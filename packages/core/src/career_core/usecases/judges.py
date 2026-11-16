@@ -10,7 +10,9 @@
 - 명시 라우트(`routes.judge_claim`, `routes.judge_visibility`)가 있을 때만 부른다. `default`로 넘어가지 않는다.
   라우트가 없으면 지금 기준선(검색 점수·단어 일치)만 쓴다.
 - 판정 결과는 **참고용**이다. 주장을 자동으로 연결하지 않고, 요건을 충족으로 표시하지 않는다.
-  저장도 하지 않는다 (요청마다 새로 묻는다. 비용은 모델 장부 `model_calls`에 남는다).
+  판정을 주장·문서에 저장하지 않는다. 같은 질문에 두 번 돈을 내지 않도록 모델 응답만 캐시(c0022
+  `judge_cache`)에 둔다: (용도, 라우트 모델, 프롬프트 버전, 입력 해시)가 같고 만료 전이면 다시 부르지 않는다.
+  비용은 처음 부를 때만 모델 장부 `model_calls`에 남는다.
 - 자료 등급: restricted 원본에서 온 주장·그 주장에 연결된 문단은 보내지 않는다
   (`data_classes.restricted_claims`). 나머지는 근거 원본 등급 + private로 게이트웨이 egress 검사를 받는다.
 - 외부로 자료를 보내므로 `egress` 범위가 있는 사람만 부른다.
@@ -20,18 +22,31 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Awaitable, Callable, Sequence
+import os
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from career_core.db import Database
-from career_core.db.models import ApplicationDocument
+from career_core.db.base import utcnow
+from career_core.db.models import ApplicationDocument, JudgeCache
 from career_core.domain.documents import BlockInput, requirement_visibility
-from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest, ModelResult
+from career_core.llm import (
+    ChatMessage,
+    ModelCallError,
+    ModelDenied,
+    ModelRequest,
+    ModelResult,
+    TokenUsage,
+)
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.data_classes import restricted_claims
@@ -47,6 +62,13 @@ MAX_REASON_CHARS = 300
 MAX_QUOTE_CHARS = 200
 # 결과에 붙이는 근거 표시: 판정 모델의 참고 의견. 연결·충족 판정이 아니다.
 BASIS = "judge_advisory"
+# 프롬프트 버전: 프롬프트 글을 바꾸면 해시가 바뀌어 캐시가 저절로 갈린다. 출력 해석을 바꾸면 이 숫자를 올린다.
+PROMPT_VERSION = "1"
+CACHE_DAYS_ENV = "CAREER_JUDGE_CACHE_DAYS"
+DEFAULT_CACHE_DAYS = 30
+CACHE_HIT_NOTE = "judge_cache_hit"
+CACHE_PURPOSES = ("judge_claim", "judge_visibility")
+MAX_CACHED_RESPONSE_CHARS = 65_536
 
 ModelCaller = Callable[[str, ModelRequest], Awaitable[ModelResult]]
 
@@ -105,11 +127,14 @@ class JudgeRun:
     cost_basis: str | None = None
     call_ids: tuple[str, ...] = ()
     basis: str = BASIS
+    # 캐시(c0022)에서 꺼낸 응답 수. calls·cost_usd에는 들어가지 않는다 (이번에 낸 돈이 아니다)
+    cached: int = 0
 
 
 @dataclass
 class _Tally:
     calls: int = 0
+    cached: int = 0
     model: str | None = None
     cost: float = 0.0
     cost_known: bool = True
@@ -118,8 +143,11 @@ class _Tally:
     errors: list[str] = field(default_factory=list)
 
     def add(self, result: ModelResult) -> None:
-        self.calls += 1
         self.model = result.model
+        if CACHE_HIT_NOTE in result.notes:
+            self.cached += 1
+            return
+        self.calls += 1
         self.call_ids.append(result.call_id)
         if result.cost_basis not in self.bases:
             self.bases.append(result.cost_basis)
@@ -129,7 +157,7 @@ class _Tally:
             self.cost += float(result.cost_usd)
 
     def run(self) -> JudgeRun:
-        if not self.calls and self.errors:
+        if not self.calls and not self.cached and self.errors:
             code = self.errors[0]
             status = "denied" if code.startswith("denied:") else "error"
             return JudgeRun(status, code)
@@ -139,9 +167,10 @@ class _Tally:
             self.errors[0] if self.errors else None,
             self.calls,
             self.model,
-            f"{self.cost:.6f}" if self.cost_known and self.calls else None,
-            "+".join(self.bases) or None,
+            f"{self.cost:.6f}" if self.cost_known and (self.calls or self.cached) else None,
+            "+".join(self.bases) or ("cached" if self.cached else None),
             tuple(self.call_ids),
+            cached=self.cached,
         )
 
 
@@ -159,11 +188,188 @@ def unavailable(gateway: ModelGateway | None, actor: ActorContext, purpose: str)
     return None
 
 
-def gateway_caller(gateway: ModelGateway, actor: ActorContext) -> ModelCaller:
+def gateway_caller(
+    gateway: ModelGateway, actor: ActorContext, *, db: Database | None = None
+) -> ModelCaller:
+    """게이트웨이로 부르는 호출자. `db`를 주면 응답 캐시(c0022)를 거친다."""
+
     async def call(purpose: str, request: ModelRequest) -> ModelResult:
         return await gateway.run(actor, purpose, request)
 
+    if db is None:
+        return call
+    return cached_caller(db, actor, call, route_model(gateway))
+
+
+# ---------------------------------------------------------------- 응답 캐시 (c0022)
+
+
+def cache_days(env: Mapping[str, str] | None = None) -> int:
+    """캐시 보관 일수 (`CAREER_JUDGE_CACHE_DAYS`, 기본 30). 0이면 캐시를 쓰지 않는다."""
+    raw = (env if env is not None else os.environ).get(CACHE_DAYS_ENV, "").strip()
+    try:
+        return max(0, min(int(raw), 365)) if raw else DEFAULT_CACHE_DAYS
+    except ValueError:
+        return DEFAULT_CACHE_DAYS
+
+
+def prompt_version(system: str | None) -> str:
+    digest = hashlib.sha256((system or "").encode()).hexdigest()[:12]
+    return f"v{PROMPT_VERSION}-{digest}"
+
+
+def input_hash(request: ModelRequest) -> str:
+    """요청 내용의 sha256: 시스템 프롬프트·메시지·최대 출력·자료 등급. 한 글자라도 다르면 다른 값."""
+    payload = {
+        "system": request.system or "",
+        "messages": [[m.role, m.content] for m in request.messages],
+        "max_output_tokens": request.max_output_tokens,
+        "data_classes": sorted(request.data_classes),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def route_model(gateway: ModelGateway) -> Callable[[str], str | None]:
+    """용도 → 명시 라우트 "<endpoint>/<model>". 라우트를 바꾸면 다른 캐시 키가 된다."""
+
+    def model(purpose: str) -> str | None:
+        route = gateway.config.routes.get(purpose)
+        return f"{route.endpoint}/{route.model}" if route else None
+
+    return model
+
+
+def _cacheable(text: str) -> bool:
+    """해석할 수 있는 응답만 담는다 (잘못된 출력을 굳혀 두지 않는다)."""
+    if len(text) > MAX_CACHED_RESPONSE_CHARS:
+        return False
+    try:
+        return isinstance(parse_model_json(text).get("results"), list)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _decimal(value: str | None) -> Decimal | None:
+    try:
+        return Decimal(value) if value is not None else None
+    except InvalidOperation:
+        return None
+
+
+def _uuid(value: str | None) -> UUID | None:
+    try:
+        return UUID(value) if value else None
+    except ValueError:
+        return None
+
+
+def cached_caller(
+    db: Database,
+    actor: ActorContext,
+    inner: ModelCaller,
+    model_for: Callable[[str], str | None],
+    *,
+    days: int | None = None,
+    clock: Callable[[], datetime] = utcnow,
+) -> ModelCaller:
+    """(용도, 라우트 모델, 프롬프트 버전, 입력 해시)가 같고 만료 전인 응답이 있으면 다시 부르지 않는다.
+
+    꺼낸 응답은 `notes`에 `judge_cache_hit`, 비용 0, `cost_basis = cached`. 장부에는 새 행을 남기지 않는다.
+    """
+    keep_days = cache_days() if days is None else days
+
+    async def call(purpose: str, request: ModelRequest) -> ModelResult:
+        model = model_for(purpose)
+        if keep_days <= 0 or model is None or purpose not in CACHE_PURPOSES or request.images:
+            return await inner(purpose, request)
+        version, digest = prompt_version(request.system), input_hash(request)
+        key = (
+            JudgeCache.purpose == purpose,
+            JudgeCache.model == model,
+            JudgeCache.prompt_version == version,
+            JudgeCache.input_hash == digest,
+        )
+        now = clock()
+        async with db.workspace_session(actor.workspace_id) as s:
+            row = await s.scalar(
+                select(JudgeCache).where(*key, JudgeCache.expires_at > now).with_for_update()
+            )
+            if row is not None:
+                row.hits += 1
+                row.last_hit_at = now
+                return ModelResult(
+                    text=row.response_text,
+                    endpoint=row.endpoint,
+                    model=row.result_model,
+                    stop_reason="cached",
+                    usage=TokenUsage(),
+                    cost_usd="0",
+                    cost_basis="cached",
+                    call_id=str(row.call_id or ""),
+                    notes=(CACHE_HIT_NOTE,),
+                )
+        result = await inner(purpose, request)
+        if not _cacheable(result.text):
+            return result
+        values = {
+            "response_text": result.text,
+            "endpoint": result.endpoint,
+            "result_model": result.model,
+            "cost_usd": _decimal(result.cost_usd),
+            "cost_basis": result.cost_basis,
+            "call_id": _uuid(result.call_id),
+            "hits": 0,
+            "created_at": now,
+            "last_hit_at": None,
+            "expires_at": now + timedelta(days=keep_days),
+        }
+        async with db.workspace_session(actor.workspace_id) as s:
+            # 만료된 행은 이 공간에 새로 쓸 때 지운다 (주기 작업 없이 크기가 묶인다)
+            await s.execute(delete(JudgeCache).where(JudgeCache.expires_at <= now))
+            stmt = pg_insert(JudgeCache).values(
+                id=uuid4(),
+                workspace_id=actor.workspace_id,
+                purpose=purpose,
+                model=model,
+                prompt_version=version,
+                input_hash=digest,
+                **values,
+            )
+            await s.execute(
+                stmt.on_conflict_do_update(constraint="uq_judge_cache_key", set_=values)
+            )
+        return result
+
     return call
+
+
+@dataclass(frozen=True, slots=True)
+class CacheStats:
+    entries: int
+    hits: int
+    saved_usd: str | None  # 꺼내 쓴 응답의 처음 비용 합 (구독 환산이면 환산액)
+
+
+async def cache_stats(db: Database, actor: ActorContext) -> CacheStats:
+    async with db.workspace_session(actor.workspace_id) as s:
+        n, hits, saved = (
+            await s.execute(
+                select(
+                    func.count(),
+                    func.coalesce(func.sum(JudgeCache.hits), 0),
+                    func.sum(JudgeCache.cost_usd * JudgeCache.hits),
+                ).where(JudgeCache.expires_at > utcnow())
+            )
+        ).one()
+    return CacheStats(int(n), int(hits), f"{saved:.6f}" if saved is not None else None)
+
+
+async def clear_cache(db: Database, actor: ActorContext) -> int:
+    """이 공간의 판정 응답 캐시를 모두 지운다. 지운 행 수."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        result = await s.execute(delete(JudgeCache))
+    return int(result.rowcount or 0)
 
 
 def _clip(value: Any, limit: int) -> str | None:
@@ -339,7 +545,8 @@ async def judge_application_visibility(
 ) -> VisibilityJudgeResult:
     """지원 문서(하나 또는 전부)의 요건 가시성: 단어 일치 기준선 + (설정했으면) 판정 모델 의견.
 
-    판정 결과는 저장하지 않고, 문서 검사(`validate_document`)의 판정도 바꾸지 않는다.
+    판정 결과는 문서에 저장하지 않고, 문서 검사(`validate_document`)의 판정도 바꾸지 않는다.
+    같은 요건·같은 글이면 응답 캐시(c0022)에서 꺼낸다 (`judge.cached`).
     """
     from career_core.usecases import applications as app_uc
 
@@ -373,7 +580,7 @@ async def judge_application_visibility(
     if run is None:
         if call_model is None:
             assert gateway is not None  # unavailable()이 라우트를 확인했다
-            call_model = gateway_caller(gateway, actor)
+            call_model = gateway_caller(gateway, actor, db=db)
         caller = call_model
         reqs = [(str(i), r["requirement"]) for i, r in enumerate(baseline)]
         verdicts, run = await judge_visibility(
@@ -402,19 +609,28 @@ async def judge_application_visibility(
 
 __all__ = [
     "BASIS",
+    "CACHE_HIT_NOTE",
     "CLAIM_SYSTEM_PROMPT",
     "JUDGE_CLAIM_PURPOSE",
     "JUDGE_VISIBILITY_PURPOSE",
     "VISIBILITY_SYSTEM_PROMPT",
+    "CacheStats",
     "JudgeRun",
     "ModelCaller",
     "Verdict",
     "VisibilityJudgeResult",
     "VisibilityRow",
+    "cache_days",
+    "cache_stats",
+    "cached_caller",
+    "clear_cache",
     "gateway_caller",
+    "input_hash",
     "judge_application_visibility",
     "judge_claims",
     "judge_configured",
     "judge_visibility",
+    "prompt_version",
+    "route_model",
     "unavailable",
 ]

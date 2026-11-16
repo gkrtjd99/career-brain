@@ -69,6 +69,7 @@
 - 외부 전송이라 `egress` 범위가 필요하다 (없으면 `note = egress_scope_required`).
 - 제한(`restricted`) 등급 주장은 보내지 않는다: 후보에 `judge_note = restricted_not_sent`. 보내는 글은 주장 문장 + 경험 제목뿐이고 자료 등급은 주장·원본 등급(`claim_data_classes`)을 그대로 게이트웨이에 넘긴다.
 - 요건 한 줄 = 호출 한 번(후보 묶음). 모델이 모르는 후보 번호·잘못된 판정을 돌려주면 그 후보만 의견 없음.
+- 같은 요건·같은 후보면 응답 캐시(c0022)에서 꺼낸다: `judge.cached`로 세고 `calls`·비용에는 안 들어간다 (`models.md` "응답 캐시").
 - 평가와 정확도·비용: `models.md` "판정 모델".
 - 웹: 후보 아래 "판정 모델로 확인" → 후보별 "판정 모델(참고): 보여 줌/보여 주지 않음/판단 어려움 — 이유".
 
@@ -86,7 +87,7 @@
 `GET /core/study/requirements/frequency?include_archived=&min_postings=&limit=` — "저장 공고 N개 중 M개가 X 요구".
 
 - 센 대상은 **내가 확정해 저장한 공고**(`saved`, 선택하면 `archived`도)의 자격·우대 요건뿐이다. 응답 `basis: saved_postings_only`. 채용 시장 통계가 아니다.
-- 묶기는 규칙이다 (`domain/study.py` `requirement_terms`): 영문 기술 낱말은 소문자·별칭(`k8s`→kubernetes, `postgres`→postgresql, `js`→javascript), 한글 기술명은 영문 키로(`도커`→docker, `쿠버네티스`→kubernetes), 연차(`3년 이상`→"경력 3년 이상"), 짧은 한글 기술·요건 낱말 목록(`자료구조`, `협업`, `영어` 등). 불용어는 뺀다. 형태소 분석은 없다.
+- 묶기는 규칙이다 (`domain/study.py` `requirement_terms`): 영문 기술 낱말은 소문자·별칭(`k8s`→kubernetes, `postgres`→postgresql, `js`→javascript), 한글 기술명은 영문 키로(`도커`→docker, `쿠버네티스`→kubernetes), 연차(`3년 이상`→"경력 3년 이상"), 짧은 한글 기술·요건 낱말 목록(`자료구조`, `협업`, `영어` 등). 불용어는 뺀다. 여러 낱말 요건은 띄어쓰기와 상관없이 찾는다(`테스트 코드` = `테스트코드`, 한 낱말은 그대로 부분 일치). 선택 extra `korean`(kiwipiepy, `CAREER_KOREAN_ANALYZER=kiwi`)을 켜면 어미·조사를 형태소로 떼고 연결 후보 검색어도 내용어로 만든다 (`search.md` "한국어 형태소 분석"). 기본은 규칙 기반.
 - 별칭 사전 (c0021): 공간 설정 `tech_aliases`(설정 화면 "작업 공간")가 기본 별칭 표 위에 합쳐진다. 사용자 항목은 대표 표기를 그대로 묶음 이름으로 쓰고(`FastAPI = 패스트API, fast api` → "FastAPI"), 여러 낱말 표기(`fast api`)도 묶는다. 같은 대표 표기는 기본 항목을 대신하고, 다른 표기는 기본 항목에서 빼앗아 온다. 문서 검사(요건 가시성·사실 바뀜)도 같은 사전을 쓴다 (`applications.md`).
 - 한 공고가 같은 낱말을 여러 줄에 써도 1개로 센다. 그룹마다 자격/우대 줄 수와 예시 문장(최대 3개).
 - 웹: 학습 화면 "요건 빈도" 탭.

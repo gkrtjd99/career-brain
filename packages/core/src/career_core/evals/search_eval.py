@@ -34,6 +34,7 @@ from career_core.usecases.indexing import IndexDeps
 from career_core.usecases.parsing import ParsingDeps
 from career_core.usecases.search import search
 from career_core.usecases.sources import upload_source
+from career_core.usecases.workspace_settings import update_settings
 from career_core.usecases.workspaces import create_workspace
 
 
@@ -42,6 +43,8 @@ def load_fixture() -> dict[str, Any]:
 
 
 async def seed(db: Database, blobs: LocalBlobStore, actor: ActorContext, fx: dict) -> None:
+    if fx.get("workspace_aliases"):
+        await update_settings(db, actor, tech_aliases=fx["workspace_aliases"])
     for src in fx["sources"]:
         await upload_source(
             db,
@@ -119,16 +122,30 @@ def rank_of(hits, expect: str) -> int | None:
 async def evaluate(
     db: Database, actor: ActorContext, fx: dict, gateway: ModelGateway | None
 ) -> dict[str, dict[str, Score]]:
-    """{"keyword"|"hybrid": {"keyword"|"paraphrase"|"all": Score}}"""
+    """{"keyword"|"hybrid": {"keyword"|"paraphrase"|"all"|"alias"|"alias_off": Score}}
+
+    `all`은 30문항(keyword + paraphrase)만 센다. `alias`는 별칭 질문(`alias_queries`, 공간 별칭 사전으로
+    넓힘), `alias_off`는 같은 질문을 넓히지 않고 (비교용).
+    """
     out: dict[str, dict[str, Score]] = {}
     modes = {"keyword": None, "hybrid": gateway} if gateway else {"keyword": None}
     for mode, gw in modes.items():
-        scores = {"keyword": Score(), "paraphrase": Score(), "all": Score()}
+        scores = {
+            "keyword": Score(),
+            "paraphrase": Score(),
+            "all": Score(),
+            "alias": Score(),
+            "alias_off": Score(),
+        }
         for q in fx["queries"]:
             result = await search(db, actor, q["q"], gateway=gw, limit=5)
             r = rank_of(result.hits, q["expect"])
             scores[q["type"]].add(r)
             scores["all"].add(r)
+        for q in fx.get("alias_queries", []):
+            for key, expand in (("alias", True), ("alias_off", False)):
+                result = await search(db, actor, q["q"], gateway=gw, limit=5, expand_aliases=expand)
+                scores[key].add(rank_of(result.hits, q["expect"]))
         out[mode] = scores
     return out
 

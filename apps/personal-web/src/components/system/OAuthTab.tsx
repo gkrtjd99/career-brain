@@ -4,7 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ErrorText, List, Loaded } from "../common";
 import { api } from "../../lib/api";
-import { formatDateTime, int } from "../../lib/format";
+import { formatDateTime } from "../../lib/dates";
+import { int } from "../../lib/format";
 
 // 원격 MCP OAuth 연결·토큰 관리 (소유자만). 연결 = 외부 인가 서버의 사용자(issuer, sub) → 이 공간의 나.
 // 토큰 목록은 MCP가 받은 액세스 토큰의 jti(없으면 sha256)이고 원문은 없다.

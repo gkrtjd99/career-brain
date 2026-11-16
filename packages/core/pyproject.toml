@@ -29,6 +29,9 @@ oauth = ["pyjwt[crypto]>=2.10,<3"]
 # 스캔 PDF 공고의 쪽을 이미지로 바꿔 비전 라우트로 (PDFium 바이너리 포함 휠 ~4MB, BSD-3/Apache-2.0).
 # 없으면 스캔 PDF는 `pdf_no_text`로 직접 확인 (docs/architecture/postings.md).
 pdf-render = ["pypdfium2>=4.30,<6"]
+# 한국어 형태소 분석 (kiwipiepy, Apache-2.0; 휠 4~12MB + 모델 sdist 88MB, 올리면 RSS ~0.42GB).
+# 설치 후 `CAREER_KOREAN_ANALYZER=kiwi`일 때만 쓴다. 없으면 규칙 기반 조사 떼기 (docs/architecture/search.md).
+korean = ["kiwipiepy>=0.24,<0.25"]
 # 내보내기 묶음 암호화 (age 형식). `age` 명령이 있으면 그것을 먼저 쓴다 (docs/operations/backup.md).
 age = ["pyrage>=1.2,<2"]
 

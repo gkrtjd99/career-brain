@@ -62,7 +62,7 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/api/core/me
 ```
 
 - `.env`는 compose 값 채우기용(DB 비밀번호·포트·빌드 옵션), `app.env`는 앱 환경변수(모델 키)다. DB 소유자 비밀번호는 app 컨테이너에 들어가지 않는다.
-- 빌드 옵션: `.env`의 `CAREER_EXTRAS=local-embed` (로컬 임베딩), `browser` (동적 공고 렌더링, `app.env`에 `CAREER_BROWSER_FETCH=1`도), `pdf-render` (스캔 PDF 공고를 쪽 이미지로 바꿔 비전 모델로: pypdfium2 ~8MB, `models.toml`에 `job_extract_image` 라우트도). 쉼표로 여럿. 로컬 `uv sync`에는 `pdf-render`가 기본으로 들어 있다.
+- 빌드 옵션: `.env`의 `CAREER_EXTRAS=local-embed` (로컬 임베딩), `browser` (동적 공고 렌더링, `app.env`에 `CAREER_BROWSER_FETCH=1`도), `pdf-render` (스캔 PDF 공고를 쪽 이미지로 바꿔 비전 모델로: pypdfium2 ~8MB, `models.toml`에 `job_extract_image` 라우트도). 쉼표로 여럿. `korean` (한국어 형태소 분석: kiwipiepy, Apache-2.0, 휠 ~6–12MB + 모델 104MB, `CAREER_KOREAN_ANALYZER=kiwi`도). 로컬 `uv sync`에는 `pdf-render`·`korean`이 기본으로 들어 있다.
 - 자료: 볼륨 `db-data`(PostgreSQL), `app-data`(`/data`: 업로드 원본, 로컬 모델 파일). 설정: `./config` → `/config` (읽기 전용).
 - 운영 명령: `docker compose run --rm app models`, `... app usage --by model` (`app.env`에 `CAREER_API_TOKEN`), `... app reindex`.
 - 로그: `docker compose logs -f app`. 접근 로그를 끄려면 `CAREER_ACCESS_LOG=0`.
@@ -192,6 +192,8 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
 | `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |
 | `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
+| `CAREER_KOREAN_ANALYZER` | `rule` | `kiwi`면 한국어 형태소 분석 (korean extra 필요, 프로세스마다 RSS ~0.42GB). 없으면 규칙 기반으로 돌아감 |
+| `CAREER_JUDGE_CACHE_DAYS` | `30` | 판정 모델 응답 캐시 보관 일수, `0`이면 캐시 안 씀 |
 | `CAREER_LOG_LEVEL` / `CAREER_ACCESS_LOG` | `info` / `1` | 로그 |
 | `CAREER_ENV_FILE` | `.env` | 로컬 실행 때 읽는 키 파일 (셸 변수가 우선) |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | `X-Forwarded-*`를 믿을 프록시 주소 (uvicorn) |

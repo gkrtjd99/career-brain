@@ -39,11 +39,19 @@ class HitOut(BaseModel):
     study_title: str | None = None
 
 
+class ExpandedTermOut(BaseModel):
+    term: str
+    canonical: str
+    spellings: list[str]
+
+
 class SearchOut(BaseModel):
     query: str
     mode: str
     semantic_note: str | None
     hits: list[HitOut]
+    # 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api)
+    expanded_terms: list[ExpandedTermOut] = []
 
 
 class QueuedOut(BaseModel):
@@ -73,6 +81,10 @@ def add_search_routes(router: APIRouter, deps, authorize) -> None:
             mode=result.mode,
             semantic_note=result.semantic_note,
             hits=[HitOut.model_validate(h, from_attributes=True) for h in result.hits],
+            expanded_terms=[
+                ExpandedTermOut.model_validate(e, from_attributes=True)
+                for e in result.expanded_terms
+            ],
         )
 
     @router.post("/search/reindex", response_model=QueuedOut, status_code=202)

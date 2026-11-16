@@ -24,7 +24,9 @@ from uuid import UUID, uuid4
 from career_core.domain.korean import (
     TechAliases,
     canonical_tech,
+    content_words,
     found_spellings,
+    korean_analyzer,
     korean_numbers,
     korean_tech_terms,
     use_aliases,
@@ -448,48 +450,7 @@ def rule_from_prompt(
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 _LATIN = re.compile(r"[A-Za-z][A-Za-z0-9+#]*(?:[.\-][A-Za-z0-9+#]+)*")
-_HANGUL = re.compile(r"[가-힣]{2,}")
-_PARTICLES = tuple(
-    sorted(
-        [
-            "으로서",
-            "으로써",
-            "에서는",
-            "에서의",
-            "에서",
-            "으로",
-            "에게",
-            "까지",
-            "부터",
-            "과의",
-            "와의",
-            "이나",
-            "이며",
-            "이고",
-            "하는",
-            "하고",
-            "하여",
-            "해서",
-            "했고",
-            "한",
-            "을",
-            "를",
-            "이",
-            "가",
-            "은",
-            "는",
-            "에",
-            "의",
-            "와",
-            "과",
-            "로",
-            "도",
-            "만",
-        ],
-        key=len,
-        reverse=True,
-    )
-)
+# 한글 낱말의 조사·어미 떼기는 domain.korean.content_words (규칙 기반 기본, 선택 설치 형태소 분석기).
 # 요건 문장에 흔하지만 무엇을 요구하는지는 말해 주지 않는 말.
 KO_STOPWORDS = frozenset(
     [
@@ -579,13 +540,6 @@ def sentence_ranges(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
-def _strip_particle(word: str) -> str:
-    for p in _PARTICLES:
-        if word.endswith(p) and len(word) - len(p) >= 2:
-            return word[: -len(p)]
-    return word
-
-
 def latin_terms(text: str) -> list[str]:
     out = []
     for t in _LATIN.findall(text or ""):
@@ -598,8 +552,7 @@ def latin_terms(text: str) -> list[str]:
 
 def korean_terms(text: str) -> list[str]:
     out = []
-    for w in _HANGUL.findall(text or ""):
-        w = _strip_particle(w)
+    for w in content_words(text):
         if len(w) >= 2 and w not in KO_STOPWORDS:
             out.append(w)
     return out
@@ -641,11 +594,21 @@ def _has_latin(text: str, term: str) -> bool:
 
 
 def matched_terms(text: str, terms: Terms) -> list[str]:
-    """요건 단어 중 본문에 있는 것. 판정 기준(needed)을 못 넘으면 빈 목록."""
+    """요건 단어 중 본문에 있는 것. 판정 기준(needed)을 못 넘으면 빈 목록.
+
+    한국어 낱말은 규칙 기반이면 부분 문자열("트래픽" ⊂ "트래픽을"), 형태소 분석기(선택 설치)가 있으면
+    본문의 내용어 집합으로 본다 ("영업"은 "영업일"에, "인사"는 "인사말"에 걸리지 않는다).
+    """
     if not terms.words:
         return []
     # 기술명은 한영 표기를 같이 본다 ("Python" 요건 ↔ 문서의 "파이썬")
-    hits = [w for w in terms.words if (found_spellings(text, w) if terms.latin else w in text)]
+    if terms.latin:
+        hits = [w for w in terms.words if found_spellings(text, w)]
+    elif korean_analyzer().morphological:
+        found = set(content_words(text))
+        hits = [w for w in terms.words if w in found]
+    else:
+        hits = [w for w in terms.words if w in text]
     return hits if len(hits) >= terms.needed else []
 
 
@@ -703,14 +666,31 @@ def is_experience_statement(sentence: str) -> bool:
     )
 
 
+# 형태소 분석기가 있을 때 한국어 역할 표현을 형태로 본다: 명사(주도·리더…), 동사 어간(이끌다), 부사(혼자).
+# "리더십", "리드타임", "단독주택"처럼 다른 낱말 속의 글자는 역할로 보지 않는다.
+_LEAD_MORPHS = {
+    ("이끌", "VV"): "이끌",
+    ("혼자", "MAG"): "혼자",
+    ("혼자", "NNG"): "혼자",
+}
+
+
 def lead_terms(text: str) -> set[str]:
     low = (text or "").lower()
     out = set()
+    analyzer = korean_analyzer()
+    if analyzer.morphological:
+        words = set(analyzer.content_words(text))
+        tokens = set(analyzer.tokens(text))
+        for t in LEAD_TERMS:
+            if not t.isascii() and t in words:
+                out.add(t)
+        out |= {v for k, v in _LEAD_MORPHS.items() if k in tokens}
     for t in LEAD_TERMS:
         if t.isascii():
             if re.search(rf"\b{t}\b", low):
                 out.add(t)
-        elif t in low:
+        elif not analyzer.morphological and t in low:
             out.add(t)
     return out
 
