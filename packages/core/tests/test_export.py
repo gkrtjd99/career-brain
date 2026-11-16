@@ -204,6 +204,8 @@ async def build_workspace(db, blobs, owner, *, tag):
         )
         s.add(sug)
     await apps_uc.apply_suggestion(db, owner, app, doc, sug.id, base_revision=1)
+    # c0016: 수정안·인터뷰 질문 요청 기록, 실행 태그가 붙은 장부 행 (장부 → 실행 FK)
+    await _add_c0016_rows(db, owner, doc, r1, session, sug.block_id)
     # c0012: 공용 문서 → 지원 문서로 복사 (복사본 → 원본 문서·revision FK가 순환한다), 문서 설정
     shared = await docs_uc.create_shared_document(db, owner, kind="resume", title=f"기본 {tag}")
     await apps_uc.save_revision(
@@ -252,6 +254,77 @@ async def build_workspace(db, blobs, owner, *, tag):
         "item": item,
         "screenshot": key,
     }
+
+
+async def _add_c0016_rows(db, owner, doc, revision_id, session_id, block_id):
+    from career_core.db.models import (
+        DocumentSuggestionRequest,
+        InterviewQuestion,
+        InterviewQuestionRequest,
+        Run,
+    )
+
+    ws = owner.workspace_id
+    async with db.workspace_session(ws) as s:
+        run = Run(
+            workspace_id=ws,
+            workflow="suggest_document_batch",
+            status="done",
+            input={},
+            position={},
+            finished_at=datetime.now(UTC),
+            created_by=owner.subject_id,
+        )
+        s.add(run)
+        await s.flush()
+        s.add(
+            ModelCall(
+                workspace_id=ws,
+                actor_id=owner.subject_id,
+                purpose="doc_suggest",
+                endpoint="proxy",
+                requested_model="m",
+                status="ok",
+                billing="metered",
+                cost_usd=Decimal("0.0001"),
+                cost_basis="metered",
+                run_id=run.id,
+                run_step=1,
+            )
+        )
+        s.add(
+            DocumentSuggestionRequest(
+                workspace_id=ws,
+                document_id=doc,
+                base_revision_id=revision_id,
+                block_ids=[block_id],
+                questions=["합성 질문: 지연을 어떻게 쟀나요?"],
+                proposed=1,
+                idempotency_key=f"run:{run.id}:block:{block_id}",
+                run_id=run.id,
+                created_by=owner.subject_id,
+            )
+        )
+        req = InterviewQuestionRequest(
+            workspace_id=ws,
+            session_id=session_id,
+            requested=1,
+            created=1,
+            created_by=owner.subject_id,
+        )
+        s.add(req)
+        await s.flush()
+        s.add(
+            InterviewQuestion(
+                workspace_id=ws,
+                session_id=session_id,
+                ordinal=99,
+                focus="metric",
+                prompt="합성 AI 질문: 수치는 어떻게 쟀나요?",
+                origin="ai",
+                request_id=req.id,
+            )
+        )
 
 
 @pytest.fixture
@@ -408,6 +481,9 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
         "core.application_submissions",
         "core.application_stages",
         "core.document_settings",
+        "core.document_suggestion_requests",
+        "core.interview_question_requests",
+        "core.runs",
         "core.study_requirement_claims",
         "core.study_items",
         "core.study_sessions",

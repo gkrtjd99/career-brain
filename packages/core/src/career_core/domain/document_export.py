@@ -16,6 +16,7 @@ import io
 import re
 import zipfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from career_core.domain.documents import HIDDEN_MARKUP, Finding, ats_findings
@@ -38,6 +39,26 @@ class ExportError(ValueError):
         self.code = code
 
 
+@dataclass(frozen=True, slots=True)
+class ExportSection:
+    """파일 안의 한 묶음 (c0016 제출본 내보내기: 문서마다 하나). 제목이 없으면 문단만 쓴다.
+
+    ``note``는 제목 아래 한 줄(문항 문구 등). 모든 칸은 글자 그대로 escape해 쓴다.
+    """
+
+    paragraphs: tuple[str, ...]
+    heading: str | None = None
+    note: str | None = None
+
+
+def _sections(
+    paragraphs: Sequence[str], sections: Sequence[ExportSection] | None
+) -> tuple[ExportSection, ...]:
+    if sections is None:
+        return (ExportSection(tuple(paragraphs)),)
+    return tuple(sections)
+
+
 def export_filename(title: str, fmt: str) -> str:
     base = re.sub(r"[\\/:*?\"<>|\x00-\x1f]+", " ", title or "").strip()
     base = re.sub(r"\s+", " ", base)[:80].strip() or "document"
@@ -48,8 +69,13 @@ def export_filename(title: str, fmt: str) -> str:
 # ---------------------------------------------------------------- Markdown
 
 
-def render_markdown(title: str, paragraphs: Sequence[str]) -> str:
-    """제목 + 문단(빈 줄로 구분). 줄 앞의 Markdown 기호와 '<'는 글자 그대로 보이게 escape한다."""
+def render_markdown(
+    title: str, paragraphs: Sequence[str] = (), *, sections: Sequence[ExportSection] | None = None
+) -> str:
+    """제목 + 문단(빈 줄로 구분). 줄 앞의 Markdown 기호와 '<'는 글자 그대로 보이게 escape한다.
+
+    ``sections``를 주면 묶음마다 ``## 제목``·안내 줄·문단을 차례로 쓴다 (제출본 내보내기).
+    """
 
     def esc(text: str) -> str:
         text = text.replace("\\", "\\\\").replace("<", "\\<")
@@ -57,7 +83,13 @@ def render_markdown(title: str, paragraphs: Sequence[str]) -> str:
         # 문단 안의 줄바꿈은 Markdown 줄바꿈(끝 공백 두 칸)으로
         return text.replace("\n", "  \n")
 
-    parts = [f"# {esc(title)}", *(esc(p) for p in paragraphs)]
+    parts = [f"# {esc(title)}"]
+    for sec in _sections(paragraphs, sections):
+        if sec.heading:
+            parts.append(f"## {esc(sec.heading)}")
+        if sec.note:
+            parts.append(esc(sec.note))
+        parts.extend(esc(p) for p in sec.paragraphs)
     return "\n\n".join(parts) + "\n"
 
 
@@ -69,13 +101,24 @@ body { font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto 
   sans-serif; font-size: 11pt; line-height: 1.7; color: #111; background: #fff;
   max-width: 720px; margin: 24px auto; padding: 0 16px; word-break: keep-all; }
 h1 { font-size: 18pt; margin: 0 0 16px; }
+h2 { font-size: 13pt; margin: 18pt 0 6pt; }
 p { margin: 0 0 10pt; white-space: pre-wrap; }
+p.note { color: #444; font-size: 10pt; }
 """
 
 
-def render_html(title: str, paragraphs: Sequence[str]) -> str:
+def render_html(
+    title: str, paragraphs: Sequence[str] = (), *, sections: Sequence[ExportSection] | None = None
+) -> str:
     """브라우저 인쇄(PDF로 저장)용 단독 HTML. 스크립트·외부 자원 없음, 모든 글은 escape."""
-    body = "\n".join(f"<p>{html.escape(p)}</p>" for p in paragraphs)
+    pieces: list[str] = []
+    for sec in _sections(paragraphs, sections):
+        if sec.heading:
+            pieces.append(f"<h2>{html.escape(sec.heading)}</h2>")
+        if sec.note:
+            pieces.append(f'<p class="note">{html.escape(sec.note)}</p>')
+        pieces.extend(f"<p>{html.escape(p)}</p>" for p in sec.paragraphs)
+    body = "\n".join(pieces)
     return (
         "<!doctype html>\n"
         '<html lang="ko"><head><meta charset="utf-8">'
@@ -130,12 +173,24 @@ def _run(text: str, *, bold: bool = False, size_half_points: int | None = None) 
     return f"<w:r><w:rPr>{props}</w:rPr>{''.join(pieces)}</w:r>"
 
 
-def render_docx(title: str, paragraphs: Sequence[str]) -> bytes:
+def render_docx(
+    title: str, paragraphs: Sequence[str] = (), *, sections: Sequence[ExportSection] | None = None
+) -> bytes:
     paras = [
         f'<w:p><w:pPr><w:spacing w:after="240"/></w:pPr>{_run(title, bold=True, size_half_points=32)}</w:p>'
     ]
-    for p in paragraphs:
-        paras.append(f'<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>{_run(p)}</w:p>')
+    for sec in _sections(paragraphs, sections):
+        if sec.heading:
+            paras.append(
+                '<w:p><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>'
+                f"{_run(sec.heading, bold=True, size_half_points=26)}</w:p>"
+            )
+        if sec.note:
+            paras.append(
+                f'<w:p><w:pPr><w:spacing w:after="120"/></w:pPr>{_run(sec.note, size_half_points=20)}</w:p>'
+            )
+        for p in sec.paragraphs:
+            paras.append(f'<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>{_run(p)}</w:p>')
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
         f'<w:document xmlns:w="{_W}"><w:body>{"".join(paras)}'
@@ -165,13 +220,20 @@ def render_docx(title: str, paragraphs: Sequence[str]) -> bytes:
     return buf.getvalue()
 
 
-def render(fmt: str, title: str, paragraphs: Sequence[str]) -> bytes:
+def render(
+    fmt: str,
+    title: str,
+    paragraphs: Sequence[str] = (),
+    *,
+    sections: Sequence[ExportSection] | None = None,
+) -> bytes:
+    """문서 revision과 제출본(묶음 여러 개)이 같은 writer를 쓴다."""
     if fmt == "md":
-        return render_markdown(title, paragraphs).encode("utf-8")
+        return render_markdown(title, paragraphs, sections=sections).encode("utf-8")
     if fmt == "html":
-        return render_html(title, paragraphs).encode("utf-8")
+        return render_html(title, paragraphs, sections=sections).encode("utf-8")
     if fmt == "docx":
-        return render_docx(title, paragraphs)
+        return render_docx(title, paragraphs, sections=sections)
     raise ExportError("invalid_format")
 
 
@@ -257,6 +319,7 @@ __all__ = [
     "FORMATS",
     "MEDIA_TYPES",
     "ExportError",
+    "ExportSection",
     "export_filename",
     "export_summary",
     "inspect_export",

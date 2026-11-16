@@ -2,17 +2,23 @@
 
 AI는 답을 쓰지 않고 질문만 만든다. 답은 사용자가 쓰고, 그 답이 그대로 근거(interview_answer)가 된다.
 답에서 만드는 주장 문장도 사용자가 쓴다 (비우면 답 원문을 그대로 쓴다). 모델이 다듬지 않는다.
+
+c0016: AI 질문 요청은 매번 ``interview_question_requests`` 1행을 남기고, 만든 질문은 ``request_id``로 묶인다.
+멱등 키가 같은 요청은 모델을 다시 부르지 않고 그 질문을 돌려준다 (질문 0개였던 요청 포함). 세션도
+멱등 키로 만들 수 있다 — 일괄 workflow ``interview_question_batch``가 재개될 때 세션·질문이 늘지 않는다.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from career_core.db import (
     Claim,
@@ -23,6 +29,7 @@ from career_core.db import (
     InterviewQuestion,
     InterviewSession,
 )
+from career_core.db.models import InterviewQuestionRequest
 from career_core.domain.brain import (
     TEMPLATE_QUESTIONS,
     ClaimOrigin,
@@ -32,7 +39,7 @@ from career_core.domain.brain import (
     EvidenceKind,
     QuestionFocus,
 )
-from career_core.llm import ChatMessage, ModelRequest
+from career_core.llm import ChatMessage, ModelRequest, ModelResult
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.brain import (
@@ -49,6 +56,9 @@ from career_core.usecases.index_queue import request_index
 
 INTERVIEW_PURPOSE = "interview"
 MAX_AI_QUESTIONS = 5
+MAX_IDEMPOTENCY_KEY = 200
+
+ModelCaller = Callable[[str, ModelRequest], Awaitable[ModelResult]]
 
 QUESTION_SYSTEM_PROMPT = """\
 You help a person organize their own work experience by asking follow-up interview questions.
@@ -93,8 +103,39 @@ class InterviewView:
     questions: list[QuestionView]
 
 
+def _key(value: str | None) -> str | None:
+    return (value or "").strip()[:MAX_IDEMPOTENCY_KEY] or None
+
+
+async def _session_by_key(db: Database, actor: ActorContext, key: str) -> UUID | None:
+    async with db.workspace_session(actor.workspace_id) as s:
+        return await s.scalar(
+            select(InterviewSession.id).where(InterviewSession.idempotency_key == key)
+        )
+
+
 async def start_interview(
-    db: Database, actor: ActorContext, experience_id: UUID | None = None
+    db: Database,
+    actor: ActorContext,
+    experience_id: UUID | None = None,
+    *,
+    idempotency_key: str | None = None,
+) -> UUID:
+    """세션 + 템플릿 질문. ``idempotency_key``가 같으면 처음 만든 세션을 돌려준다 (실행 재개)."""
+    key = _key(idempotency_key)
+    if key and (found := await _session_by_key(db, actor, key)):
+        return found
+    try:
+        return await _create_session(db, actor, experience_id, key)
+    except IntegrityError:
+        # 같은 키의 동시 요청이 먼저 만들었다
+        if key and (found := await _session_by_key(db, actor, key)):
+            return found
+        raise
+
+
+async def _create_session(
+    db: Database, actor: ActorContext, experience_id: UUID | None, key: str | None
 ) -> UUID:
     async with db.workspace_session(actor.workspace_id) as s:
         if experience_id is not None and await s.get(Experience, experience_id) is None:
@@ -103,6 +144,7 @@ async def start_interview(
             id=uuid4(),
             workspace_id=actor.workspace_id,
             experience_id=experience_id,
+            idempotency_key=key,
             created_by=actor.subject_id,
         )
         s.add(session)
@@ -159,11 +201,50 @@ async def get_interview(db: Database, actor: ActorContext, session_id: UUID) -> 
     )
 
 
+async def _replay_questions(
+    db: Database, actor: ActorContext, session_id: UUID, key: str
+) -> list[UUID] | None:
+    async with db.workspace_session(actor.workspace_id) as s:
+        req = await s.scalar(
+            select(InterviewQuestionRequest.id).where(
+                InterviewQuestionRequest.session_id == session_id,
+                InterviewQuestionRequest.idempotency_key == key,
+            )
+        )
+        if req is None:
+            return None
+        return list(
+            (
+                await s.execute(
+                    select(InterviewQuestion.id)
+                    .where(InterviewQuestion.request_id == req)
+                    .order_by(InterviewQuestion.ordinal)
+                )
+            ).scalars()
+        )
+
+
 async def add_ai_questions(
-    db: Database, gateway: ModelGateway, actor: ActorContext, session_id: UUID, *, count: int = 3
+    db: Database,
+    gateway: ModelGateway | None,
+    actor: ActorContext,
+    session_id: UUID,
+    *,
+    count: int = 3,
+    idempotency_key: str | None = None,
+    call_model: ModelCaller | None = None,
+    run_id: UUID | None = None,
 ) -> list[UUID]:
-    """지금까지의 경험·주장·답을 보고 보충 질문을 만든다. 자료 등급은 주장 근거 원본을 따르고, restricted 주장은 빼고 보낸다."""
+    """지금까지의 경험·주장·답을 보고 보충 질문을 만든다. 자료 등급은 주장 근거 원본을 따르고, restricted 주장은 빼고 보낸다.
+
+    - ``idempotency_key``: 같은 키의 요청 기록이 있으면 모델을 부르지 않고 그때 만든 질문 ID를 돌려준다
+      (0개였어도 다시 부르지 않는다).
+    - ``call_model``: 실행 단계는 ``StepContext.model``을 넘겨 비용을 실행에 쌓는다. 없으면 ``gateway.run``.
+    """
     count = max(1, min(count, MAX_AI_QUESTIONS))
+    key = _key(idempotency_key)
+    if key and (done := await _replay_questions(db, actor, session_id, key)) is not None:
+        return done
     view = await get_interview(db, actor, session_id)
     context: dict = {"experience": None, "claims": [], "asked": [], "answers": []}
     data_classes = frozenset({"private"})
@@ -208,13 +289,43 @@ async def add_ai_questions(
         max_output_tokens=2000,
         data_classes=data_classes,
     )
-    result = await gateway.run(actor, INTERVIEW_PURPOSE, request)
+    if call_model is None:
+        if gateway is None:
+            raise ClaimRuleError("models_not_configured")
+
+        async def call_model(purpose: str, req: ModelRequest) -> ModelResult:
+            return await gateway.run(actor, purpose, req)
+
+    result = await call_model(INTERVIEW_PURPOSE, request)
     try:
         parsed = _Qs.model_validate(parse_model_json(result.text))
     except (ValueError, ValidationError) as exc:
         raise ClaimRuleError("invalid_model_output") from exc
+    try:
+        return await _save_questions(
+            db, actor, session_id, parsed, context, count, key, run_id, UUID(result.call_id)
+        )
+    except IntegrityError:
+        # 같은 키의 동시 요청이 먼저 저장했다: 그 질문을 돌려준다 (이번 결과는 버린다)
+        if key and (done := await _replay_questions(db, actor, session_id, key)) is not None:
+            return done
+        raise
+
+
+async def _save_questions(
+    db: Database,
+    actor: ActorContext,
+    session_id: UUID,
+    parsed: _Qs,
+    context: dict,
+    count: int,
+    key: str | None,
+    run_id: UUID | None,
+    call_id: UUID,
+) -> list[UUID]:
     asked = {p.strip() for p in context["asked"]}
-    new_ids: list[UUID] = []
+    req_id = uuid4()
+    rows: list[InterviewQuestion] = []
     async with db.workspace_session(actor.workspace_id) as s:
         top = await s.scalar(
             select(func.coalesce(func.max(InterviewQuestion.ordinal), 0)).where(
@@ -231,19 +342,36 @@ async def add_ai_questions(
                 focus = QuestionFocus(q.focus).value
             except ValueError:
                 focus = QuestionFocus.CONTEXT.value
-            row = InterviewQuestion(
-                id=uuid4(),
+            rows.append(
+                InterviewQuestion(
+                    id=uuid4(),
+                    workspace_id=actor.workspace_id,
+                    session_id=session_id,
+                    ordinal=top,
+                    focus=focus,
+                    prompt=prompt,
+                    origin="ai",
+                    model_call_id=call_id,
+                    request_id=req_id,
+                )
+            )
+        # 요청 기록은 고치지 않는다(추가·조회만): 개수를 먼저 정해 넣는다. 기록과 질문은 한 트랜잭션.
+        s.add(
+            InterviewQuestionRequest(
+                id=req_id,
                 workspace_id=actor.workspace_id,
                 session_id=session_id,
-                ordinal=top,
-                focus=focus,
-                prompt=prompt,
-                origin="ai",
-                model_call_id=UUID(result.call_id),
+                requested=count,
+                created=len(rows),
+                idempotency_key=key,
+                run_id=run_id,
+                model_call_id=call_id,
+                created_by=actor.subject_id,
             )
-            s.add(row)
-            new_ids.append(row.id)
-    return new_ids
+        )
+        await s.flush()
+        s.add_all(rows)
+    return [r.id for r in rows]
 
 
 @dataclass(frozen=True, slots=True)

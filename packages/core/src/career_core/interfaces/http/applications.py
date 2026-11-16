@@ -278,6 +278,22 @@ class SuggestOut(BaseModel):
     dropped: int
     model_call_id: UUID | None
     replayed: bool = False
+    request_id: UUID | None = None
+
+
+class SuggestionRequestOut(BaseModel):
+    """수정안 요청 1회 기록 (c0016). 질문은 모델이 사실 대신 물어본 것 — 근거가 아니다."""
+
+    id: UUID
+    document_id: UUID
+    block_ids: list[str]
+    questions: list[str]
+    proposed: int
+    rejected: int
+    dropped: int
+    run_id: UUID | None
+    model_call_id: UUID | None
+    created_at: datetime
 
 
 class ApplyIn(BaseModel):
@@ -538,6 +554,23 @@ def _add_document_routes(router: APIRouter, deps, authorize, doc_path: str, scop
             raise _not_found() from exc
         return [SuggestionOut.model_validate(r, from_attributes=True) for r in rows]
 
+    @router.get(doc_path + "/suggestion-requests", response_model=list[SuggestionRequestOut])
+    async def suggestion_requests(
+        actor: reader,
+        scope: Scope,
+        document_id: UUID,
+        run_id: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ) -> list[SuggestionRequestOut]:
+        """수정안 요청 기록(최근 것부터): 모델이 되물은 질문·개수. ``run_id``로 일괄 실행 것만."""
+        try:
+            rows = await uc.list_suggestion_requests(
+                db, actor, scope, document_id, run_id=run_id, limit=limit
+            )
+        except NotFound as exc:
+            raise _not_found() from exc
+        return [SuggestionRequestOut.model_validate(r, from_attributes=True) for r in rows]
+
     @router.post(
         doc_path + "/suggestions/{suggestion_id}/apply", response_model=RevisionOut, status_code=201
     )
@@ -736,6 +769,49 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
             raise _not_found() from exc
         return SubmissionOut.model_validate(view, from_attributes=True)
 
+    # ---- 제출본 내보내기 (c0016): 불변 스냅샷을 문서 내보내기와 같은 writer·검사로
+
+    SubmissionFmt = Annotated[Literal["md", "docx", "html"], Query(alias="format")]
+
+    async def _export_submission(actor, application_id, fmt) -> docs_uc.ExportResult:
+        try:
+            return await docs_uc.export_submission(db, actor, application_id, fmt=fmt)
+        except NotFound as exc:
+            raise _not_found() from exc
+        except DocumentRuleError as exc:
+            raise _error(exc) from exc
+
+    @router.get(base + "/submission/export/check", response_model=ExportCheckOut)
+    async def submission_export_check(
+        actor: reader, application_id: UUID, fmt: SubmissionFmt
+    ) -> ExportCheckOut:
+        res = await _export_submission(actor, application_id, fmt)
+        return ExportCheckOut(
+            filename=res.filename,
+            media_type=res.media_type,
+            format=res.format,
+            revision=res.revision,
+            bytes=len(res.data),
+            findings=res.findings,
+            summary=res.summary,
+        )
+
+    @router.get(base + "/submission/export")
+    async def submission_export(
+        actor: reader, application_id: UUID, fmt: SubmissionFmt
+    ) -> Response:
+        res = await _export_submission(actor, application_id, fmt)
+        return Response(
+            content=res.data,
+            media_type=res.media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(res.filename)}",
+                "X-Export-Findings": str(len(res.findings)),
+                "X-Export-Codes": ",".join(res.summary),
+                "Cache-Control": "no-store",
+            },
+        )
+
     # ---- 전형 단계 (제출본에 묶인 일정·결과. 원인은 기록하지 않고 판단하지 않는다)
 
     @router.get(base + "/stages", response_model=list[StageOut])
@@ -817,3 +893,8 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
         except DocumentRuleError as exc:
             raise _error(exc) from exc
         return SettingsOut.model_validate(view, from_attributes=True)
+
+    # c0016 올린 DOCX·PDF 숨김 글 검사 (경고만)
+    from career_core.interfaces.http.file_checks import add_file_check_routes
+
+    add_file_check_routes(router, deps, authorize)

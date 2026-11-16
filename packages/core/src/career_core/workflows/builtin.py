@@ -167,4 +167,9 @@ from career_core.workflows.documents import SUGGEST_DOCUMENT_BATCH
 
 WORKFLOWS[SUGGEST_DOCUMENT_BATCH.name] = SUGGEST_DOCUMENT_BATCH
 
+# c0016 AI 인터뷰 질문 묶음 (workflows/interviews.py)
+from career_core.workflows.interviews import INTERVIEW_QUESTION_BATCH
+
+WORKFLOWS[INTERVIEW_QUESTION_BATCH.name] = INTERVIEW_QUESTION_BATCH
+
 __all__ = ["SAVE_JOB_URLS", "SUBMIT_APPLICATION", "WORKFLOWS"]

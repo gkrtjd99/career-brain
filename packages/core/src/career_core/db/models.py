@@ -166,6 +166,9 @@ class ModelCall(Base):
     price_refs: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     provider_request_id: Mapped[str | None] = mapped_column(Text, default=None)
+    # c0016: 실행 단계 안의 호출이면 그 실행·단계 (실행 비용을 장부에서 다시 맞춘다)
+    run_id: Mapped[UUID | None] = mapped_column(default=None)
+    run_step: Mapped[int | None] = mapped_column(Integer, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -269,6 +272,7 @@ class InterviewSession(Base):
     workspace_id: Mapped[UUID]
     experience_id: Mapped[UUID | None] = mapped_column(default=None)
     status: Mapped[str] = mapped_column(Text, default="open")
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)  # c0016
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -284,6 +288,7 @@ class InterviewQuestion(Base):
     prompt: Mapped[str] = mapped_column(Text)
     origin: Mapped[str] = mapped_column(Text)  # template | ai
     model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    request_id: Mapped[UUID | None] = mapped_column(default=None)  # c0016 AI 질문 요청
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -694,6 +699,8 @@ class Run(Base):
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 10), default=Decimal(0))
     cost_unknown: Mapped[bool] = mapped_column(default=False)
     model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    # c0016: 참이면 비용을 장부(model_calls.run_id)에서 계산한다. 이전에 만든 실행은 거짓
+    cost_from_ledger: Mapped[bool] = mapped_column(default=True)
     resumes: Mapped[int] = mapped_column(Integer, default=0)
     actor_kind: Mapped[str] = mapped_column(Text, default="human")
     actor_scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
@@ -902,3 +909,44 @@ class OAuthIdentity(Base):
     label: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+# ---------------------------------------------------------------- c0016: AI 요청 기록
+
+
+class DocumentSuggestionRequest(Base):
+    """AI 수정안 요청 1회. 모델이 되물은 질문 글과 개수를 남긴다. 추가·조회만."""
+
+    __tablename__ = "document_suggestion_requests"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    document_id: Mapped[UUID]
+    base_revision_id: Mapped[UUID]
+    block_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    questions: Mapped[list] = mapped_column(JSONB, default=list)
+    proposed: Mapped[int] = mapped_column(Integer, default=0)
+    rejected: Mapped[int] = mapped_column(Integer, default=0)
+    dropped: Mapped[int] = mapped_column(Integer, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    run_id: Mapped[UUID | None] = mapped_column(default=None)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InterviewQuestionRequest(Base):
+    """AI 인터뷰 질문 요청 1회. 만든 질문은 ``interview_questions.request_id``로 묶인다. 추가·조회만."""
+
+    __tablename__ = "interview_question_requests"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    session_id: Mapped[UUID]
+    requested: Mapped[int] = mapped_column(Integer, default=0)
+    created: Mapped[int] = mapped_column(Integer, default=0)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    run_id: Mapped[UUID | None] = mapped_column(default=None)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
