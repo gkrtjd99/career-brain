@@ -46,7 +46,9 @@ class EgressPolicy(Protocol):
 class BudgetPolicy(Protocol):
     """작업 시작 전 예약, 완료 후 정산. 같은 idempotency_key로 이중 차감하지 않는다."""
 
-    async def reserve(self, actor: ActorContext, kind: str, amount: int, idempotency_key: str) -> str | None: ...
+    async def reserve(
+        self, actor: ActorContext, kind: str, amount: int, idempotency_key: str
+    ) -> str | None: ...
 
     async def settle(self, reservation_id: str, actual: int) -> None: ...
 
