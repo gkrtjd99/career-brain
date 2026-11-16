@@ -224,7 +224,7 @@ ETag·Last-Modified를 제공하는 출처에는 조건부 요청을 적용한�
 
 초기 검색은 PostgreSQL 안에서 끝낸다. 구조화 조건과 공간 권한으로 범위를 좁힌 뒤 제목·별칭·본문 검색과 pgvector 의미 검색을 결합한다. 한국어 동의어·복합어·띄어쓰기 샘플을 별도 시험한다. pg_trgm은 유사 문자열 보조이며 한국어 의미 검색의 대체로 취급하지 않는다. [S8]
 
-임베딩은 OpenAI API와 로컬 모델(fastembed) 둘 다 같은 게이트웨이로 붙는다. 예시 설정의 기본은 OpenAI `text-embedding-3-small` 512차원이고, 키가 없거나 라우트를 지우면 키워드 검색만 한다. 측정과 선택 근거: `docs/architecture/search.md`.
+임베딩은 OpenAI API와 로컬 모델(fastembed) 둘 다 같은 게이트웨이로 붙는다. 예시 설정의 기본은 OpenAI `text-embedding-3-large` 1024차원이고, 키가 없거나 라우트를 지우면 키워드 검색만 한다. 측정과 선택 근거: `docs/architecture/search.md`.
 
 작은 개인 자료에는 정확 벡터 검색부터 측정한다. pgvector는 정확 검색과 근사 검색을 모두 지원하므로, HNSW 색인을 무조건 켜는 대신 부하 결과와 검색 재현율을 보고 추가한다. 임베딩 모델과 차원이 다른 자료를 같은 검색 공간으로 섞지 않는다. [S3]
 
