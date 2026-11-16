@@ -15,8 +15,9 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, useToken } from "../lib/api";
+import { setDisplayTimeZone, useDisplayTimeZone } from "../lib/dates";
 
 interface NavItem {
   to: string;
@@ -69,6 +70,15 @@ export function AppShell() {
   const token = useToken();
   const [more, setMore] = useState(false);
   const me = useQuery({ queryKey: ["me", token], queryFn: api.me, enabled: !!token, staleTime: 300_000 });
+  // 공간 표시 시간대 (설정 화면). 모든 화면의 날짜 표시가 이 값을 쓴다 (lib/dates).
+  const settings = useQuery({
+    queryKey: ["workspace-settings", token],
+    queryFn: api.workspaceSettings,
+    enabled: !!token,
+    staleTime: 300_000,
+  });
+  useEffect(() => setDisplayTimeZone(settings.data?.timezone), [settings.data?.timezone]);
+  const zone = useDisplayTimeZone();
 
   return (
     <div className="min-h-dvh md:flex">
@@ -97,7 +107,8 @@ export function AppShell() {
 
       <main className="min-w-0 flex-1 px-4 pt-5 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:px-8 md:pt-8 md:pb-12">
         <div className="mx-auto max-w-5xl">
-          <Outlet />
+          {/* 시간대가 바뀌면 화면을 다시 그려 날짜 표시를 맞춘다 */}
+          <Outlet key={zone} />
         </div>
       </main>
 

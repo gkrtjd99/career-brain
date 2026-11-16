@@ -5,7 +5,7 @@ import { Ban, Check, Sparkles, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { wordDiff } from "../../lib/diff";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime } from "../../lib/dates";
 import { REJECT_REASON, SUGGESTION_STATUS } from "../../lib/labels";
 import { ErrorText, Loaded } from "../common";
 

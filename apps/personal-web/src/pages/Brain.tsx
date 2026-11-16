@@ -7,7 +7,7 @@ import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
+import { formatDate } from "../lib/dates";
 import { EXTRACTION_STATUS, ORIGIN_LABEL, PARSE_STATUS } from "../lib/labels";
 
 const route = getRouteApi("/brain");

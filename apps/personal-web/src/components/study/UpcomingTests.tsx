@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { api } from "../../lib/api";
-import { formatDateTime } from "../../lib/format";
+import { formatDateTime } from "../../lib/dates";
 import { ASSESSMENT_KIND } from "../../lib/labels";
 
 /** 오늘 화면: 일정이 잡힌 시험 준비의 D-day (공간 표시 시간대의 날짜 기준, 30일 안). 없으면 그리지 않는다. */

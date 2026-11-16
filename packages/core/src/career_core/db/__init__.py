@@ -89,7 +89,12 @@ from career_core.db.models import ExportRun
 
 __all__ += ["ExportRun"]
 
-# c0013 학습 설정·항목 병합
-from career_core.db.models import StudyItemMerge, StudySettings
+# c0013 학습 항목 병합
+from career_core.db.models import StudyItemMerge
 
-__all__ += ["StudyItemMerge", "StudySettings"]
+__all__ += ["StudyItemMerge"]
+
+# c0017 공간 공용 설정 (표시 시간대·기술명 별칭)
+from career_core.db.models import WorkspaceSettings
+
+__all__ += ["WorkspaceSettings"]

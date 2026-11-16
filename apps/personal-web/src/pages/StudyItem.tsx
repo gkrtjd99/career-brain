@@ -6,7 +6,7 @@ import { useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { AttemptForm, AttemptRow, MistakeForm, ReviewCard, useStudyInvalidate } from "../components/study/parts";
 import { api } from "../lib/api";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime } from "../lib/dates";
 import { ATTEMPT_RESULT, ITEM_KIND, ITEM_STATUS, KIND_LABEL, REQ_FIELD } from "../lib/labels";
 
 const route = getRouteApi("/study/items/$itemId");

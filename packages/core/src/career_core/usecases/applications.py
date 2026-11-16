@@ -65,6 +65,7 @@ from career_core.domain.documents import (
     requirement_visibility,
     rule_from_prompt,
 )
+from career_core.domain.korean import TechAliases
 from career_core.domain.postings import FieldName, PostingStatus
 from career_core.domain.sensitive import OwnContacts, sensitive_findings, sensitive_hash
 from career_core.llm import ChatMessage, ModelRequest, ModelResult
@@ -73,6 +74,7 @@ from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound
 from career_core.usecases.data_classes import claim_data_classes, restricted_claims
 from career_core.usecases.extraction import parse_model_json
+from career_core.usecases.workspace_settings import workspace_aliases
 
 SUGGEST_PURPOSE = "doc_suggest"
 APPROVE_SCOPE = "approve"
@@ -482,6 +484,7 @@ async def _check_context(
         other_companies=tuple(sorted({o for o in others if o and o != company})),
         cliches=cliches,
         brain=tuple(_evidence(_claim_info(c, e)) for c, e in brain_rows),
+        aliases=await workspace_aliases(s),  # 기본 표 + 공간 별칭 (c0017)
     )
     return ctx, posting
 
@@ -1032,9 +1035,12 @@ def review_suggestion(
     suggested: str,
     evidence_texts: Sequence[str],
     known_organizations: Sequence[str],
+    aliases: TechAliases | None = None,
 ) -> list[dict]:
     """수정안 거부 사유. 비어 있으면 사용자에게 제안해도 된다."""
-    reasons = fact_changes(original, suggested, evidence_texts, known_organizations)
+    reasons = fact_changes(
+        original, suggested, evidence_texts, known_organizations, aliases=aliases
+    )
     ats = ats_findings(suggested)
     if ats:
         reasons.append({"code": "ats_manipulation", "values": sorted({f.code for f in ats})})
@@ -1159,7 +1165,9 @@ async def suggest_edits(
             dropped += 1
             continue
         seen.add(item.block_id)
-        reasons = review_suggestion(block["text"], text, evidence[block["id"]], known_orgs)
+        reasons = review_suggestion(
+            block["text"], text, evidence[block["id"]], known_orgs, ctx.aliases
+        )
         rows.append(
             DocumentSuggestion(
                 id=uuid4(),

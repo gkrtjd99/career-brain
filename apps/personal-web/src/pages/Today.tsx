@@ -9,7 +9,8 @@ import { ErrorText, List, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { UpcomingTests } from "../components/study/UpcomingTests";
 import { api } from "../lib/api";
-import { daysLeft, formatDateTime, formatDeadline, hostOf, usd } from "../lib/format";
+import { daysLeft, formatDateTime, formatDeadline, formatToday } from "../lib/dates";
+import { hostOf, usd } from "../lib/format";
 import { ACTIVITY_LABEL, FETCH_ERROR, FIELD_LABEL, MISTAKE_REASON, POSTING_STATUS } from "../lib/labels";
 
 const SOON_DAYS = 14;
@@ -88,11 +89,7 @@ export function TodayPage() {
   const troubled = u ? u.total.errors + u.total.denied > 0 : false;
 
   const loading = postings.isPending || experiences.isPending;
-  const today = new Intl.DateTimeFormat("ko-KR", {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  }).format(new Date());
+  const today = formatToday();
 
   return (
     <div>

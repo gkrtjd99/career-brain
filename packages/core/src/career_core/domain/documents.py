@@ -22,10 +22,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from career_core.domain.korean import (
+    TechAliases,
     canonical_tech,
     found_spellings,
     korean_numbers,
     korean_tech_terms,
+    use_aliases,
 )
 
 
@@ -897,6 +899,19 @@ def fact_changes(
     suggested: str,
     evidence_texts: Sequence[str] = (),
     known_organizations: Iterable[str] = (),
+    *,
+    aliases: TechAliases | None = None,
+) -> list[dict[str, Any]]:
+    """`_fact_changes`를 공간 별칭 표(`aliases`, 없으면 지금 표)로."""
+    with use_aliases(aliases):
+        return _fact_changes(original, suggested, evidence_texts, known_organizations)
+
+
+def _fact_changes(
+    original: str,
+    suggested: str,
+    evidence_texts: Sequence[str] = (),
+    known_organizations: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """수정안이 원문·연결 근거에 없는 사실을 넣었는지. 비어 있으면 통과.
 
@@ -1012,6 +1027,8 @@ class CheckContext:
     cliches: tuple[str, ...] = DEFAULT_CLICHES
     # 공간의 확인된 주장 전체. 요건 가시성의 "브레인 근거"
     brain: tuple[EvidenceClaim, ...] = ()
+    # 기술명 별칭 표 (기본 표 + 공간 설정, c0017). None이면 기본 표
+    aliases: TechAliases | None = None
 
 
 def _posting_terms(ctx: CheckContext) -> set[str]:
@@ -1042,6 +1059,14 @@ def _mentions_target(sentence: str, ctx: CheckContext) -> bool:
 
 
 def requirement_visibility(ctx: CheckContext, blocks: Sequence[BlockInput]) -> list[dict[str, Any]]:
+    """`_requirement_visibility`를 문맥의 별칭 표(`ctx.aliases`)로."""
+    with use_aliases(ctx.aliases):
+        return _requirement_visibility(ctx, blocks)
+
+
+def _requirement_visibility(
+    ctx: CheckContext, blocks: Sequence[BlockInput]
+) -> list[dict[str, Any]]:
     """공고 요건 × 문서 × 브레인 (§11 요건 가시성 검사).
 
     | 브레인 근거 | 문서에 보임 | 판정 |
@@ -1113,6 +1138,12 @@ def requirement_visibility(ctx: CheckContext, blocks: Sequence[BlockInput]) -> l
 
 
 def check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str, Any]:
+    """`_check_document`를 문맥의 별칭 표(`ctx.aliases`)로."""
+    with use_aliases(ctx.aliases):
+        return _check_document(ctx, blocks)
+
+
+def _check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str, Any]:
     """문서 한 벌 검사. {"findings": [...], "requirements": [...], "summary": {code: n}}"""
     findings: list[Finding] = []
     posting_terms = _posting_terms(ctx)

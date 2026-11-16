@@ -1171,6 +1171,10 @@ export interface ClaimSuggestion {
   score: number;
   keyword_rank: number | null;
   semantic_rank: number | null;
+  /** judge=true로 물었을 때만: 판정 모델의 참고 의견 (연결·충족 판정이 아니다) */
+  judge?: import("./settings").JudgeVerdict | null;
+  /** restricted_not_sent: restricted 근거라 판정 모델에 보내지 않음 */
+  judge_note?: string | null;
 }
 
 /** 요건 → 주장 후보 (검색 제안). 사용자가 하나씩 연결해야 반영되고 충족 판정에 쓰지 않는다 */
@@ -1186,6 +1190,7 @@ export interface ClaimSuggestions {
   mode: string;
   semantic_note: string | null;
   basis: "search_suggestion";
+  judge?: import("./settings").JudgeRun | null;
 }
 
 export interface FrequencyGroup {

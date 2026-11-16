@@ -114,13 +114,29 @@ class SearchArgs(Args):
     query: str = Field(min_length=1, max_length=search_uc.MAX_QUERY_CHARS)
     kinds: list[Literal["claim", "block", "answer"]] | None = None
     limit: int = Field(default=10, ge=1, le=50)
+    # 학습 기록(학습 메모·오답)도 찾기. 기본은 끔: 학습 기록은 경험 근거가 아니다.
+    include_study: bool = False
+
+
+# 학습 기록 결과마다 붙이는 표시. 외부 AI가 학습 메모를 경험 근거로 쓰지 않게 한다.
+STUDY_RECORD_NOTE = "study, not experience"
 
 
 async def _search(env: ToolEnv, a: SearchArgs) -> Any:
     kinds = tuple(a.kinds) if a.kinds else search_uc.KINDS
-    return await search_uc.search(
+    if a.include_study:
+        kinds = (*kinds, *search_uc.STUDY_KINDS)
+    result = await search_uc.search(
         env.db, env.actor, a.query, gateway=env.deps.models, kinds=kinds, limit=a.limit
     )
+    if not a.include_study:
+        return result
+    out = jsonable(result)
+    for hit in out["hits"]:
+        if hit.get("record") == "study":
+            hit["note"] = STUDY_RECORD_NOTE
+    out["include_study"] = True
+    return out
 
 
 class NoArgs(Args):
@@ -387,7 +403,9 @@ TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
         "Search the user's confirmed career brain (claims, document blocks, interview answers). "
-        "Returns snippets with their source.",
+        "Returns snippets with their source. include_study=true also searches study notes and "
+        "mistakes; those hits have record='study' and note='study, not experience' and must "
+        "never be used as evidence of experience.",
         "search.read",
         SearchArgs,
         _search,

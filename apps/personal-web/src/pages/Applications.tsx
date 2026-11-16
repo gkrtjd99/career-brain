@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 import { ErrorText, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api } from "../lib/api";
-import { daysLeft, hostOf } from "../lib/format";
+import { daysLeft } from "../lib/dates";
+import { hostOf } from "../lib/format";
 import { APP_STATUS } from "../lib/labels";
 
 /** 카드의 다음 행동 한 줄 */

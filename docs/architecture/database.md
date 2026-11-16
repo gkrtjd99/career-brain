@@ -226,3 +226,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - trigger `approvals_wake_run` (AFTER UPDATE OF status ON approvals): 열린 승인이 `invalidated`·`expired`로 바뀌고 그 승인을 기다리던 실행(`waiting_approval`, 같은 `approval_id`)이 있으면 `queued`로 바꾸고 사건(`approval_invalidated`/`approval_expired`)과 `run` job을 넣는다. 다음 단계가 실패 처리한다.
 - 내보내기: `audit_events`·`deletions`는 묶음에 들어가고, `oauth_identities`는 `EXCLUDED_TABLES`(설치마다 다시 연결).
 - 상세: `docs/architecture/runs.md`(무효화를 trigger로 둔 이유), `docs/architecture/mcp.md`(감사·OAuth), `docs/operations/backup.md`(삭제 기록 재적용).
+
+## 공간 공용 설정 (c0017)
+
+`down_revision = c0015`. 표시 시간대를 학습 전용(`study_settings`)에서 공간 공용 설정으로 옮기고, 기술명 별칭 사전을 더한다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `workspace_settings` (새 표) | 공간당 1행(`uq_workspace_settings_workspace`). 표시 시간대 `timezone`(IANA 이름, NULL = 기본 `Asia/Seoul`, 1–64자, 값 검사는 앱 `zoneinfo`), 기술명 별칭 `tech_aliases` JSONB 배열 `[{term, aliases}]`(`ck_workspace_settings_tech_aliases`: 배열, 200개 이하, 항목 검사는 앱 `parse_alias_entries`), `updated_by` | `SELECT, INSERT, UPDATE` |
+| `study_settings` | 지움. 값은 `workspace_settings.timezone`으로 옮긴다 | – |
+
+- 옮기기: upgrade는 모든 공간의 행을 한 번에 복사해야 해서 그동안만 `study_settings`의 `FORCE ROW LEVEL SECURITY`를 끈다(`NO FORCE`, 같은 트랜잭션에서 표를 지움). 소유자가 superuser가 아닌 설치에서도 복사가 빠지지 않는다. downgrade는 시간대가 있는 행만 `study_settings`로 되돌린다 (별칭은 버린다).
+- RLS FORCE, `workspace_id` + 공간 복합 키. 내보내기·복원 대상이 자동으로 된다 (`test_export.py`).
+- API: `GET/PUT /core/workspace-settings` (`settings.read` = read, `settings.write` = draft-write). 준 칸만 바꾼다. `GET/PUT /core/study/settings`는 같은 시간대를 읽고 쓴다.
+- 키워드 검색용 SECURITY DEFINER 함수(trigram 색인 사용)는 시험했지만 넣지 않았다 (2글자 한국어 낱말은 색인 이득이 없고, 소유자가 superuser가 아니면 RLS가 그대로 적용된다. `search.md` "RLS 아래 trigram 색인").
+- 상세: `docs/architecture/study.md`(시간대·별칭), `docs/architecture/applications.md`(문서 검사의 별칭), `docs/architecture/models.md`(판정 모델).

@@ -31,7 +31,8 @@ import { useEffect, useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api, ApiError } from "../lib/api";
-import { formatDateTime, formatDeadline, int } from "../lib/format";
+import { formatDateTime, formatDeadline, fromLocalInput, toLocalInput } from "../lib/dates";
+import { int } from "../lib/format";
 import {
   APP_STATUS,
   DOC_KIND,
@@ -606,14 +607,6 @@ function FrozenView({ app }: { app: Application }) {
 const STAGE_KINDS: StageKind[] = ["document", "test", "assignment", "interview", "final", "other"];
 const STAGE_OUTCOMES: StageOutcome[] = ["pending", "passed", "failed", "withdrawn", "cancelled"];
 
-/** datetime-local 값 ↔ ISO */
-function toLocalInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-const fromLocalInput = (v: string) => (v ? new Date(v).toISOString() : null);
 
 /**
  * 제출 뒤 전형 단계와 결과를 기록한다. 결과만 적고, 왜 떨어졌는지 같은 원인은 시스템이 판단하지 않는다.

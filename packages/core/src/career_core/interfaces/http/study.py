@@ -407,6 +407,23 @@ class CleanupOut(BaseModel):
     claim_links_removed: int
 
 
+class JudgeVerdictOut(BaseModel):
+    verdict: str  # yes | no | unclear (참고 의견)
+    reason: str | None = None
+    quote: str | None = None
+    note: str | None = None
+
+
+class JudgeRunOut(BaseModel):
+    status: str  # ok | unavailable | denied | error | partial
+    note: str | None = None
+    calls: int = 0
+    model: str | None = None
+    cost_usd: str | None = None
+    cost_basis: str | None = None
+    basis: str = "judge_advisory"
+
+
 class ClaimSuggestionOut(BaseModel):
     claim_id: UUID
     statement: str
@@ -416,6 +433,8 @@ class ClaimSuggestionOut(BaseModel):
     score: float
     keyword_rank: int | None
     semantic_rank: int | None
+    judge: JudgeVerdictOut | None = None
+    judge_note: str | None = None
 
 
 class LineSuggestionsOut(BaseModel):
@@ -432,6 +451,7 @@ class SuggestionsOut(BaseModel):
     mode: str
     semantic_note: str | None
     basis: str
+    judge: JudgeRunOut | None = None
 
 
 class FrequencyGroupOut(BaseModel):
@@ -545,8 +565,12 @@ def add_study_routes(router: APIRouter, deps, authorize) -> None:
         field: str | None = None,
         text: Annotated[str | None, Query(max_length=uc.MAX_TEXT)] = None,
         limit: Annotated[int, Query(ge=1, le=20)] = 5,
+        judge: bool = False,
     ) -> SuggestionsOut:
-        """요건별 주장 후보 (검색 제안). 연결·충족 판정은 하지 않는다 — 사용자가 하나씩 연결한다."""
+        """요건별 주장 후보 (검색 제안). 연결·충족 판정은 하지 않는다 — 사용자가 하나씩 연결한다.
+
+        `judge=true`: 판정 모델(라우트 `judge_claim`)의 참고 의견을 후보마다 붙인다 (egress 범위 필요).
+        """
         result = await call(
             uc.suggest_claims,
             db,
@@ -556,6 +580,7 @@ def add_study_routes(router: APIRouter, deps, authorize) -> None:
             field=field,
             text=text,
             limit=limit,
+            judge=judge,
         )
         return _out(SuggestionsOut, result)
 

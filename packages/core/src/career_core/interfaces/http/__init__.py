@@ -32,9 +32,11 @@ from career_core.domain.workspace import ScopePermissionPolicy
 from career_core.interfaces.http.activity import add_activity_routes
 from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
+from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.postings import add_posting_routes
 from career_core.interfaces.http.search import add_search_routes
+from career_core.interfaces.http.settings import add_settings_routes
 from career_core.interfaces.http.study import add_study_routes
 from career_core.interfaces.http.usage import add_usage_routes
 from career_core.llm.gateway import ModelGateway
@@ -197,6 +199,8 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_posting_routes(router, deps, authorize)
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
+    add_settings_routes(router, deps, authorize)  # c0017 공간 공용 설정
+    add_judge_routes(router, deps, authorize)  # 판정 모델 (참고 의견)
     # O08 실행·승인·MCP. MCP는 같은 identity로 인증하고 같은 PermissionPolicy를 쓴다.
     from career_core.interfaces.http.runs import add_approval_routes, add_run_routes
     from career_core.interfaces.mcp.http import add_mcp_routes

@@ -7,7 +7,8 @@ import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api } from "../lib/api";
-import { formatDate, formatDeadline, hostOf } from "../lib/format";
+import { formatDate, formatDeadline } from "../lib/dates";
+import { hostOf } from "../lib/format";
 import { ERROR_TEXT, FETCH_ERROR, FETCH_STATUS, FIELD_LABEL, POSTING_STATUS } from "../lib/labels";
 
 const MAX_URLS = 20;

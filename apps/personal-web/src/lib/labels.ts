@@ -228,6 +228,12 @@ export const ERROR_TEXT: Record<string, string> = {
   merge_same_item: "같은 항목끼리는 합칠 수 없습니다.",
   requirement_current: "지금 공고에 있는 요건은 정리하지 않습니다.",
   invalid_timezone: "알 수 없는 시간대입니다 (예: Asia/Seoul).",
+  // 공간 설정 (c0017)
+  invalid_aliases: "별칭 형식이 맞지 않습니다.",
+  too_many_aliases: "별칭이 너무 많습니다 (항목 200개, 항목당 20개까지).",
+  invalid_alias_term: "대표 표기가 비었거나 40자를 넘습니다.",
+  invalid_alias: "다른 표기가 비었거나 40자를 넘습니다.",
+  alias_conflict: "같은 표기가 두 기술에 들어 있습니다.",
 };
 
 // ---------------------------------------------------------------- O07 지원·문서

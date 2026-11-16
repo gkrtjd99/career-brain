@@ -62,6 +62,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0014 감사 기록(MCP 도구 호출)·외부 OAuth 신원 연결. 소유자만.
     "audit.read": "workspace-admin",
     "oauth.link": "workspace-admin",
+    # c0017 공간 공용 설정 (표시 시간대·기술명 별칭). 학습 설정 PUT과 같은 범위.
+    "settings.read": "read",
+    "settings.write": "draft-write",
 }
 
 

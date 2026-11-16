@@ -6,7 +6,7 @@ import { ChevronRight, FileText, Plus } from "lucide-react";
 import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { api } from "../lib/api";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime } from "../lib/dates";
 import { DOC_KIND } from "../lib/labels";
 import { countLine } from "./Application";
 
