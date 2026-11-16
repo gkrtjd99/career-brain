@@ -28,10 +28,16 @@ deploy/compose/       개인용 compose
 uv sync                    # Python (3.13)
 uv run pytest
 npm install                # Node 24
-docker compose -f deploy/compose/compose.yaml up -d db
-uv run uvicorn personal_api.main:app --reload   # http://127.0.0.1:8000/api/core/health
-npm run dev                                       # http://localhost:5173
+docker compose -f deploy/compose/compose.yaml up -d db   # PostgreSQL + 앱 역할(career_api)
+uv run pytest                                           # DB 테스트는 임시 DB를 만들고 지운다
+uv run personal-api migrate                             # core → personal migration
+uv run personal-api bootstrap                           # 공간 + owner + API 토큰 (한 번만 출력)
+uv run uvicorn personal_api.main:app --reload           # http://127.0.0.1:8000
+curl -H "Authorization: Bearer <token>" localhost:8000/api/core/me
+npm run dev                                             # http://localhost:5173
 ```
+
+DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md)
 
 ## 원칙
 
