@@ -52,7 +52,8 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 | 이름 | 시작 권한 | 단계 |
 |---|---|---|
 | `save_job_urls` | `jobs.write` | URL 하나씩 저장 (`{"urls": [...]}`, 최대 50). 같은 공고는 기존 항목 |
-| `submit_application` | `applications.write` | 제출 승인 요청 → 사람 결정 대기 → 승인으로 제출 (`{"application_id", "revisions", "note"}`) |
+| `submit_application` | `applications.write` | 제출 승인 요청 → 사람 결정 대기 → 승인으로 제출 (`{"application_id", "revisions", "note", "sensitive_ack"?}`). 민감 정보 경고가 있으면 `sensitive_ack`도 승인 내용에 들어간다 |
+| `suggest_document_batch` | `documents.ai` | 문서의 문단마다 AI 수정안 1회 (`{"application_id", "document_id", "base_revision", "block_ids"?, "instruction"?}`, 지원 문서만, 최대 50문단). 비용은 run에, 문단별 `effect_key`로 재개 시 중복 없음 (`applications.md`) |
 
 새 workflow는 `career_core.workflows.builtin.WORKFLOWS`에 `Workflow(name, action, steps, validate)`로 추가한다. `action`은 `ACTION_SCOPES`에 등록된 행동이어야 한다.
 

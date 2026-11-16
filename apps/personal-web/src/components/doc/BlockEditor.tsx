@@ -1,7 +1,7 @@
-import type { ClaimBrief, Finding } from "@career-brain/client";
+import type { ClaimBrief, DocBlock, Finding, SpanIn } from "@career-brain/client";
 import { Badge, Button, cn, StatusBadge } from "@career-brain/ui";
-import { Link2, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent } from "react";
+import { Link2, Plus, Quote, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { FINDING, FINDING_GROUP } from "../../lib/labels";
 
 export interface DraftBlock {
@@ -11,6 +11,51 @@ export interface DraftBlock {
   text: string;
   origin: string;
   claim_ids: string[];
+  /** 문장 단위 근거. 위치 대신 가리키는 글(quote)을 들고 있다가 저장할 때 위치를 다시 찾는다. */
+  spans?: DraftSpan[];
+}
+
+export interface DraftSpan {
+  quote: string;
+  /** 처음 위치 (같은 글이 여러 번 나오면 가까운 쪽을 고른다). UTF-16 기준 */
+  at: number;
+  claim_ids: string[];
+}
+
+/** 서버가 저장 전에 하는 정리와 같다: NFC, 줄바꿈 \n, 앞뒤 공백 제거 */
+export function normalizeBlockText(text: string): string {
+  return text.normalize("NFC").replace(/\r\n?/g, "\n").trim();
+}
+
+/** UTF-16 위치 → 코드 포인트 위치 (서버는 코드 포인트로 센다) */
+const cp = (text: string, i: number) => Array.from(text.slice(0, i)).length;
+
+/** 서버 블록의 span(코드 포인트 위치) → 화면 span(인용문) */
+export function draftSpans(b: DocBlock): DraftSpan[] {
+  const chars = Array.from(b.text);
+  return (b.spans ?? []).map((sp) => {
+    const quote = chars.slice(sp.start, sp.end).join("");
+    return { quote, at: chars.slice(0, sp.start).join("").length, claim_ids: [...sp.claim_ids] };
+  });
+}
+
+/** 저장할 span: 지금 글에서 인용문을 다시 찾는다. 못 찾으면 뺀다 (근거 없는 위치를 만들지 않는다). */
+export function spansForSave(text: string, spans: DraftSpan[] | undefined): SpanIn[] {
+  const norm = normalizeBlockText(text);
+  // 앞 공백을 지운 만큼 처음 위치를 당긴다
+  const lead = text.length - text.trimStart().length;
+  const out: SpanIn[] = [];
+  for (const sp of spans ?? []) {
+    const q = sp.quote.normalize("NFC").replace(/\r\n?/g, "\n");
+    if (!q.trim()) continue;
+    const hits: number[] = [];
+    for (let i = norm.indexOf(q); i >= 0; i = norm.indexOf(q, i + 1)) hits.push(i);
+    if (!hits.length) continue;
+    const want = sp.at - lead;
+    const i = hits.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a));
+    out.push({ start: cp(norm, i), end: cp(norm, i + q.length), claim_ids: sp.claim_ids });
+  }
+  return out;
 }
 
 let seq = 0;
@@ -23,6 +68,7 @@ function AutoTextarea({
   onKeyDown,
   onPaste,
   onFocus,
+  onSelect,
   inputRef,
   label,
   placeholder,
@@ -33,6 +79,7 @@ function AutoTextarea({
   onKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onFocus?: () => void;
+  onSelect?: (start: number, end: number) => void;
   inputRef: (el: HTMLTextAreaElement | null) => void;
   label: string;
   placeholder?: string;
@@ -59,6 +106,7 @@ function AutoTextarea({
       onKeyDown={onKeyDown}
       onPaste={onPaste}
       onFocus={onFocus}
+      onSelect={(e) => onSelect?.(e.currentTarget.selectionStart, e.currentTarget.selectionEnd)}
       className="block w-full resize-none overflow-hidden bg-transparent text-base leading-8 text-fg outline-none placeholder:text-muted"
     />
   );
@@ -88,11 +136,14 @@ export function BlockEditor({
   findings: Finding[];
   activeKey: string | null;
   onActive: (key: string) => void;
-  onPickEvidence: (key: string) => void;
+  /** range 가 있으면 그 문장(선택한 부분)에만 근거를 붙인다 */
+  onPickEvidence: (key: string, range?: { start: number; end: number; quote: string }) => void;
   /** 바깥에서 특정 문단으로 이동할 때 */
   focusRequest?: { key: string; at?: number; n: number } | null;
 }) {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
+  // 문단 안에서 고른 글 (문장 단위 근거용)
+  const [selection, setSelection] = useState<{ key: string; start: number; end: number } | null>(null);
   const pending = useRef<{ key: string; at: number } | null>(null);
 
   useEffect(() => {
@@ -128,8 +179,10 @@ export function BlockEditor({
       const at = el.selectionStart;
       const end = el.selectionEnd;
       const next: DraftBlock = { key: newKey(), id: null, text: b.text.slice(end), origin: "user", claim_ids: [] };
+      // 문장 근거는 가리키는 글이 간 문단으로 따라간다
+      next.spans = (b.spans ?? []).filter((sp) => sp.at >= end).map((sp) => ({ ...sp, at: sp.at - end }));
       const copy = [...blocks];
-      copy.splice(i, 1, { ...b, text: b.text.slice(0, at) }, next);
+      copy.splice(i, 1, { ...b, text: b.text.slice(0, at), spans: (b.spans ?? []).filter((sp) => sp.at < at) }, next);
       pending.current = { key: next.key, at: 0 };
       onChange(copy);
     } else if (e.key === "Backspace" && i > 0 && el.selectionStart === 0 && el.selectionEnd === 0) {
@@ -139,6 +192,7 @@ export function BlockEditor({
         ...prev,
         text: prev.text + b.text,
         claim_ids: [...new Set([...prev.claim_ids, ...b.claim_ids])],
+        spans: [...(prev.spans ?? []), ...(b.spans ?? []).map((sp) => ({ ...sp, at: sp.at + prev.text.length }))],
       };
       const copy = [...blocks];
       copy.splice(i - 1, 2, joined);
@@ -218,6 +272,9 @@ export function BlockEditor({
               onKeyDown={onKeyDown(i)}
               onPaste={onPaste(i)}
               onFocus={() => onActive(b.key)}
+              onSelect={(start, end) =>
+                setSelection(end > start && b.text.slice(start, end).trim() ? { key: b.key, start, end } : null)
+              }
               inputRef={(el) => {
                 if (el) refs.current.set(b.key, el);
                 else refs.current.delete(b.key);
@@ -247,6 +304,26 @@ export function BlockEditor({
                   </span>
                 );
               })}
+              {(b.spans ?? []).map((sp, si) => (
+                <span
+                  key={`sp-${si}`}
+                  className="inline-flex max-w-full items-center gap-1 rounded border border-accent/40 bg-accent-soft/40 px-1.5 py-0.5 text-xs"
+                  title={sp.claim_ids.map((c) => claims.get(c)?.statement ?? c).join("\n")}
+                >
+                  <Quote size={11} className="shrink-0 text-accent" />
+                  <span className="max-w-[12rem] truncate">“{sp.quote}”</span>
+                  <span className="text-muted">근거 {sp.claim_ids.length}</span>
+                  {!readOnly ? (
+                    <button
+                      aria-label="문장 근거 끊기"
+                      className="rounded p-0.5 text-muted hover:text-danger"
+                      onClick={() => update(i, { spans: (b.spans ?? []).filter((_, j) => j !== si) })}
+                    >
+                      <X size={12} />
+                    </button>
+                  ) : null}
+                </span>
+              ))}
               {marks.map((code) => {
                 const info = FINDING[code];
                 const tone = info ? FINDING_GROUP[info.group].tone : "neutral";
@@ -258,6 +335,24 @@ export function BlockEditor({
               })}
               {!readOnly ? (
                 <span className={cn("ml-auto flex gap-0.5", active ? "" : "md:opacity-0 md:group-hover:opacity-100")}>
+                  {selection?.key === b.key ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      // 버튼을 눌러도 문단의 선택이 풀리지 않게 포커스를 옮기지 않는다
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        onPickEvidence(b.key, {
+                          start: selection.start,
+                          end: selection.end,
+                          quote: b.text.slice(selection.start, selection.end),
+                        })
+                      }
+                      aria-label={`문단 ${i + 1}에서 고른 문장 근거 연결`}
+                    >
+                      <Quote size={14} /> 고른 문장 근거
+                    </Button>
+                  ) : null}
                   <Button size="sm" variant="ghost" onClick={() => onPickEvidence(b.key)} aria-label={`문단 ${i + 1} 근거 연결`}>
                     <Link2 size={14} /> 근거
                   </Button>

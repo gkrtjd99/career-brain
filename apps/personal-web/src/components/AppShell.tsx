@@ -4,6 +4,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
   Brain,
   Briefcase,
+  Files,
   Gauge,
   GraduationCap,
   House,
@@ -29,6 +30,7 @@ const MAIN: NavItem[] = [
   { to: "/postings", label: "공고", icon: Briefcase },
   { to: "/search", label: "검색", icon: Search },
   { to: "/applications", label: "지원 현황", icon: KanbanSquare },
+  { to: "/documents", label: "공용 문서", icon: Files },
   { to: "/study", label: "학습", icon: GraduationCap },
 ];
 const SYSTEM: NavItem[] = [

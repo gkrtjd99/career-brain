@@ -1,32 +1,58 @@
-import type { AppDocument, ClaimBrief, CountRule, RevisionConflictDetail, TextCounts } from "@career-brain/client";
+import type {
+  AppDocument,
+  ClaimBrief,
+  CountRule,
+  ExportCheck,
+  ExportFormat,
+  RevisionConflictDetail,
+  TextCounts,
+} from "@career-brain/client";
 import { Badge, Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useBlocker } from "@tanstack/react-router";
-import { AlertTriangle, History, Lock, Save, Settings2 } from "lucide-react";
+import { AlertTriangle, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
-import { BlockEditor, newKey, type DraftBlock } from "../components/doc/BlockEditor";
+import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "../components/doc/BlockEditor";
 import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime, int } from "../lib/format";
-import { DOC_KIND, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
+import { DOC_KIND, EXPORT_FORMAT, FINDING, FINDING_GROUP, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
 
 const route = getRouteApi("/applications/$applicationId/documents/$documentId");
+const sharedRoute = getRouteApi("/documents/$documentId");
 
 function toDraft(doc: AppDocument): DraftBlock[] {
   if (!doc.blocks.length) return [{ key: newKey(), id: null, text: "", origin: "user", claim_ids: [] }];
-  return doc.blocks.map((b) => ({ key: newKey(), id: b.id, text: b.text, origin: b.origin, claim_ids: [...b.claim_ids] }));
+  return doc.blocks.map((b) => ({
+    key: newKey(),
+    id: b.id,
+    text: b.text,
+    origin: b.origin,
+    claim_ids: [...b.claim_ids],
+    spans: draftSpans(b),
+  }));
 }
 
 /** 저장할 때 서버가 하는 정리(앞뒤 공백·빈 문단 제외)와 같은 기준으로 비교한다. */
-function canonical(blocks: { id: string | null; text: string; claim_ids: string[] }[]) {
+function canonical(blocks: { id: string | null; text: string; claim_ids: string[]; spans?: DraftBlock["spans"] }[]) {
   return JSON.stringify(
     blocks
-      .map((b) => ({ id: b.id, text: b.text.normalize("NFC").replace(/\r\n?/g, "\n").trim(), c: b.claim_ids }))
+      .map((b) => ({
+        id: b.id,
+        text: b.text.normalize("NFC").replace(/\r\n?/g, "\n").trim(),
+        c: b.claim_ids,
+        s: (b.spans ?? []).map((sp) => [sp.quote, sp.claim_ids]),
+      }))
       .filter((b) => b.text),
   );
+}
+
+/** 서버 블록 → 비교용 (span 은 인용문으로) */
+function baseShape(blocks: AppDocument["blocks"]) {
+  return blocks.map((b) => ({ id: b.id, text: b.text, claim_ids: b.claim_ids, spans: draftSpans(b) }));
 }
 
 function fnv1a(text: string): string {
@@ -56,9 +82,19 @@ export function DocumentPage() {
   return <Loaded query={q}>{(doc) => <DocumentEditor key={doc.id} appId={applicationId} initial={doc} />}</Loaded>;
 }
 
+/** 공용 문서 (지원에 묶이지 않은 포트폴리오·기본 이력서). 편집 규칙은 지원 문서와 같다. */
+export function SharedDocumentPage() {
+  const { documentId } = sharedRoute.useParams();
+  const q = useQuery({
+    queryKey: ["document", documentId],
+    queryFn: () => api.document(null, documentId),
+  });
+  return <Loaded query={q}>{(doc) => <DocumentEditor key={doc.id} appId={null} initial={doc} />}</Loaded>;
+}
+
 type Panel = "checks" | "ai" | "history";
 
-function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocument }) {
+function DocumentEditor({ appId, initial }: { appId: string | null; initial: AppDocument }) {
   const qc = useQueryClient();
   const docQuery = useQuery({
     queryKey: ["document", initial.id],
@@ -66,15 +102,20 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
     initialData: initial,
   });
   const doc = docQuery.data;
-  const app = useQuery({ queryKey: ["application", appId], queryFn: () => api.application(appId) });
+  const app = useQuery({
+    queryKey: ["application", appId],
+    queryFn: () => api.application(appId!),
+    enabled: appId !== null,
+  });
 
   // 편집 상태: 마지막으로 불러온(또는 저장한) revision 을 기준(base)으로 둔다.
   const [base, setBase] = useState(doc.revision_no);
-  const [baseBlocks, setBaseBlocks] = useState(doc.blocks);
+  const [baseBlocks, setBaseBlocks] = useState(() => baseShape(doc.blocks));
   const [blocks, setBlocks] = useState<DraftBlock[]>(() => toDraft(doc));
   const [conflict, setConflict] = useState<RevisionConflictDetail | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [pickFor, setPickFor] = useState<string | null>(null);
+  const [pickFor, setPickFor] = useState<{ key: string; range?: { start: number; end: number; quote: string } } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [focus, setFocus] = useState<{ key: string; n: number } | null>(null);
   const [panel, setPanel] = useState<Panel>("checks");
   const [settings, setSettings] = useState(false);
@@ -84,7 +125,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
 
   const reset = useCallback((d: AppDocument) => {
     setBase(d.revision_no);
-    setBaseBlocks(d.blocks);
+    setBaseBlocks(baseShape(d.blocks));
     setBlocks(toDraft(d));
     setConflict(null);
   }, []);
@@ -141,7 +182,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
             op: "set_blocks",
             blocks: blocks
               .filter((b) => b.text.trim())
-              .map((b) => ({ id: b.id, text: b.text, claim_ids: b.claim_ids })),
+              .map((b) => ({ id: b.id, text: b.text, claim_ids: b.claim_ids, spans: spansForSave(b.text, b.spans) })),
           },
         ],
         reason: opts.reason ?? null,
@@ -151,9 +192,11 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
     onSuccess: async () => {
       const fresh = await qc.fetchQuery({ queryKey: ["document", doc.id], queryFn: () => api.document(appId, doc.id) });
       reset(fresh);
-      qc.invalidateQueries({ queryKey: ["application", appId] });
-      qc.invalidateQueries({ queryKey: ["application-checks", appId] });
-      qc.invalidateQueries({ queryKey: ["applications"] });
+      if (appId) {
+        qc.invalidateQueries({ queryKey: ["application", appId] });
+        qc.invalidateQueries({ queryKey: ["application-checks", appId] });
+        qc.invalidateQueries({ queryKey: ["applications"] });
+      } else qc.invalidateQueries({ queryKey: ["shared-documents"] });
       qc.invalidateQueries({ queryKey: ["revisions", doc.id] });
     },
     onError: (err) => {
@@ -198,7 +241,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
     }
   };
   const activeBlock = blocks.find((b) => b.key === activeKey) ?? null;
-  const pickBlock = blocks.find((b) => b.key === pickFor) ?? null;
+  const pickBlock = blocks.find((b) => b.key === pickFor?.key) ?? null;
   const docs = app.data?.documents ?? [];
   const idx = docs.findIndex((d) => d.id === doc.id);
   const saveError = save.error && !(save.error instanceof ApiError && save.error.status === 409 && conflict) ? save.error : null;
@@ -206,7 +249,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
   return (
     <div>
       <PageHeader
-        back={{ to: `/applications/${appId}`, label: app.data?.title ?? "지원" }}
+        back={appId ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" } : { to: "/documents", label: "공용 문서" }}
         title={
           <>
             {doc.question_index !== null ? `${doc.question_index + 1}. ` : ""}
@@ -216,6 +259,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
         subtitle={
           <span className="flex flex-wrap items-center gap-1.5">
             <span>{DOC_KIND[doc.kind] ?? doc.kind}</span>
+            {appId === null ? <Badge tone="neutral">공용</Badge> : null}
             <span>· {base ? `r${base}` : "저장 전"}</span>
             {dirty ? <Badge tone="warn">저장 안 함</Badge> : base ? <Badge tone="ok">저장됨</Badge> : null}
             {!editable ? (
@@ -226,20 +270,25 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
           </span>
         }
         actions={
-          editable ? (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => save.mutate({ baseRevision: base })}
-              disabled={!dirty || !!conflict || save.isPending}
-            >
-              <Save size={14} /> {save.isPending ? "저장하는 중" : "저장"}
+          <>
+            <Button size="sm" onClick={() => setExporting(true)} disabled={!doc.current_revision}>
+              <Download size={14} /> 내보내기
             </Button>
-          ) : null
+            {editable ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => save.mutate({ baseRevision: base })}
+                disabled={!dirty || !!conflict || save.isPending}
+              >
+                <Save size={14} /> {save.isPending ? "저장하는 중" : "저장"}
+              </Button>
+            ) : null}
+          </>
         }
       />
 
-      {docs.length > 1 ? (
+      {appId && docs.length > 1 ? (
         <nav className="mb-4 flex flex-wrap gap-1 text-[13px]" aria-label="같은 지원의 문서">
           {docs.map((d, i) => (
             <Link
@@ -255,6 +304,22 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
             </Link>
           ))}
         </nav>
+      ) : null}
+
+      {doc.source ? (
+        <p className="mb-4 flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px] text-muted">
+          <Copy size={14} />
+          <span>
+            공용 문서{" "}
+            <Link to="/documents/$documentId" params={{ documentId: doc.source.document_id }} className="text-accent hover:underline">
+              {doc.source.title ?? "(지운 문서)"}
+            </Link>{" "}
+            r{doc.source.revision_no ?? "?"}에서 복사했습니다.
+          </span>
+          {doc.source.current_revision && doc.source.revision_no && doc.source.current_revision > doc.source.revision_no ? (
+            <span>원본은 그 뒤 r{doc.source.current_revision}까지 바뀌었습니다. 이 문서에는 자동으로 들어오지 않습니다.</span>
+          ) : null}
+        </p>
       ) : null}
 
       {!editable ? (
@@ -311,12 +376,12 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
               })}
               activeKey={activeKey}
               onActive={setActiveKey}
-              onPickEvidence={setPickFor}
+              onPickEvidence={(key, range) => setPickFor({ key, range })}
               focusRequest={focus}
             />
           </div>
           <p className="text-xs text-muted">
-            Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장. 근거는 확인한 주장만 셉니다.
+            Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장. 문장을 고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 주장만 셉니다.
           </p>
           <ErrorText error={saveError} />
         </div>
@@ -349,7 +414,7 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
                 const fresh = await qc.fetchQuery({ queryKey: ["document", doc.id], queryFn: () => api.document(appId, doc.id) });
                 reset(fresh);
                 qc.invalidateQueries({ queryKey: ["revisions", doc.id] });
-                qc.invalidateQueries({ queryKey: ["application", appId] });
+                if (appId) qc.invalidateQueries({ queryKey: ["application", appId] });
               }}
             />
           ) : null}
@@ -360,15 +425,38 @@ function DocumentEditor({ appId, initial }: { appId: string; initial: AppDocumen
       <ClaimPicker
         open={!!pickFor}
         onClose={() => setPickFor(null)}
-        selected={pickBlock?.claim_ids ?? []}
-        title={pickBlock ? `문단 ${blocks.indexOf(pickBlock) + 1} 근거 연결` : "근거 연결"}
+        selected={
+          pickFor?.range
+            ? (pickBlock?.spans?.find((sp) => sp.quote === pickFor.range!.quote)?.claim_ids ?? [])
+            : (pickBlock?.claim_ids ?? [])
+        }
+        title={
+          pickBlock
+            ? pickFor?.range
+              ? `문단 ${blocks.indexOf(pickBlock) + 1}의 고른 문장 근거: “${pickFor.range.quote.slice(0, 30)}${pickFor.range.quote.length > 30 ? "…" : ""}”`
+              : `문단 ${blocks.indexOf(pickBlock) + 1} 근거 연결`
+            : "근거 연결"
+        }
         onPick={(c) => {
           if (!pickFor) return;
+          const range = pickFor.range;
           setBlocks((bs) =>
-            bs.map((b) => (b.key === pickFor && !b.claim_ids.includes(c.id) ? { ...b, claim_ids: [...b.claim_ids, c.id] } : b)),
+            bs.map((b) => {
+              if (b.key !== pickFor.key) return b;
+              if (!range) return b.claim_ids.includes(c.id) ? b : { ...b, claim_ids: [...b.claim_ids, c.id] };
+              // 같은 문장에 이미 붙인 근거가 있으면 주장만 더한다
+              const spans = [...(b.spans ?? [])];
+              const at = spans.findIndex((sp) => sp.quote === range.quote && sp.at === range.start);
+              if (at >= 0) {
+                const sp = spans[at]!;
+                if (!sp.claim_ids.includes(c.id)) spans[at] = { ...sp, claim_ids: [...sp.claim_ids, c.id] };
+              } else spans.push({ quote: range.quote, at: range.start, claim_ids: [c.id] });
+              return { ...b, spans };
+            }),
           );
         }}
       />
+      <ExportSheet appId={appId} doc={doc} dirty={dirty} open={exporting} onClose={() => setExporting(false)} />
       <SettingsSheet appId={appId} doc={doc} open={settings} onClose={() => setSettings(false)} />
       <CompareSheet
         open={compare}
@@ -420,7 +508,7 @@ function CountBar({ counts, counting, onSettings }: { counts: TextCounts; counti
   );
 }
 
-function SettingsSheet({ appId, doc, open, onClose }: { appId: string; doc: AppDocument; open: boolean; onClose: () => void }) {
+function SettingsSheet({ appId, doc, open, onClose }: { appId: string | null; doc: AppDocument; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     title: doc.title,
@@ -442,7 +530,8 @@ function SettingsSheet({ appId, doc, open, onClose }: { appId: string; doc: AppD
       }),
     onSuccess: (d) => {
       qc.setQueryData(["document", doc.id], d);
-      qc.invalidateQueries({ queryKey: ["application", appId] });
+      if (appId) qc.invalidateQueries({ queryKey: ["application", appId] });
+      else qc.invalidateQueries({ queryKey: ["shared-documents"] });
       qc.invalidateQueries({ queryKey: ["validate", doc.id] });
       onClose();
     },
@@ -535,7 +624,7 @@ function HistoryPanel({
   current,
   onOpen,
 }: {
-  appId: string;
+  appId: string | null;
   docId: string;
   current: number;
   onOpen: (n: number) => void;
@@ -569,7 +658,7 @@ function HistoryPanel({
   );
 }
 
-function RevisionSheet({ appId, docId, revision, onClose }: { appId: string; docId: string; revision: number | null; onClose: () => void }) {
+function RevisionSheet({ appId, docId, revision, onClose }: { appId: string | null; docId: string; revision: number | null; onClose: () => void }) {
   const q = useQuery({
     queryKey: ["document", docId, "rev", revision],
     queryFn: () => api.document(appId, docId, revision!),
@@ -596,5 +685,141 @@ function RevisionSheet({ appId, docId, revision, onClose }: { appId: string; doc
         )}
       </Loaded>
     </Sheet>
+  );
+}
+
+// ---------------------------------------------------------------- 내보내기
+
+const FORMATS: ExportFormat[] = ["md", "docx", "html"];
+
+/** 받은 파일을 저장한다 */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * PDF: 서버가 만든 인쇄용 HTML(스크립트 없음)을 새 창에 열고 인쇄 대화상자를 띄운다.
+ * 한글 글꼴을 서버에 싣지 않으려고 브라우저의 "PDF로 저장"을 쓴다. 창을 못 열면 HTML 파일로 받는다.
+ */
+function printHtml(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(new Blob([blob], { type: "text/html;charset=utf-8" }));
+  const w = window.open(url, "_blank");
+  if (!w) {
+    URL.revokeObjectURL(url);
+    saveBlob(blob, filename);
+    return;
+  }
+  w.addEventListener("load", () => {
+    w.focus();
+    w.print();
+  });
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** 내보내기 전에 서버가 만든 파일을 다시 읽어 검사한 결과(숨김 글·조작 문구·민감 정보)를 보이고, 확인한 뒤 받는다. */
+function ExportSheet({
+  appId,
+  doc,
+  dirty,
+  open,
+  onClose,
+}: {
+  appId: string | null;
+  doc: AppDocument;
+  dirty: boolean;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const [format, setFormat] = useState<ExportFormat>("docx");
+  const [confirmed, setConfirmed] = useState(false);
+  const check = useQuery({
+    queryKey: ["export-check", doc.id, doc.current_revision, format],
+    queryFn: () => api.exportCheck(appId, doc.id, format),
+    enabled: open && doc.current_revision > 0,
+    staleTime: Infinity,
+  });
+  useEffect(() => setConfirmed(false), [format, open, check.data]);
+  const download = useMutation({
+    mutationFn: () => api.exportFile(appId, doc.id, format, check.data?.revision),
+    onSuccess: (f) => {
+      if (format === "html") printHtml(f.blob, f.filename);
+      else saveBlob(f.blob, f.filename);
+    },
+  });
+  const warnings = check.data?.findings.length ?? 0;
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="내보내기"
+      description="저장한 최신 revision 을 파일로 만듭니다. 만든 파일을 다시 읽어 숨김 글·조작 문구·민감 정보를 검사합니다. 경고만 하고 지우지 않습니다."
+    >
+      <div className="space-y-3">
+        <div>
+          <Label htmlFor="ex-format">형식</Label>
+          <Select id="ex-format" value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+            {FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {EXPORT_FORMAT[f]}
+              </option>
+            ))}
+          </Select>
+          {format === "html" ? (
+            <p className="mt-1 text-xs text-muted">인쇄 화면을 새 창에 엽니다. 인쇄 대화상자에서 "PDF로 저장"을 고르세요.</p>
+          ) : null}
+        </div>
+        {dirty ? <p className="text-xs text-warn">저장하지 않은 편집은 들어가지 않습니다.</p> : null}
+        <Loaded query={check}>{(c) => <ExportFindings check={c} />}</Loaded>
+        {warnings ? (
+          <label className="flex items-start gap-2 text-[13px]">
+            <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+            <span>경고 {warnings}개를 확인했고 이대로 내보냅니다.</span>
+          </label>
+        ) : null}
+        <ErrorText error={download.error} />
+        <Button
+          variant="primary"
+          onClick={() => download.mutate()}
+          disabled={!check.data || download.isPending || (warnings > 0 && !confirmed)}
+        >
+          <Download size={14} /> {format === "html" ? "인쇄 화면 열기" : "파일 받기"}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+function ExportFindings({ check }: { check: ExportCheck }) {
+  if (!check.findings.length)
+    return (
+      <p className="rounded-md border border-line bg-surface px-3 py-2 text-[13px]">
+        r{check.revision} · {check.filename} · {int(check.bytes)} byte · 경고 없음
+      </p>
+    );
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[13px]">
+        r{check.revision} · {check.filename} · 경고 {check.findings.length}개
+      </p>
+      <ul className="space-y-1.5">
+        {check.findings.map((f, i) => {
+          const info = FINDING[f.code];
+          const tone = info ? FINDING_GROUP[info.group].tone : "neutral";
+          return (
+            <li key={`${f.code}-${i}`} className="rounded-md border border-line bg-surface px-2.5 py-2 text-[13px]">
+              <Badge tone={tone}>{info?.label ?? f.code}</Badge>
+              <p className="mt-1 leading-5">{f.message}</p>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

@@ -1,9 +1,13 @@
 import type {
   Application,
   ApplicationChecks,
+  ApplicationStage,
   DocumentKind,
   DocumentSummary,
   RequirementVisibility,
+  SensitiveUnacknowledgedDetail,
+  StageKind,
+  StageOutcome,
   Submission,
   TextCounts,
 } from "@career-brain/client";
@@ -22,13 +26,23 @@ import {
 } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
-import { ChevronRight, FileText, Lock, Plus } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, Copy, FileText, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime, formatDeadline, int } from "../lib/format";
-import { APP_STATUS, DOC_KIND, FINDING, FINDING_GROUP, FIELD_LABEL, REQ_FIELD, VISIBILITY } from "../lib/labels";
+import {
+  APP_STATUS,
+  DOC_KIND,
+  FINDING,
+  FINDING_GROUP,
+  FIELD_LABEL,
+  REQ_FIELD,
+  STAGE_KIND,
+  STAGE_OUTCOME,
+  VISIBILITY,
+} from "../lib/labels";
 
 const route = getRouteApi("/applications/$applicationId");
 
@@ -193,6 +207,11 @@ function DocumentRow({ appId, d, summary }: { appId: string; d: DocumentSummary;
             <span>{DOC_KIND[d.kind] ?? d.kind}</span>
             <span>· {countLine(d.counts)}</span>
             {d.current_revision ? <span>· r{d.current_revision}</span> : null}
+            {d.source ? (
+              <span className="inline-flex items-center gap-0.5">
+                · <Copy size={11} /> 공용 문서 r{d.source.revision_no ?? "?"}에서 복사
+              </span>
+            ) : null}
           </div>
           <div className="mt-1 flex flex-wrap gap-1">
             {unwritten ? <Badge tone="warn">안 씀</Badge> : null}
@@ -240,7 +259,22 @@ const KINDS: DocumentKind[] = ["resume", "cover_letter", "portfolio", "question"
 
 function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
+  const [mode, setMode] = useState<"new" | "copy">("new");
   const [form, setForm] = useState({ kind: "resume" as DocumentKind, title: "", prompt: "", limit: "" });
+  const shared = useQuery({
+    queryKey: ["shared-documents"],
+    queryFn: api.sharedDocuments,
+    enabled: open && mode === "copy",
+  });
+  const copy = useMutation({
+    mutationFn: (sourceId: string) => api.copyDocument(appId, { source_document_id: sourceId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["application", appId] });
+      qc.invalidateQueries({ queryKey: ["applications"] });
+      qc.invalidateQueries({ queryKey: ["shared-documents"] });
+      onClose();
+    },
+  });
   const add = useMutation({
     mutationFn: () =>
       api.addDocument(appId, {
@@ -258,6 +292,67 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
   });
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="문서 추가">
+      <div className="mb-3 inline-flex rounded-lg border border-line bg-surface p-0.5" role="radiogroup">
+        {(
+          [
+            ["new", "새로 쓰기"],
+            ["copy", "공용 문서에서 복사"],
+          ] as const
+        ).map(([v, label]) => (
+          <button
+            key={v}
+            role="radio"
+            aria-checked={mode === v}
+            onClick={() => setMode(v)}
+            className={
+              mode === v
+                ? "rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-fg"
+                : "rounded-md px-3 py-1.5 text-[13px] text-muted hover:text-fg"
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === "copy" ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted">
+            공용 문서의 최신 revision 을 이 지원의 새 문서로 복사합니다. 근거 연결도 같이 옮기고, 출처(문서·revision)를 남깁니다.
+            복사한 뒤 원본을 고쳐도 이 문서는 바뀌지 않습니다.
+          </p>
+          <Loaded query={shared}>
+            {(docs) =>
+              docs.filter((d) => d.current_revision > 0).length ? (
+                <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                  {docs
+                    .filter((d) => d.current_revision > 0)
+                    .map((d) => (
+                      <li key={d.id} className="flex items-center gap-2 px-3 py-2">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium">{d.title}</span>
+                          <span className="text-xs text-muted">
+                            {DOC_KIND[d.kind]} · r{d.current_revision} · {countLine(d.counts)}
+                          </span>
+                        </span>
+                        <Button size="sm" onClick={() => copy.mutate(d.id)} disabled={copy.isPending}>
+                          <Copy size={14} /> 복사
+                        </Button>
+                      </li>
+                    ))}
+                </ul>
+              ) : (
+                <EmptyState>
+                  저장한 공용 문서가 없습니다.{" "}
+                  <Link to="/documents" className="text-accent hover:underline">
+                    공용 문서 만들기
+                  </Link>
+                </EmptyState>
+              )
+            }
+          </Loaded>
+          <ErrorText error={copy.error} />
+        </div>
+      ) : (
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -312,6 +407,7 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
           추가
         </Button>
       </form>
+      )}
     </Sheet>
   );
 }
@@ -330,20 +426,43 @@ function SubmitDialog({
   onDone: () => void;
 }) {
   const [note, setNote] = useState("");
+  const [ack, setAck] = useState(false);
+  // 제출 직전 재검사: 주민등록번호·본인 것이 아닌 연락처·대외비 표시. 지우지 않고, 확인을 받는다.
+  const sensitive = useQuery({
+    queryKey: ["sensitive-check", app.id, app.documents.map((d) => `${d.id}:${d.current_revision}`).join(",")],
+    queryFn: () => api.sensitiveCheck(app.id),
+    enabled: open,
+    staleTime: 0,
+  });
+  useEffect(() => setAck(false), [open, sensitive.data?.sensitive_hash]);
+  const hash = sensitive.data?.sensitive_hash ?? null;
   const submit = useMutation({
     mutationFn: () =>
       api.submitApplication(
         app.id,
         Object.fromEntries(app.documents.map((d) => [d.id, d.current_revision])),
         note.trim() || null,
+        ack ? hash : null,
       ),
     onSuccess: () => {
       onClose();
       onDone();
     },
+    onError: (err) => {
+      // 확인한 뒤 글이 바뀌어 경고가 달라졌으면 새 경고를 다시 보여 준다
+      if (err instanceof ApiError && (err.detail as SensitiveUnacknowledgedDetail | null)?.code === "sensitive_unacknowledged")
+        void sensitive.refetch();
+    },
   });
+  const sensitiveError =
+    submit.error instanceof ApiError &&
+    (submit.error.detail as SensitiveUnacknowledgedDetail | null)?.code === "sensitive_unacknowledged";
   const stale =
-    submit.error instanceof ApiError && submit.error.status === 409 && typeof submit.error.detail === "object";
+    !sensitiveError &&
+    submit.error instanceof ApiError &&
+    submit.error.status === 409 &&
+    typeof submit.error.detail === "object";
+  const needsAck = !!sensitive.data?.requires_ack;
   const byDoc = new Map(checks?.documents.map((d) => [d.document_id, d]) ?? []);
   const filled = app.documents.filter((d) => d.current_revision > 0);
   const empty = app.documents.filter((d) => d.current_revision === 0);
@@ -360,7 +479,7 @@ function SubmitDialog({
       description="지금 저장된 글을 그대로 고정합니다. 고정한 뒤에는 이 지원의 문서를 고칠 수 없고, 이후 경력·공고를 고쳐도 제출본은 바뀌지 않습니다."
       confirmLabel={submit.isPending ? "고정하는 중" : "확인한 내용으로 고정"}
       busy={submit.isPending}
-      confirmDisabled={!filled.length}
+      confirmDisabled={!filled.length || sensitive.isPending || sensitive.isError || (needsAck && !ack)}
       onConfirm={() => submit.mutate()}
     >
       <ul className="space-y-2">
@@ -384,6 +503,29 @@ function SubmitDialog({
         </p>
       ) : null}
       {!filled.length ? <p className="mt-2 text-xs text-danger">저장한 글이 없어 고정할 수 없습니다.</p> : null}
+      <ErrorText error={sensitive.error} className="mt-2" />
+      {needsAck && sensitive.data ? (
+        <div className="mt-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2.5 text-[13px]">
+          <p className="flex items-center gap-1.5 font-semibold text-danger">
+            <ShieldAlert size={15} /> 민감 정보 경고 {sensitive.data.findings.length}개
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {sensitive.data.findings.map((f, i) => (
+              <li key={`${f.document_id}-${f.code}-${i}`} className="text-fg">
+                <Badge tone="danger">{FINDING[f.code]?.label ?? f.code}</Badge> <span className="text-xs text-muted">{f.title}</span>
+                <span className="block text-xs">{f.message}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs text-muted">
+            아무것도 자동으로 지우지 않습니다. 고치려면 창을 닫고 문서를 고친 뒤 저장하세요. 본인 연락처는 설정에 적어 두면 경고하지 않습니다.
+          </p>
+          <label className="mt-2 flex items-start gap-2">
+            <input type="checkbox" className="mt-1" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+            <span>위 내용을 확인했고 이대로 제출본에 넣습니다.</span>
+          </label>
+        </div>
+      ) : null}
       <div className="mt-3">
         <Label htmlFor="submit-note">메모 (선택)</Label>
         <Input id="submit-note" value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="예: 채용 사이트에 붙여넣어 제출함" />
@@ -451,7 +593,205 @@ function FrozenView({ app }: { app: Application }) {
   });
   if (!app.submission_id)
     return <EmptyState>제출본 없이 끝난 지원입니다 (제출 전 철회).</EmptyState>;
-  return <Loaded query={q}>{(sub) => <SubmissionBody sub={sub} />}</Loaded>;
+  return (
+    <div className="space-y-8">
+      <StagesSection app={app} />
+      <Loaded query={q}>{(sub) => <SubmissionBody sub={sub} />}</Loaded>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- 전형 단계 (제출본에 묶인 일정·결과)
+
+const STAGE_KINDS: StageKind[] = ["document", "test", "assignment", "interview", "final", "other"];
+const STAGE_OUTCOMES: StageOutcome[] = ["pending", "passed", "failed", "withdrawn", "cancelled"];
+
+/** datetime-local 값 ↔ ISO */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+const fromLocalInput = (v: string) => (v ? new Date(v).toISOString() : null);
+
+/**
+ * 제출 뒤 전형 단계와 결과를 기록한다. 결과만 적고, 왜 떨어졌는지 같은 원인은 시스템이 판단하지 않는다.
+ * 지원 상태(통과·불합격)는 단계 결과로 자동으로 바꾸지 않는다.
+ */
+function StagesSection({ app }: { app: Application }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["stages", app.id], queryFn: () => api.stages(app.id) });
+  const [editing, setEditing] = useState<ApplicationStage | "new" | null>(null);
+  return (
+    <Section
+      title="전형 단계"
+      action={
+        <Button size="sm" variant="ghost" onClick={() => setEditing("new")}>
+          <Plus size={14} /> 단계 추가
+        </Button>
+      }
+    >
+      <Loaded query={q}>
+        {(stages) =>
+          stages.length ? (
+            <ol className="relative ml-2 space-y-3 border-l border-line pl-4">
+              {stages.map((st) => {
+                const o = STAGE_OUTCOME[st.outcome];
+                return (
+                  <li key={st.id} className="relative">
+                    <span
+                      className={
+                        st.outcome === "pending"
+                          ? "absolute top-1.5 -left-[21px] h-2.5 w-2.5 rounded-full border-2 border-accent bg-surface"
+                          : "absolute top-1.5 -left-[21px] h-2.5 w-2.5 rounded-full bg-muted"
+                      }
+                    />
+                    <button className="w-full text-left" onClick={() => setEditing(st)}>
+                      <span className="flex flex-wrap items-center gap-1.5 text-[13px]">
+                        <span className="font-medium">{st.name}</span>
+                        <Badge tone={o.tone}>{o.label}</Badge>
+                        {st.scheduled_at ? <span className="text-xs text-muted">{formatDateTime(st.scheduled_at)}</span> : null}
+                      </span>
+                      {st.note ? <span className="block text-xs text-muted">{st.note}</span> : null}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <EmptyState>기록한 단계가 없습니다. 서류 결과·면접 일정 같은 것을 적어 둡니다.</EmptyState>
+          )
+        }
+      </Loaded>
+      <p className="mt-2 text-xs text-muted">결과만 기록합니다. 원인은 판단하지 않고, 지원 상태도 자동으로 바꾸지 않습니다.</p>
+      <StageSheet
+        appId={app.id}
+        stage={editing}
+        onClose={() => setEditing(null)}
+        onSaved={() => qc.invalidateQueries({ queryKey: ["stages", app.id] })}
+      />
+    </Section>
+  );
+}
+
+function StageSheet({
+  appId,
+  stage,
+  onClose,
+  onSaved,
+}: {
+  appId: string;
+  stage: ApplicationStage | "new" | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const existing = stage && stage !== "new" ? stage : null;
+  const [form, setForm] = useState({
+    kind: "document" as StageKind,
+    name: "",
+    scheduled: "",
+    outcome: "pending" as StageOutcome,
+    note: "",
+  });
+  useEffect(() => {
+    if (!stage) return;
+    setForm(
+      existing
+        ? {
+            kind: existing.kind,
+            name: existing.name,
+            scheduled: toLocalInput(existing.scheduled_at),
+            outcome: existing.outcome,
+            note: existing.note ?? "",
+          }
+        : { kind: "document", name: "", scheduled: "", outcome: "pending", note: "" },
+    );
+  }, [stage, existing]);
+  const done = () => {
+    onSaved();
+    onClose();
+  };
+  const save = useMutation({
+    mutationFn: () => {
+      const body = {
+        kind: form.kind,
+        name: form.name.trim() || null,
+        scheduled_at: fromLocalInput(form.scheduled),
+        outcome: form.outcome,
+        note: form.note.trim() || null,
+      };
+      return existing ? api.patchStage(appId, existing.id, body) : api.addStage(appId, body);
+    },
+    onSuccess: done,
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteStage(appId, existing!.id),
+    onSuccess: done,
+  });
+  return (
+    <Sheet open={!!stage} onOpenChange={(o) => !o && onClose()} title={existing ? "전형 단계" : "전형 단계 추가"}>
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label htmlFor="stg-kind">종류</Label>
+            <Select id="stg-kind" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as StageKind })}>
+              {STAGE_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {STAGE_KIND[k]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="stg-outcome">결과</Label>
+            <Select id="stg-outcome" value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value as StageOutcome })}>
+              {STAGE_OUTCOMES.map((o) => (
+                <option key={o} value={o}>
+                  {STAGE_OUTCOME[o].label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="stg-name">이름 (선택)</Label>
+          <Input
+            id="stg-name"
+            value={form.name}
+            maxLength={200}
+            placeholder={STAGE_KIND[form.kind]}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </div>
+        <div>
+          <Label htmlFor="stg-at">일정 (선택)</Label>
+          <Input id="stg-at" type="datetime-local" value={form.scheduled} onChange={(e) => setForm({ ...form, scheduled: e.target.value })} />
+        </div>
+        <div>
+          <Label htmlFor="stg-note">메모 (선택)</Label>
+          <Textarea id="stg-note" value={form.note} maxLength={2000} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+        </div>
+        <ErrorText error={save.error ?? remove.error} />
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={save.isPending}>
+            저장
+          </Button>
+          {existing ? (
+            <Button variant="danger" onClick={() => remove.mutate()} disabled={remove.isPending}>
+              <Trash2 size={14} /> 지우기
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </Sheet>
+  );
 }
 
 function SubmissionBody({ sub }: { sub: Submission }) {

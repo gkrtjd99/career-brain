@@ -4,7 +4,7 @@ import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { FINDING, FINDING_GROUP, type FindingGroup } from "../../lib/labels";
 import { VisibilityTable } from "../../pages/Application";
 
-const ORDER: FindingGroup[] = ["limit", "risk", "manipulation", "evidence", "info"];
+const ORDER: FindingGroup[] = ["limit", "risk", "manipulation", "sensitive", "evidence", "info"];
 
 function detailText(f: Finding): string | null {
   const d = f.detail ?? {};

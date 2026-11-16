@@ -1,12 +1,12 @@
-import { Badge, Button, Card, Input, Label, Section } from "@career-brain/ui";
+import type { DocumentSettings } from "@career-brain/client";
+import { Badge, Button, Card, Input, Label, Section, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@career-brain/client";
 import { ErrorText, PageHeader } from "../components/common";
 import { api, setToken, useToken } from "../lib/api";
 import { useTheme, type ThemePref } from "../lib/theme";
-
 
 const route = getRouteApi("/settings");
 const BASE = import.meta.env.VITE_API_BASE ?? "/api";
@@ -114,6 +114,8 @@ export function SettingsPage() {
           </Card>
         </Section>
 
+        {me.isSuccess ? <DocumentSettingsSection /> : null}
+
         <Section title="테마">
           <div className="inline-flex rounded-lg border border-line bg-surface p-0.5" role="radiogroup">
             {(
@@ -141,5 +143,97 @@ export function SettingsPage() {
         </Section>
       </div>
     </div>
+  );
+}
+
+const lines = (v: string) =>
+  v
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+/** 문서 검사 설정: 상투어 목록(공간 설정)과 본인 연락처(제출 전 민감 정보 검사에서 빼는 값) */
+function DocumentSettingsSection() {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["document-settings"], queryFn: api.documentSettings });
+  const [cliches, setCliches] = useState("");
+  const [emails, setEmails] = useState("");
+  const [phones, setPhones] = useState("");
+  const fill = (d: DocumentSettings) => {
+    setCliches(d.cliches.join("\n"));
+    setEmails(d.own_contacts.emails.join("\n"));
+    setPhones(d.own_contacts.phones.join("\n"));
+  };
+  useEffect(() => {
+    if (q.data) fill(q.data);
+  }, [q.data]);
+  const done = (d: DocumentSettings) => {
+    qc.setQueryData(["document-settings"], d);
+    // 검사 결과가 상투어 목록에 따라 바뀐다
+    qc.invalidateQueries({ queryKey: ["validate"] });
+    qc.invalidateQueries({ queryKey: ["sensitive-check"] });
+  };
+  const saveCliches = useMutation({
+    mutationFn: (value: string[] | null) => api.saveDocumentSettings({ cliches: value }),
+    onSuccess: done,
+  });
+  const saveContacts = useMutation({
+    mutationFn: () => api.saveDocumentSettings({ own_contacts: { emails: lines(emails), phones: lines(phones) } }),
+    onSuccess: done,
+  });
+  const d = q.data;
+  return (
+    <Section title="문서 검사">
+      <Card className="space-y-4 p-4">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Label htmlFor="cliches">상투어 목록 (한 줄에 하나)</Label>
+            {d ? <Badge tone={d.customized ? "accent" : "neutral"}>{d.customized ? "직접 고친 목록" : "기본 목록"}</Badge> : null}
+          </div>
+          <Textarea
+            id="cliches"
+            value={cliches}
+            className="min-h-40 font-mono text-[13px]"
+            onChange={(e) => setCliches(e.target.value)}
+            disabled={!d}
+          />
+          <p className="text-xs text-muted">
+            문서 검사에서 "참고"로만 알려 줍니다. 300개, 한 줄 40자까지. 검사 요청에 따로 넣는 상투어는 이 목록에 더해집니다.
+          </p>
+          <ErrorText error={saveCliches.error} />
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" size="sm" disabled={!d || saveCliches.isPending} onClick={() => saveCliches.mutate(lines(cliches))}>
+              상투어 저장
+            </Button>
+            {d?.customized ? (
+              <Button size="sm" disabled={saveCliches.isPending} onClick={() => saveCliches.mutate(null)}>
+                기본 목록으로 되돌리기
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <div className="space-y-2 border-t border-line pt-4">
+          <p className="text-[13px] font-medium">본인 연락처</p>
+          <p className="text-xs text-muted">
+            제출 전 재검사는 주민등록번호, 본인 것이 아닌 전화번호·이메일, 대외비 표시를 경고합니다. 여기 적은 내 연락처는 경고하지 않습니다.
+            이 값은 이 작업 공간의 데이터베이스에만 저장합니다.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="own-emails">이메일 (한 줄에 하나)</Label>
+              <Textarea id="own-emails" value={emails} className="min-h-20" onChange={(e) => setEmails(e.target.value)} disabled={!d} />
+            </div>
+            <div>
+              <Label htmlFor="own-phones">전화번호 (한 줄에 하나)</Label>
+              <Textarea id="own-phones" value={phones} className="min-h-20" onChange={(e) => setPhones(e.target.value)} disabled={!d} />
+            </div>
+          </div>
+          <ErrorText error={saveContacts.error} />
+          <Button variant="primary" size="sm" disabled={!d || saveContacts.isPending} onClick={() => saveContacts.mutate()}>
+            연락처 저장
+          </Button>
+        </div>
+      </Card>
+    </Section>
   );
 }

@@ -529,6 +529,17 @@ export interface DocumentSummary {
   byte_limit: number | null;
   current_revision: number;
   counts: TextCounts | null;
+  /** 공용 문서에서 복사한 문서면 출처 (c0012) */
+  source?: DocumentSource | null;
+}
+
+/** 복사 출처: 원본 공용 문서와 복사한 revision. 원본이 그 뒤에 바뀌어도 그대로다. */
+export interface DocumentSource {
+  document_id: Uuid;
+  revision_id: Uuid;
+  revision_no?: number | null;
+  title?: string | null;
+  current_revision?: number | null;
 }
 
 export interface Application {
@@ -550,11 +561,20 @@ export interface DocBlock {
   text: string;
   origin: "user" | "ai" | string;
   claim_ids: string[];
+  /** 문장 단위 근거 (문단 안 글자 위치). 없으면 문단 단위 근거만 있다. */
+  spans?: DocSpan[];
+}
+
+export interface DocSpan {
+  start: number;
+  end: number;
+  claim_ids: string[];
 }
 
 export interface AppDocument {
   id: Uuid;
-  application_id: Uuid;
+  /** 공용 문서면 null */
+  application_id: Uuid | null;
   kind: DocumentKind;
   title: string;
   question_index: number | null;
@@ -570,6 +590,7 @@ export interface AppDocument {
   counts: TextCounts;
   ai_ratio: number;
   editable: boolean;
+  source?: DocumentSource | null;
 }
 
 export interface DocumentIn {
@@ -599,12 +620,23 @@ export interface RevisionSummary {
   created_at: IsoDateTime;
 }
 
+export interface SpanIn {
+  start: number;
+  end: number;
+  claim_ids: Uuid[];
+}
+
 export type DocOperation =
-  | { op: "replace"; block_id: string; text: string; claim_ids?: Uuid[] }
-  | { op: "insert"; text: string; index?: number; claim_ids?: Uuid[] }
+  | { op: "replace"; block_id: string; text: string; claim_ids?: Uuid[]; spans?: SpanIn[] }
+  | { op: "insert"; text: string; index?: number; claim_ids?: Uuid[]; spans?: SpanIn[] }
   | { op: "delete"; block_id: string }
   | { op: "link"; block_id: string; claim_ids: Uuid[] }
-  | { op: "set_blocks"; blocks: { id?: string | null; text: string; claim_ids?: Uuid[] }[] };
+  /** 문단의 문장 단위 근거를 통째로 바꾼다 (빈 목록이면 지운다) */
+  | { op: "link_spans"; block_id: string; spans: SpanIn[] }
+  | {
+      op: "set_blocks";
+      blocks: { id?: string | null; text: string; claim_ids?: Uuid[]; spans?: SpanIn[] | null }[];
+    };
 
 export interface RevisionIn {
   base_revision: number;
@@ -695,6 +727,8 @@ export interface SuggestOut {
   questions: string[];
   dropped: number;
   model_call_id: Uuid | null;
+  /** 같은 idempotency_key로 다시 요청해 모델을 부르지 않고 저장된 수정안을 돌려줬다 */
+  replayed?: boolean;
 }
 
 export interface SubmissionDocument {
@@ -734,11 +768,135 @@ export interface Submission {
   checks: {
     documents?: Record<string, { summary: Record<string, number>; findings: Finding[] }>;
     requirements?: RequirementVisibility[];
+    sensitive?: { hash: string | null; acknowledged: boolean; findings: SensitiveFinding[] };
   };
   content_hash: string;
   note: string | null;
   submitted_by: Uuid;
   submitted_at: IsoDateTime;
+}
+
+// ---------------------------------------------------------------- 공용 문서·설정·내보내기·전형 단계 (c0012)
+
+export type SharedDocumentKind = Exclude<DocumentKind, "question">;
+
+export interface SharedDocumentSummary {
+  id: Uuid;
+  kind: SharedDocumentKind;
+  title: string;
+  char_limit: number | null;
+  byte_limit: number | null;
+  current_revision: number;
+  counts: TextCounts | null;
+  /** 이 문서를 복사해 간 지원 문서 수 */
+  copies: number;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
+}
+
+export interface SharedDocumentIn {
+  kind: SharedDocumentKind;
+  title: string;
+  char_limit?: number | null;
+  byte_limit?: number | null;
+  count_rule?: Partial<CountRule> | null;
+}
+
+export interface OwnContacts {
+  emails: string[];
+  phones: string[];
+}
+
+export interface DocumentSettings {
+  cliches: string[];
+  /** false면 기본 목록을 쓰는 중 */
+  customized: boolean;
+  default_cliches: string[];
+  own_contacts: OwnContacts;
+  updated_at: IsoDateTime | null;
+}
+
+/** 준 칸만 바꾼다. cliches: null 이면 기본 목록으로 되돌린다. */
+export interface DocumentSettingsIn {
+  cliches?: string[] | null;
+  own_contacts?: OwnContacts | null;
+}
+
+/** md·docx 는 파일, html 은 브라우저에서 PDF로 인쇄할 화면 */
+export type ExportFormat = "md" | "docx" | "html";
+
+export interface ExportCheck {
+  filename: string;
+  media_type: string;
+  format: ExportFormat;
+  revision: number;
+  bytes: number;
+  findings: Finding[];
+  summary: Record<string, number>;
+}
+
+export interface ExportFile {
+  filename: string;
+  blob: Blob;
+  /** 서버가 만든 파일을 다시 읽어 찾은 경고 수 */
+  findings: number;
+  codes: string[];
+}
+
+export interface SensitiveFinding extends Finding {
+  document_id: Uuid;
+  title: string;
+}
+
+export interface SensitiveCheck {
+  application_id: Uuid;
+  /** 경고가 없으면 null. 있으면 제출할 때 sensitive_ack 로 이 값을 보낸다. */
+  sensitive_hash: string | null;
+  requires_ack: boolean;
+  findings: SensitiveFinding[];
+  summary: Record<string, number>;
+}
+
+/** 409 `sensitive_unacknowledged` 의 detail */
+export interface SensitiveUnacknowledgedDetail {
+  code: "sensitive_unacknowledged";
+  sensitive_hash: string;
+  findings: SensitiveFinding[];
+}
+
+export type StageKind = "document" | "test" | "assignment" | "interview" | "final" | "other";
+export type StageOutcome = "pending" | "passed" | "failed" | "withdrawn" | "cancelled";
+
+export interface ApplicationStage {
+  id: Uuid;
+  application_id: Uuid;
+  submission_id: Uuid;
+  position: number;
+  kind: StageKind;
+  name: string;
+  scheduled_at: IsoDateTime | null;
+  outcome: StageOutcome;
+  decided_at: IsoDateTime | null;
+  note: string | null;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
+}
+
+export interface StageIn {
+  kind: StageKind;
+  name?: string | null;
+  scheduled_at?: IsoDateTime | null;
+  outcome?: StageOutcome;
+  note?: string | null;
+}
+
+export interface StagePatch {
+  kind?: StageKind;
+  name?: string | null;
+  scheduled_at?: IsoDateTime | null;
+  outcome?: StageOutcome;
+  note?: string | null;
+  position?: number;
 }
 
 // ---------------------------------------------------------------- study (O09)
