@@ -660,3 +660,95 @@ class StudyClaimCandidate(Base):
     claim_id: Mapped[UUID]
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- O08: 실행·승인 (Automation)
+# 실행 기록에는 원문을 넣지 않는다 (대상 ID와 짧은 결과만).
+
+
+class Run(Base):
+    """오래 걸리는 여러 단계 작업 하나. 단계가 끝날 때마다 ``position``(재개 위치)을 저장한다."""
+
+    __tablename__ = "runs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    workflow: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="queued")
+    input: Mapped[dict] = mapped_column(JSONB, default=dict)
+    position: Mapped[dict] = mapped_column(JSONB, default=dict)
+    step: Mapped[int] = mapped_column(Integer, default=0)
+    steps_total: Mapped[int | None] = mapped_column(Integer, default=None)
+    result: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    stop_requested: Mapped[str | None] = mapped_column(Text, default=None)
+    wait_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    waits: Mapped[int] = mapped_column(Integer, default=0)
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    approval_id: Mapped[UUID | None] = mapped_column(default=None)
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric(18, 10), default=Decimal(0))
+    cost_unknown: Mapped[bool] = mapped_column(default=False)
+    model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    resumes: Mapped[int] = mapped_column(Integer, default=0)
+    actor_kind: Mapped[str] = mapped_column(Text, default="human")
+    actor_scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class RunEvent(Base):
+    """실행 사건. 추가·조회만."""
+
+    __tablename__ = "run_events"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    run_id: Mapped[UUID]
+    seq: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text, default=None)
+    step: Mapped[int | None] = mapped_column(Integer, default=None)
+    code: Mapped[str | None] = mapped_column(Text, default=None)
+    data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Approval(Base):
+    """사람의 승인 1건. 행위·대상·대상 버전·내용 해시는 만든 뒤 바꿀 수 없다 (DB trigger)."""
+
+    __tablename__ = "approvals"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    action: Mapped[str] = mapped_column(Text)
+    target_kind: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[UUID]
+    target_version: Mapped[str] = mapped_column(Text)
+    payload_hash: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    summary: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    requested_by: Mapped[UUID]
+    requested_via: Mapped[str] = mapped_column(Text, default="human")
+    run_id: Mapped[UUID | None] = mapped_column(default=None)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[UUID | None] = mapped_column(default=None)
+    decided_via: Mapped[str | None] = mapped_column(Text, default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    decision_note: Mapped[str | None] = mapped_column(Text, default=None)
+    used_by: Mapped[UUID | None] = mapped_column(default=None)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    used_result_id: Mapped[UUID | None] = mapped_column(default=None)
+    invalid_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

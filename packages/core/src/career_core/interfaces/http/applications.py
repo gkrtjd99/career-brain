@@ -11,6 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from career_core.domain.documents import DocumentRuleError, RevisionConflict
+from career_core.domain.runs import ApprovalError
+from career_core.interfaces.http.runs import approval_error
 from career_core.llm import ModelCallError, ModelDenied
 from career_core.ports import ActorContext
 from career_core.usecases import applications as uc
@@ -221,6 +223,8 @@ class SubmitIn(BaseModel):
     # 사용자가 확인한 문서별 revision 번호. 최신과 다르면 409.
     revisions: dict[UUID, int]
     note: str | None = Field(default=None, max_length=2000)
+    # O08: 사람이 승인한 제출 묶음. 승인 당시와 대상·내용이 다르면 409 (그 승인은 무효가 된다)
+    approval_id: UUID | None = None
 
 
 class SubmissionOut(BaseModel):
@@ -253,7 +257,6 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
     db = deps.db
     reader = Annotated[ActorContext, Depends(authorize("applications.read"))]
     writer = Annotated[ActorContext, Depends(authorize("applications.write"))]
-    submitter = Annotated[ActorContext, Depends(authorize("applications.submit"))]
     ai = Annotated[ActorContext, Depends(authorize("documents.ai"))]
     base = "/applications/{application_id}"
     doc_path = base + "/documents/{document_id}"
@@ -453,15 +456,29 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
             raise _not_found() from exc
 
     @router.post(base + "/submit", response_model=SubmissionOut, status_code=201)
-    async def submit(actor: submitter, application_id: UUID, body: SubmitIn) -> SubmissionOut:
+    async def submit(actor: writer, application_id: UUID, body: SubmitIn) -> SubmissionOut:
+        # 승인 묶음 없이 제출하면 제출자가 승인 행위를 한다 (applications.submit = approve, 사람만).
+        # 승인 묶음(O08)이 있으면 사람이 미리 승인했으므로 편집 권한으로 실행한다.
+        action = (
+            "applications.submit" if body.approval_id is None else "applications.submit_approved"
+        )
+        if not deps.permissions.allows(actor, action):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
         try:
             view = await uc.submit_application(
-                db, actor, application_id, revisions=body.revisions, note=body.note
+                db,
+                actor,
+                application_id,
+                revisions=body.revisions,
+                note=body.note,
+                approval_id=body.approval_id,
             )
         except NotFound as exc:
             raise _not_found() from exc
         except DocumentRuleError as exc:
             raise _error(exc) from exc
+        except ApprovalError as exc:
+            raise approval_error(exc) from exc
         return SubmissionOut.model_validate(view, from_attributes=True)
 
     @router.get(base + "/submission", response_model=SubmissionOut)

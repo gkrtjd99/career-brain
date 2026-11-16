@@ -1174,6 +1174,99 @@ def _json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
+# O08 승인 묶음: 제출 승인의 대상 버전과 내용.
+SUBMIT_ACTION = "applications.submit"
+MAX_NOTE_CHARS = 2000
+
+
+def submission_payload(raw: dict[str, Any]) -> dict[str, Any]:
+    """제출 승인의 내용: 문서별 revision 번호와 메모. 키 순서와 무관하게 같은 해시가 된다."""
+    revisions = raw.get("revisions")
+    if not isinstance(revisions, dict) or not revisions:
+        raise _approval_error("invalid_payload")
+    out: dict[str, int] = {}
+    for key, value in revisions.items():
+        try:
+            doc_id = str(UUID(str(key)))
+        except ValueError as exc:
+            raise _approval_error("invalid_payload") from exc
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise _approval_error("invalid_payload")
+        out[doc_id] = value
+    note = raw.get("note")
+    if note is not None and not isinstance(note, str):
+        raise _approval_error("invalid_payload")
+    return {"revisions": dict(sorted(out.items())), "note": (note or "").strip()[:MAX_NOTE_CHARS]}
+
+
+def _approval_error(code: str):
+    from career_core.domain.runs import ApprovalError
+
+    return ApprovalError(code)
+
+
+async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str, dict[str, Any]]:
+    """제출 승인의 대상 버전: 지원 상태, 문서별 현재 revision·본문 해시·글자 규칙, 공고 확정 값.
+
+    이 중 하나라도 바뀌면 해시가 달라져 기존 승인을 쓸 수 없다 (§17.10).
+    """
+    from career_core.domain.runs import content_hash
+
+    app = await _get_app(s, application_id)
+    posting = await s.get(JobPosting, app.posting_id)
+    docs = (
+        (
+            await s.execute(
+                select(ApplicationDocument)
+                .where(ApplicationDocument.application_id == application_id)
+                .order_by(ApplicationDocument.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    doc_state = []
+    summary_docs = []
+    for d in docs:
+        rev = await _revision(s, d.id, d.current_revision)
+        doc_state.append(
+            [
+                str(d.id),
+                d.current_revision,
+                rev.content_hash if rev else None,
+                d.char_limit,
+                d.byte_limit,
+                d.count_rule,
+                d.question_prompt,
+            ]
+        )
+        summary_docs.append(
+            {
+                "document_id": str(d.id),
+                "title": d.title,
+                "revision": d.current_revision,
+                "content_hash": rev.content_hash if rev else None,
+            }
+        )
+    state = {
+        "status": app.status,
+        "posting_id": str(posting.id),
+        "posting_version_id": str(posting.confirmed_version_id)
+        if posting.confirmed_version_id
+        else None,
+        "posting_fields": content_hash(posting.fields or {}),
+        "posting_pending_changes": sorted(posting.pending_changes or []),
+        "documents": doc_state,
+    }
+    summary = {
+        "application_id": str(app.id),
+        "title": app.title,
+        "posting_version_id": state["posting_version_id"],
+        "documents": summary_docs,
+    }
+    return content_hash(state), summary
+
+
 async def submit_application(
     db: Database,
     actor: ActorContext,
@@ -1181,13 +1274,42 @@ async def submit_application(
     *,
     revisions: dict[UUID, int],
     note: str | None = None,
+    approval_id: UUID | None = None,
 ) -> SubmissionView:
     """제출본을 고정한다. `revisions`는 사용자가 확인한 문서별 revision 번호다.
 
     지금 최신과 하나라도 다르면 RevisionConflict(stale 목록). 확인한 것과 다른 내용을 고정하지 않는다.
+
+    - ``approval_id`` 없음: 제출하는 사람이 직접 승인 행위를 한다 (approve 범위, 사람만).
+    - ``approval_id`` 있음: 사람이 미리 승인한 묶음으로 제출한다. 편집 권한이면 되고(AI 실행 포함),
+      승인 당시와 대상·내용이 같아야 한다. 다르면 ApprovalError이고 그 승인은 무효가 된다.
     """
-    if not actor.has_scope(APPROVE_SCOPE):
+    from career_core.domain.runs import ApprovalError
+    from career_core.usecases.approvals import record_rejection
+
+    if approval_id is None:
+        if not actor.has_scope(APPROVE_SCOPE):
+            raise DocumentRuleError("submit_requires_approve")
+    elif not actor.has_scope("draft-write"):
         raise DocumentRuleError("submit_requires_approve")
+    try:
+        return await _submit(db, actor, application_id, revisions, note, approval_id)
+    except ApprovalError as exc:
+        # 제출 트랜잭션은 롤백됐다. 대상·내용이 바뀐 승인은 따로 무효로 남긴다.
+        await record_rejection(db, actor.workspace_id, approval_id, exc.code)
+        raise
+
+
+async def _submit(
+    db: Database,
+    actor: ActorContext,
+    application_id: UUID,
+    revisions: dict[UUID, int],
+    note: str | None,
+    approval_id: UUID | None,
+) -> SubmissionView:
+    from career_core.usecases.approvals import consume_approval
+
     async with db.workspace_session(actor.workspace_id) as s:
         app = await _get_app(s, application_id, lock=True)
         if app.status != ApplicationStatus.DRAFT:
@@ -1207,6 +1329,17 @@ async def submit_application(
             .scalars()
             .all()
         )
+        approval = None
+        if approval_id is not None:
+            # 문서를 잠근 뒤에 확인한다: 확인과 고정 사이에 내용이 바뀔 틈이 없다
+            approval = await consume_approval(
+                s,
+                actor,
+                approval_id,
+                action=SUBMIT_ACTION,
+                target_id=application_id,
+                payload={"revisions": {str(k): v for k, v in revisions.items()}, "note": note},
+            )
         if set(revisions) - {d.id for d in docs}:
             raise DocumentRuleError("unknown_document")
         stale = [
@@ -1293,6 +1426,8 @@ async def submit_application(
         await s.flush()
         app.status = ApplicationStatus.SUBMITTED.value
         app.submitted_at = now
+        if approval is not None:
+            approval.used_result_id = sub.id
     return _submission_view(sub)
 
 
@@ -1310,6 +1445,7 @@ async def get_submission(db: Database, actor: ActorContext, application_id: UUID
 
 
 __all__ = [
+    "SUBMIT_ACTION",
     "SUGGEST_PURPOSE",
     "ApplicationSummary",
     "ApplicationView",
@@ -1332,6 +1468,8 @@ __all__ = [
     "review_suggestion",
     "save_revision",
     "set_status",
+    "submission_payload",
+    "submission_target",
     "submit_application",
     "suggest_edits",
     "update_document",

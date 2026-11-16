@@ -8,6 +8,7 @@ personal-api models      # 엔드포인트·라우트·단가·키 설정 상태
 personal-api pricing     # 단가표 점검 (오래된 항목, 단가 없는 라우트)
 personal-api usage       # 모델 사용량·비용 (CAREER_API_TOKEN 의 공간)
 personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 설정을 확인 (과금됨)
+personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구는 docs/architecture/mcp.md)
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from career_core.jobs.worker import (
     index_handlers,
     parsing_handlers,
     posting_handlers,
+    run_handlers,
     run_until_idle,
 )
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
@@ -41,6 +43,7 @@ from career_core.usecases.extraction import ExtractionDeps
 from career_core.usecases.indexing import IndexDeps
 from career_core.usecases.parsing import ParsingDeps
 from career_core.usecases.postings import PostingDeps
+from career_core.usecases.runs import RunDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
@@ -62,6 +65,7 @@ def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
     )
     gateway = build_gateway(settings, db)
     return {
+        **run_handlers(RunDeps(db=db, gateway=gateway)),
         **parsing_handlers(deps),
         **extraction_handlers(ExtractionDeps(db, gateway)),
         **index_handlers(IndexDeps(db, gateway)),
@@ -252,6 +256,28 @@ async def _search(settings: Settings, query: str, limit: int) -> None:
         print(f"{h.score:.4f} {ranks:<8} {h.kind:<6} {where[:24]:<24} {h.snippet[:90]}")
 
 
+async def _mcp(settings: Settings) -> None:
+    """stdio MCP 서버. 토큰은 메시지마다 다시 확인한다 (폐기하면 바로 막힌다)."""
+    from career_core.interfaces.http import CoreDeps
+    from career_core.interfaces.mcp import McpServer
+    from career_core.interfaces.mcp.stdio import run_stdio
+
+    token = os.environ.get(TOKEN_ENV)
+    if not token:
+        sys.exit(f"set {TOKEN_ENV} to an API token from `personal-api bootstrap`")
+    db = Database(settings.database_url)
+    try:
+        resolver = PersonalTokenResolver(db)
+        if await resolver.resolve(token) is None:
+            sys.exit(f"{TOKEN_ENV} is not a valid token")
+
+        deps = CoreDeps(identity=resolver, db=db, models=build_gateway(settings, db))
+        server = McpServer(deps)
+        await run_stdio(server, lambda: resolver.resolve(token))
+    finally:
+        await db.dispose()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="personal-api")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -282,6 +308,7 @@ def main(argv: list[str] | None = None) -> None:
     se.add_argument("--limit", type=int, default=10)
     pg = sub.add_parser("ping", help="send a tiny synthetic request through a route (billed)")
     pg.add_argument("purpose", nargs="?", default="default")
+    sub.add_parser("mcp", help=f"MCP server over stdio for the {TOKEN_ENV} workspace")
     args = parser.parse_args(argv)
     settings = Settings.from_env()
 
@@ -315,6 +342,8 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_search(settings, args.query, args.limit))
     elif args.cmd == "ping":
         sys.exit(asyncio.run(_ping(settings, args.purpose)))
+    elif args.cmd == "mcp":
+        asyncio.run(_mcp(settings))
 
 
 if __name__ == "__main__":

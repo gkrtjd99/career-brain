@@ -127,3 +127,16 @@ def posting_handlers(deps) -> dict[str, JobHandler]:
             give_up=lambda ws, target: give_up_fetch(deps, ws, target),
         )
     }
+
+
+def run_handlers(deps) -> dict[str, JobHandler]:
+    """O08 실행(run). ``deps``는 ``career_core.usecases.runs.RunDeps``."""
+    from career_core.domain.runs import RUN_JOB
+    from career_core.usecases.runs import give_up_run, process_run
+
+    return {
+        RUN_JOB: JobHandler(
+            run=lambda ws, target: process_run(deps, ws, target),
+            give_up=lambda ws, target: give_up_run(deps, ws, target),
+        )
+    }
