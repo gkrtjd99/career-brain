@@ -43,6 +43,9 @@ ACTION_SCOPES: dict[str, str] = {
     "applications.write": "draft-write",
     "applications.submit": "approve",
     "documents.ai": "egress",
+    # O09 학습. 경험 후보로 올리기도 study.write (주장은 확인 대기로만 생긴다).
+    "study.read": "read",
+    "study.write": "draft-write",
 }
 
 

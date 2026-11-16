@@ -33,6 +33,7 @@ from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.postings import add_posting_routes
 from career_core.interfaces.http.search import add_search_routes
+from career_core.interfaces.http.study import add_study_routes
 from career_core.interfaces.http.usage import add_usage_routes
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext, BlobStore, IdentityResolver, PermissionPolicy
@@ -183,6 +184,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_search_routes(router, deps, authorize)
     add_posting_routes(router, deps, authorize)
     add_application_routes(router, deps, authorize)
+    add_study_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 
