@@ -116,3 +116,14 @@ def index_handlers(deps) -> dict[str, JobHandler]:
     from career_core.usecases.indexing import INDEX_JOB, process_index
 
     return {INDEX_JOB: JobHandler(run=lambda ws, target: process_index(deps, ws, target))}
+
+
+def posting_handlers(deps) -> dict[str, JobHandler]:
+    from career_core.usecases.postings import FETCH_JOB, give_up_fetch, process_fetch
+
+    return {
+        FETCH_JOB: JobHandler(
+            run=lambda ws, target: process_fetch(deps, ws, target),
+            give_up=lambda ws, target: give_up_fetch(deps, ws, target),
+        )
+    }

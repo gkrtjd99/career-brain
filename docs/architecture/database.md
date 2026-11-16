@@ -102,3 +102,11 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - `core.embeddings` — 대상(`target_kind` ∈ claim/block/answer/job, `target_id`)·공간(`space`)마다 벡터 1개. 원문은 두지 않고 `content_hash`(sha256)만. `vector_dims(embedding) = dims` CHECK. RLS FORCE.
   대상 테이블에 FK가 없다(여러 종류를 가리킨다). 대상이 사라진 벡터는 검색 조인에서 자연히 빠진다.
 - 상세: `docs/architecture/search.md`.
+
+## 채용 공고 (c0006)
+
+- `core.job_postings` — 공간마다 `canonical_url` UNIQUE (정규화: 소문자 호스트, 추적 파라미터·조각·기본 포트·끝 슬래시 제거, 쿼리 정렬). `status` draft/saved/archived. 확정한 값은 `fields`, 항목별 근거는 `evidence`(structured 경로·quote 위치·user). `confirmed_version_id`, `pending_changes`(확정 후 바뀐 항목), saved면 `saved_by`·`saved_at` 필수 (`ck_job_postings_saved`).
+- `core.job_posting_versions` — 가져온 원문 스냅샷. **SELECT/INSERT만** (수정·삭제 불가). `(posting_id, version_no)`, `(posting_id, content_hash)` UNIQUE → 같은 본문이면 새 버전·LLM 호출 없음. `method` http/browser/manual_text, `adapter`, `extracted`, `missing`, `changed_fields`, `model_call_id`, `screenshot_key`(blob sha256).
+- `core.job_fetch_runs` — 가져오기 시도 기록. `status` pending/done/listing/failed, `error_code`, `http_status`, `unchanged`, 목록 페이지면 `candidates`(따라가지 않음), `notes`.
+- 확정하지 않은 초안은 7일 뒤 `purge_unconfirmed`로 정리 (버전·실행 기록은 FK CASCADE).
+- 상세: `docs/architecture/postings.md`.

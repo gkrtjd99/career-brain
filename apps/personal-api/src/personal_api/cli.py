@@ -21,12 +21,14 @@ from datetime import UTC, date, datetime, timedelta
 
 from career_core.adapters.blobstore import LocalBlobStore
 from career_core.adapters.parsers import default_local_parsers
+from career_core.adapters.web_fetch import BrowserFetcher, HttpFetcher
 from career_core.db import Database
 from career_core.db.migrate import upgrade
 from career_core.jobs.worker import (
     extraction_handlers,
     index_handlers,
     parsing_handlers,
+    posting_handlers,
     run_once,
     run_until_idle,
 )
@@ -38,6 +40,7 @@ from career_core.ports import ActorContext
 from career_core.usecases.extraction import ExtractionDeps
 from career_core.usecases.indexing import IndexDeps
 from career_core.usecases.parsing import ParsingDeps
+from career_core.usecases.postings import PostingDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
@@ -62,6 +65,16 @@ async def _worker(settings: Settings, *, once: bool) -> None:
         **parsing_handlers(deps),
         **extraction_handlers(ExtractionDeps(db, gateway)),
         **index_handlers(IndexDeps(db, gateway)),
+        **posting_handlers(
+            PostingDeps(
+                db=db,
+                fetcher=HttpFetcher(),
+                gateway=gateway,
+                # 동적 페이지용 브라우저는 선택 설치. 없으면 직접 붙여넣기로 안내한다.
+                browser=BrowserFetcher() if settings.browser_fetch else None,
+                blobs=deps.blobs,
+            )
+        ),
     }
     try:
         if once:
