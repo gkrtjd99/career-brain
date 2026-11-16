@@ -424,6 +424,24 @@ export interface FetchConfirmation {
   model: string;
   created_at: IsoDateTime;
   decided_at: IsoDateTime | null;
+  /** 호출별 예상: 이미지 읽기(job_extract_image) + 항목 추출(job_extract). 옛 요청은 빈 목록 */
+  parts?: FetchCostPart[];
+}
+
+/** 비용 확인의 호출 하나. 합계·상한 비교에는 종량제(metered)만 들어간다 */
+export interface FetchCostPart {
+  purpose: string;
+  endpoint: string;
+  model: string;
+  billing: "metered" | "subscription" | "free" | string;
+  input_tokens: number;
+  max_input_tokens: number;
+  output_tokens: number;
+  max_output_tokens: number;
+  estimated_usd: string | null;
+  max_usd: string | null;
+  /** 출력 추정 근거: per_page | history_<n>(지난 호출 n개 평균) | default(상수) */
+  basis: string;
 }
 
 export interface FetchRun {

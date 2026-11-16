@@ -65,6 +65,7 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 - 근거는 구조화 경로 `greeting:opening.questionnairesInfo[<번호들>,<번호들>].question·need·optionItems` (원래 배열 번호).
 - **구조화 데이터에서만 온다** (`STRUCTURED_ONLY_FIELDS`): LLM에게 묻지 않고(빠진 항목 목록에도 없다), LLM이 이 이름으로 답해도 버린다. 확정 화면에서 손으로 고치는 항목이 아니라(`POSTING_FIELDS`에 없다) 공고 화면에 읽기 전용 "지원서 선택형 문항"으로 보이고, 확정하면 다른 항목처럼 `fields`·`evidence`에 들어간다.
 - 하나 고르기·여러 개 고르기는 구분하지 않는다 (`source_type`에 원래 번호만. 공개 자료에서 두 번호의 뜻을 확인하지 못했다).
+  - **보류** (2026-11-17 다시 찾음): 그리팅의 공개 개발자 문서·도움말에서 `type` 번호 목록을 찾지 못했다 (일반 웹 검색, 로그인 없이). 다른 채용 솔루션 도움말의 "단일 선택·다중 선택" 구분은 그리팅 번호와 대응한다는 근거가 아니다. 공개 공고 몇 건의 보기 모양만으로 뜻을 짐작하지 않는다 (추측한 뜻을 화면에 보이면 지원자가 잘못 고를 수 있다). 관리자 화면 로그인이나 지원서 제출 흐름을 따라가 확인하는 것은 이 레포 규칙 밖이다. 그리팅이 공개 문서(또는 공개 API 응답에 이름 붙은 칸, 예: `multiple: true`)로 뜻을 밝히면 그때 `selection: single|multiple`을 더한다.
 - fixture는 합성이다 (`test_postings_ops.py`).
 
 ### 추가 요청 규칙
@@ -118,17 +119,27 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 
 **쪽 고르기** (`adapters/pdf_render.py::pick_pages`): 앞 60쪽(+ 마지막 쪽)을 긴 변 96px 회색조로 작게 그려 어두운 점(밝기 200 미만)의 비율을 잰다. 0.4% 미만이면 빈 쪽으로 보고 뺀다. 남은 쪽이 4쪽 이하면 모두, 넘으면 **앞 3쪽 + 마지막 쪽** (마감·지원 방법·문의가 끝에 있는 공고가 많다). 모두 빈 쪽이면 앞 4쪽 (모델이 글자 없음으로 답한다). 고른 쪽만 150dpi로 그린다.
 
-**예상 비용** (`usecases/postings.py::vision_estimate`): 고른 쪽 이미지 크기로 입력 토큰을 어림한다 — 이미지마다 Anthropic 식(`가로×세로/750`)과 OpenAI 타일 식(512px 타일 170 + 85) 중 큰 값, 더하기 안내문. 출력은 쪽마다 1200 토큰(상한 6000). 금액은 게이트웨이의 `estimate_cost`(라우트의 단가·구간 그대로, 호출하지 않는다): 예상(`estimated_usd`)과 출력이 상한까지 나올 때(`max_usd`).
+**예상 비용** (`usecases/postings.py::vision_estimate`): 가져오기 한 번이 부르는 두 호출을 따로 어림해 더한다. 금액은 게이트웨이의 `estimate_cost`(라우트의 단가·구간 그대로, 호출하지 않는다)로, 호출마다 예상(`estimated_usd`)과 입력·출력이 상한까지 나올 때(`max_usd`).
+
+| 호출 | 입력 토큰 (예상 / 최대) | 출력 토큰 (예상 / 최대) |
+|---|---|---|
+| 이미지 읽기 `job_extract_image` | 이미지마다 Anthropic 식(`가로×세로/750`)과 OpenAI 타일 식(512px 타일 170 + 85) 중 큰 값 + 안내문 글자 수 (둘이 같다) | 쪽마다 1200 / 6000 (`per_page`) |
+| 항목 추출 `job_extract` | 안내문 글자 수 + 옮긴 글. 옮긴 글 = 이미지 읽기의 출력이라 예상은 그 예상 출력(쪽마다 1200), 최대는 그 상한 6000 (본문 상한 3만 자 이하) | 이 공간 장부(`model_calls`)의 최근 성공한 `job_extract` 호출 20개 평균(3개 이상일 때, `history_<n>`), 모자라면 상수 1500 (`default`, 측정값이 아니라 항목 JSON + 인용 몇십 개 어림) / 6000 (호출 상한) |
+
+- 글자 수를 토큰으로 세는 안내문은 넘치게 잡는 쪽이다. 장부에서는 출력 토큰 수만 읽는다 (본문 없음).
+- 합계(`input_tokens`·`output_tokens`)는 두 호출의 합, 금액(`estimated_usd`·`max_usd`)은 **종량제 호출만** 더한다. 구독·로컬 호출은 정가 환산("API였다면", `price_as`)을 호출별 줄에만 보이고 합계·상한 비교에서 뺀다. 종량제 호출 하나라도 단가를 모르면 합계는 모름 (→ 묻는다).
+- 추출 라우트가 없으면(기본 라우트도 없으면) 추출 줄이 빠진다.
+- 호출별 예상은 실행 메모 `estimate_part:<목적>:<과금>:<입력>:<최대 입력>:<출력>:<최대 출력>:<예상 USD>:<최대 USD>:<근거>:<엔드포인트>:<모델>`로 남고 (확인 요청 행에는 합계만, migration 없음), API는 `confirmation.parts[]`로 돌려준다. 웹 확인 카드에 호출별 표가 보인다. 이 변경 전의 요청은 `parts`가 비어 합계만 보인다.
 
 **확인** (`needs_confirmation`):
 
-1. 종량제(`billing = metered`) 엔드포인트이고 `max_usd`가 `CAREER_VISION_CONFIRM_USD`(기본 0.10 USD)를 넘거나 단가를 모르면, 모델을 부르지 않고 실행을 `needs_confirmation`으로 멈춘다. `core.job_fetch_confirmations`에 쪽·이미지 수·토큰·금액·모델·파일 해시를 남긴다 (원본 바이트 없음). 같은 공고의 앞선 대기 요청은 `superseded`. `notes`: `pdf_no_text`, `pdf_pages_read:…`, `pdf_blank_pages:N`, `vision_estimate_usd:<최대|unknown>`.
-2. 구독(`subscription`)·로컬 엔드포인트는 묻지 않는다 (호출마다 돈이 나가지 않는다). `CAREER_VISION_CONFIRM_USD=off`면 묻지 않는다.
+1. 이미지 읽기 엔드포인트가 종량제(`billing = metered`)이고 종량제 합계 `max_usd`(이미지 읽기 + 종량제면 항목 추출)가 `CAREER_VISION_CONFIRM_USD`(기본 0.10 USD)를 넘거나 단가를 모르면, 모델을 부르지 않고 실행을 `needs_confirmation`으로 멈춘다. `core.job_fetch_confirmations`에 쪽·이미지 수·합계 토큰·합계 금액·이미지 읽기 모델·파일 해시를 남긴다 (원본 바이트 없음). 같은 공고의 앞선 대기 요청은 `superseded`. `notes`: `pdf_no_text`, `pdf_pages_read:…`, `pdf_blank_pages:N`, `vision_estimate_usd:<이미지 읽기 최대|unknown>`, `estimate_part:…`(호출마다).
+2. 이미지 읽기가 구독(`subscription`)·로컬 엔드포인트면 묻지 않는다 (호출마다 돈이 나가지 않는다). 이때 종량제 추출 호출은 다른 공고(HTML·글자 있는 PDF)의 추출과 같이 게이트웨이 예산·장부 규칙만 따른다 — 스캔 PDF에서만 추출 비용을 묻지 않게. `CAREER_VISION_CONFIRM_USD=off`면 묻지 않는다.
 3. 웹 공고 화면에 예상(읽을 쪽, 토큰, 금액, 기준)이 보이고 **확인하고 읽기** → `POST /api/core/job-postings/<id>/fetch-runs/<run>/confirm` (202, 같은 주소로 새 가져오기를 넣는다. 이미 대기 중인 가져오기가 있으면 그것) 또는 **읽지 않기** → `.../decline` (실행은 `failed`/`needs_manual_check` + `vision_declined`, 직접 붙여넣기). 사람(웹·HTTP 토큰)만, `jobs.write`. MCP 등 에이전트는 403 `human_confirmation_required`, 이미 결정한 요청은 409 `confirmation_not_pending`.
 4. 새 가져오기는 확인한 요청 중 **같은 파일 해시·같은 쪽·같은 모델이고 금액이 확인한 최대 이하**인 것을 한 번만 쓴다 (`used`, `notes`에 `vision_confirmed`). 파일이 바뀌었거나 더 비싸면 다시 묻는다.
 5. 오늘 화면의 "가져오기 확인" 목록에 "비용 확인"으로 보인다.
 
-추정은 이미지 읽기 호출만이다. 그 뒤의 항목 추출(`job_extract`)은 기존 예산·장부 규칙을 따른다.
+확인은 두 호출의 합계 금액에 대한 것이다. 실제 호출은 각각 게이트웨이의 예산·장부 규칙을 그대로 따른다 (예상이 실제 비용을 막지 않는다).
 - **이미지(포스터)**: `models.toml`에 `job_extract_image` 라우트를 **명시**했을 때만 게이트웨이로 보낸다 (default 라우트로 넘어가지 않는다: 비전을 못 하는 모델로 보내지 않게). 자료 등급 `public`(공개 공고), 게이트웨이의 egress·단가·예산·장부 규칙 그대로. 제공자 SDK를 직접 부르지 않는다 (`ModelRequest.images`).
   1. 모델이 이미지의 글자를 그대로 옮긴다 (번역·요약 금지, 이미지 속 지시는 무시).
   2. 옮긴 글이 버전 본문이 되고, 항목은 같은 LLM 인용 확인을 거친다. `notes`에 `ocr_by_model` (화면: "AI가 읽은 글, 원본과 대조").

@@ -156,6 +156,14 @@ export function noteLabel(note: string): string {
       return `빈 쪽 ${arg}개는 건너뜀`;
     case "vision_estimate_usd":
       return arg === "unknown" ? "이미지 읽기 예상 비용: 단가 모름" : `이미지 읽기 예상 비용(최대): $${arg}`;
+    case "estimate_part": {
+      // estimate_part:<목적>:<과금>:<입력>:<최대 입력>:<출력>:<최대 출력>:<예상 USD>:<최대 USD>:<근거>:<엔드포인트>:<모델>
+      const [purpose, billing, input, , output, , , maxUsd] = rest;
+      const name = purpose === "job_extract_image" ? "이미지 읽기" : purpose === "job_extract" ? "항목 추출" : purpose;
+      const kind = billing === "metered" ? "종량제" : billing === "subscription" ? "구독, 정가 환산" : "무료·로컬";
+      const money = maxUsd === "unknown" ? "단가 모름" : `최대 $${Number(maxUsd)}`;
+      return `예상(${name}, ${kind}): 입력 ${Number(input).toLocaleString()} · 출력 약 ${Number(output).toLocaleString()} 토큰, ${money}`;
+    }
     case "pdf_unreadable":
       return `PDF를 읽지 못함: ${arg}`;
     case "vision_denied":

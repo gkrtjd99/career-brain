@@ -6,7 +6,25 @@ import { ErrorText } from "../common";
 import { api } from "../../lib/api";
 import { usd } from "../../lib/format";
 
-/** 예상 비용이 상한을 넘어 멈춘 가져오기: 쪽·이미지·토큰·금액을 보여 주고 확인/거절을 받는다. */
+const PART_LABEL: Record<string, string> = {
+  job_extract_image: "이미지 읽기",
+  job_extract: "항목 추출",
+};
+
+const BILLING_LABEL: Record<string, string> = {
+  metered: "종량제",
+  subscription: "구독",
+  free: "무료·로컬",
+};
+
+function basisLabel(basis: string) {
+  if (basis === "per_page") return "쪽마다 어림";
+  if (basis === "default") return "기본값 (지난 호출 부족)";
+  const n = /^history_(\d+)$/.exec(basis);
+  return n ? `지난 호출 ${n[1]}개 평균` : basis;
+}
+
+/** 예상 비용이 상한을 넘어 멈춘 가져오기: 쪽·이미지·토큰·금액(호출별)을 보여 주고 확인/거절을 받는다. */
 export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId: string }) {
   const qc = useQueryClient();
   const done = () => {
@@ -18,12 +36,13 @@ export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId:
   const c = run.confirmation;
   if (!c) return null;
   const pending = c.status === "pending";
+  const parts = c.parts ?? [];
   return (
     <Card className="space-y-2 border-warn/40 p-3 text-[13px]">
       <p className="font-medium">스캔 PDF를 AI로 읽기 전에 비용을 확인해 주세요</p>
       <p className="text-muted">
-        글자가 없는 PDF라 쪽 이미지를 이미지 읽기 모델({c.model})로 보냅니다. 예상 비용이 확인 기준(
-        {usd(c.threshold_usd, 2)})을 넘었습니다. 토큰 수와 금액은 추정값입니다.
+        글자가 없는 PDF라 쪽 이미지를 이미지 읽기 모델({c.model})로 보내고, 읽은 글에서 항목을 추출합니다. 예상
+        비용이 확인 기준({usd(c.threshold_usd, 2)})을 넘었습니다. 토큰 수와 금액은 추정값입니다.
       </p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
         <dt className="text-muted">읽을 쪽</dt>
@@ -34,13 +53,51 @@ export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId:
         <dt className="text-muted">토큰(추정)</dt>
         <dd>
           입력 {c.input_tokens.toLocaleString()} · 출력 약 {c.output_tokens.toLocaleString()}
+          {parts.length > 1 ? " (두 호출 합계)" : ""}
         </dd>
         <dt className="text-muted">예상 비용</dt>
         <dd>
           {c.estimated_usd ? usd(c.estimated_usd) : "단가 모름"}
           {c.max_usd ? ` (최대 ${usd(c.max_usd)})` : ""}
+          {parts.length > 1 ? " · 종량제 호출만 합침" : ""}
         </dd>
       </dl>
+      {parts.length ? (
+        <table className="w-full text-left text-xs">
+          <thead className="text-muted">
+            <tr>
+              <th className="py-0.5 font-normal">호출</th>
+              <th className="py-0.5 font-normal">입력 토큰</th>
+              <th className="py-0.5 font-normal">출력 토큰</th>
+              <th className="py-0.5 font-normal">예상 (최대)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {parts.map((p) => (
+              <tr key={p.purpose} className="align-top">
+                <td className="py-0.5 pr-2">
+                  {PART_LABEL[p.purpose] ?? p.purpose}
+                  <div className="text-muted">
+                    {p.model} · {BILLING_LABEL[p.billing] ?? p.billing}
+                  </div>
+                </td>
+                <td className="py-0.5 pr-2">
+                  {p.input_tokens.toLocaleString()} (최대 {p.max_input_tokens.toLocaleString()})
+                </td>
+                <td className="py-0.5 pr-2">
+                  약 {p.output_tokens.toLocaleString()} (최대 {p.max_output_tokens.toLocaleString()})
+                  <div className="text-muted">{basisLabel(p.basis)}</div>
+                </td>
+                <td className="py-0.5">
+                  {p.estimated_usd ? usd(p.estimated_usd) : "단가 모름"}
+                  {p.max_usd ? ` (${usd(p.max_usd)})` : ""}
+                  {p.billing !== "metered" ? <div className="text-muted">정가 환산, 합계에서 뺌</div> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
       {pending ? (
         <div className="flex flex-wrap gap-2">
           <Button
