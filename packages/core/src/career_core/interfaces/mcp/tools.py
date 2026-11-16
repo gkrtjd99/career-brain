@@ -199,6 +199,35 @@ async def _add_answer(env: ToolEnv, a: AnswerArgs) -> Any:
     )
 
 
+class StartInterviewArgs(Args):
+    experience_id: UUID
+
+
+async def _start_interview(env: ToolEnv, a: StartInterviewArgs) -> Any:
+    """경험 정리 인터뷰를 연다. 기본 질문(맥락·본인 기여·수치·선택 이유·어려움…)을 돌려준다."""
+    sid = await interview_uc.start_interview(env.db, env.actor, a.experience_id)
+    return await interview_uc.get_interview(env.db, env.actor, sid)
+
+
+class GetInterviewArgs(Args):
+    session_id: UUID | None = None
+    experience_id: UUID | None = None
+
+
+async def _get_interview(env: ToolEnv, a: GetInterviewArgs) -> Any:
+    """인터뷰 질문과 답. session_id가 없으면 그 경험의 가장 최근 인터뷰."""
+    if a.session_id is None:
+        if a.experience_id is None:
+            raise ToolFailed("session_or_experience_required")
+        rows = await interview_uc.list_interviews(
+            env.db, env.actor, experience_id=a.experience_id, limit=1
+        )
+        if not rows:
+            return {"interview": None}
+        a = GetInterviewArgs(session_id=rows[0].id)
+    return await interview_uc.get_interview(env.db, env.actor, a.session_id)
+
+
 # ---------------------------------------------------------------- 공고·학습·지원
 
 
@@ -243,6 +272,11 @@ class ApplicationArgs(Args):
 
 async def _get_application(env: ToolEnv, a: ApplicationArgs) -> Any:
     return await app_uc.get_application(env.db, env.actor, a.application_id)
+
+
+async def _check_application(env: ToolEnv, a: ApplicationArgs) -> Any:
+    """코드 검사 결과: 글자·바이트 수, 범용·다른 회사 문장, 근거 없는 서술, 요건 가시성, 조작 의심."""
+    return await app_uc.application_checks(env.db, env.actor, a.application_id)
 
 
 class SuggestArgs(Args):
@@ -408,6 +442,25 @@ TOOLS: tuple[Tool, ...] = (
         read_only=False,
     ),
     Tool(
+        "start_interview",
+        "Open an interview for an experience. Returns template questions (context, own "
+        "contribution, metrics, decisions, difficulties). Ask them one by one; never invent "
+        "the answers.",
+        "brain.write",
+        StartInterviewArgs,
+        _start_interview,
+        read_only=False,
+    ),
+    Tool(
+        "get_interview",
+        "Get an interview's questions and saved answers (by session_id, or the latest one for "
+        "an experience_id).",
+        "brain.read",
+        GetInterviewArgs,
+        _get_interview,
+        untrusted=True,
+    ),
+    Tool(
         "save_job_urls",
         "Save job posting URLs the user gave you (max 10). The same posting is never duplicated. "
         "Fetching happens in the background.",
@@ -439,6 +492,16 @@ TOOLS: tuple[Tool, ...] = (
         "applications.read",
         ApplicationArgs,
         _get_application,
+        untrusted=True,
+    ),
+    Tool(
+        "check_application",
+        "Deterministic checks for an application's documents: character/byte counts per the "
+        "question rules, generic or other-company sentences, statements without brain evidence, "
+        "requirement visibility, manipulation warnings. Use these counts; do not count yourself.",
+        "applications.read",
+        ApplicationArgs,
+        _check_application,
         untrusted=True,
     ),
     Tool(

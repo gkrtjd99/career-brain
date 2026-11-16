@@ -261,6 +261,27 @@ def cases(e):
         ),
         ("get_application", {"application_id": str(aid)}, "GET", f"/core/applications/{aid}", None),
         (
+            "check_application",
+            {"application_id": str(aid)},
+            "GET",
+            f"/core/applications/{aid}/checks",
+            None,
+        ),
+        (
+            "get_interview",
+            {"experience_id": str(e["experience"])},
+            "GET",
+            f"/core/interviews?experience_id={e['experience']}",
+            None,
+        ),
+        (
+            "start_interview",
+            {"experience_id": str(e["experience"])},
+            "POST",
+            "/core/interviews",
+            {"experience_id": str(e["experience"])},
+        ),
+        (
             "save_job_urls",
             {"urls": ["https://jobs.example.test/mcp/policy"]},
             "POST",
@@ -315,6 +336,7 @@ def cases(e):
 
 EXPECTED_FORBIDDEN = {
     "viewer": {
+        "start_interview",
         "save_job_urls",
         "add_interview_answer",
         "study_record_attempt",
