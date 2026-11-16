@@ -165,6 +165,21 @@ async def test_synthetic_eval_and_isolation(db, blobs, people):
     assert mine and theirs and not mine & theirs
 
 
+async def test_missing_api_key_means_keyword_only_without_calls(db, blobs, people):
+    """예시 설정처럼 OpenAI 라우트가 있어도 키가 없으면 색인·검색어 임베딩을 부르지 않는다."""
+    owner = people["owner"]
+    await seed(db, blobs, owner, load_fixture())
+    fake = FakeEmbedder()
+    gw = ModelGateway(db, API, PriceBook.load(), client_factory=lambda ep, key: fake, env={})
+    assert gw.embedding_status() == "api_key_missing" and gw.embedding_space() is None
+    await run_until_idle(db, index_handlers(IndexDeps(db, gw)))
+    res = await search(db, owner, "트래커", gateway=gw)
+    assert res.mode == "keyword" and res.semantic_note == "embedding_api_key_missing"
+    assert res.hits  # 키워드 결과는 그대로
+    assert fake.calls == []
+    assert await rows(db, owner, ModelCall) == []  # 거부 기록도 쌓지 않는다
+
+
 # --- 색인 ---------------------------------------------------------------------
 
 

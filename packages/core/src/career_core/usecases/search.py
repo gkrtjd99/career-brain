@@ -248,7 +248,9 @@ async def search(
     note = None
     space = gateway.embedding_space() if gateway else None
     if gateway is None or space is None:
-        note = "no_embedding_route"
+        # 키만 없는 경우를 따로 알린다 (설정은 했는데 OPENAI_API_KEY 등이 비어 있음)
+        missing_key = gateway is not None and gateway.embedding_status() == "api_key_missing"
+        note = "embedding_api_key_missing" if missing_key else "no_embedding_route"
     elif gateway.embedding_leaves_host() and not actor.has_scope("egress"):
         note = "egress_scope_required"  # 검색어도 외부 API로 나가는 자료다
     else:

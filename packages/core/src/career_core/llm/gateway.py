@@ -311,10 +311,25 @@ class ModelGateway:
         if reservation is not None and self._budget is not None:
             await self._budget.release(reservation)
 
-    def embedding_space(self) -> str | None:
+    def embedding_status(self) -> str | None:
+        """임베딩을 쓸 수 없는 이유 (쓸 수 있으면 None): ``no_route`` 또는 ``api_key_missing``.
+
+        예시 설정의 기본 라우트가 OpenAI라도 키가 없으면 호출·장부 기록 없이 키워드 검색만 한다.
+        """
         route = self._config.embedding_route()
         if route is None:
+            return "no_route"
+        endpoint = self._config.endpoints[route.endpoint]
+        if endpoint.api_key_env and not self._env.get(endpoint.api_key_env):
+            return "api_key_missing"
+        return None
+
+    def embedding_space(self) -> str | None:
+        """쓸 수 있는 임베딩 공간. 라우트가 없거나 키가 없으면 None (색인·의미 검색을 하지 않음)."""
+        if self.embedding_status() is not None:
             return None
+        route = self._config.embedding_route()
+        assert route is not None
         endpoint = self._config.endpoints[route.endpoint]
         return embedding_space(endpoint, route.model, self._config.embedding.dimensions)
 
