@@ -1,0 +1,59 @@
+# career-brain 모델 설정 예시. `models.toml`로 복사해 쓴다 (models.toml은 git에 올리지 않는다).
+# 키 값은 여기 넣지 않는다. api_key_env에 환경변수 이름만 적고, 키는 셸이나 .env에 둔다.
+#
+#   personal-api models    # 설정 상태 확인 (키 값은 출력하지 않음)
+#   personal-api pricing   # 단가표 점검
+#   personal-api ping      # 짧은 합성 요청으로 연결 확인 (과금됨)
+#   personal-api usage     # 사용량·비용
+
+# --- 공식 API (종량제). 비용은 단가표(catalog.toml)로 계산하고 월 예산에 들어간다.
+[endpoints.claude]
+preset = "anthropic"               # api_key_env 기본값 ANTHROPIC_API_KEY
+data_classes = ["public", "private"]   # 이 엔드포인트로 보내도 되는 자료 등급. restricted는 적어도 거부된다.
+
+[endpoints.openai]
+preset = "openai"                  # OPENAI_API_KEY
+data_classes = ["public", "private"]
+
+[endpoints.gemini]
+preset = "gemini"                  # GEMINI_API_KEY, OpenAI 호환 엔드포인트
+data_classes = ["public"]
+
+[endpoints.grok]
+preset = "xai"                     # XAI_API_KEY. 응답의 실제 청구액을 그대로 기록한다.
+data_classes = ["public"]
+
+# --- 구독 계정 프록시 (CLIProxyAPI 등). 토큰은 기록하지만 실지출로 세지 않는다.
+# price_as를 주면 "API였다면 얼마"를 환산해 따로 보여준다.
+# 주의: CLIProxyAPI 기본 설정은 모든 네트워크 인터페이스에 바인딩된다. config.yaml에 host: "127.0.0.1"을 둔다.
+# 주의: 소비자 구독 계정을 API처럼 쓰는 것은 제공자 약관에 어긋날 수 있다. 본인 책임으로 판단한다.
+# [endpoints.proxy]
+# preset = "cliproxyapi"           # http://127.0.0.1:8317/v1, CLIPROXY_API_KEY (프록시 access.api-keys 값)
+# price_as = "anthropic"
+# data_classes = ["public", "private"]
+
+# --- 로컬 모델 (Ollama). 외부로 나가지 않으니 restricted 외 등급을 열어도 된다.
+# [endpoints.local]
+# preset = "ollama"
+# data_classes = ["public", "private"]
+
+# --- 그 밖의 OpenAI 호환 서버
+# [endpoints.other]
+# preset = "openai-compatible"
+# base_url = "https://example.invalid/v1"
+# api_key_env = "OTHER_API_KEY"
+# pricing_provider = "other"       # 단가는 [pricing] files의 덮어쓰기 파일에 둔다
+
+# --- 용도별 라우트: "<endpoint>/<model>". 없는 용도는 default를 쓴다.
+[routes]
+default = "claude/claude-sonnet-5-5"
+extract = "claude/claude-haiku-5-5"      # 자료에서 경험 후보 추출 (대량, 저가)
+interview = "claude/claude-opus-5-5"     # 인터뷰 질문 생성
+
+[budget]
+monthly_usd = "20"           # 공간별 이번 달(UTC) 종량제 지출이 이 값에 닿으면 호출을 막는다
+require_known_price = true   # 단가표에 없는 종량제 모델은 호출하지 않는다
+
+# 단가 덮어쓰기 (catalog.toml과 같은 형식). 뒤 파일이 이긴다.
+# [pricing]
+# files = ["prices.local.toml"]

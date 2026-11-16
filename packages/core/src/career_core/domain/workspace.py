@@ -27,6 +27,7 @@ ACTION_SCOPES: dict[str, str] = {
     "members.manage": "workspace-admin",
     "sources.read": "read",
     "sources.write": "draft-write",
+    "usage.read": "read",
 }
 
 

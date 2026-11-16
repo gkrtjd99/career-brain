@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "개인용 FastAPI composition root (개인 로그인·설정)"
 license = "Apache-2.0"
 requires-python = ">=3.12"
-dependencies = ["career-core", "uvicorn[standard]>=0.30"]
+dependencies = ["career-core[llm]", "uvicorn[standard]>=0.30"]
 
 [build-system]
 requires = ["hatchling"]

@@ -63,3 +63,12 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 외부 전송: `restricted` 등급은 제공자 설정과 무관하게 보내지 않는다. 설정하지 않은 제공자도 거부.
 - 작업 큐 행에는 원문을 넣지 않고 대상 ID만 둔다. 실패 기록에는 예외 종류만 남긴다.
 - 외부 OCR 어댑터(PaddleOCR·MinerU 등)는 아직 연결하지 않았다. `ParserProvider` 포트로 붙인다.
+
+## 모델 호출 장부 (c0003)
+
+`core.model_calls` — 모델 호출 1건 = 1행. RLS FORCE, 앱 role 권한은 `SELECT, INSERT`뿐이다(고쳐서 비용을 줄일 수 없다).
+
+- 기록: 용도, 엔드포인트, 요청/응답 모델, 상태(`ok`/`error`/`denied`), 오류 코드, 토큰(입력·캐시 읽기·캐시 쓰기·출력·reasoning), 과금 방식(`metered`/`subscription`/`free`), 비용과 근거(`provider_reported`/`metered`/`estimated`/`list_price_equivalent`/`unknown`/`none`), 단가 출처 참조, 지연시간, 제공자 요청 ID.
+- 기록하지 않음: 프롬프트·응답 본문, 키.
+- 월 예산은 이번 달(UTC) `billing = 'metered'` 행의 `cost_usd` 합으로 본다. 동시에 여러 호출이 출발하면 한도를 조금 넘을 수 있다(사전 확인 방식). 서비스는 `BudgetPolicy`(예약·정산)를 주입해 정확히 막는다.
+

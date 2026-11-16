@@ -7,9 +7,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -123,4 +132,37 @@ class Job(Base):
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ModelCall(Base):
+    """모델 호출 장부. 프롬프트·응답 본문은 저장하지 않는다 (토큰 수와 비용만).
+
+    앱 role은 INSERT/SELECT만 가진다. 기록을 고쳐 비용을 줄일 수 없게 한다.
+    """
+
+    __tablename__ = "model_calls"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    actor_id: Mapped[UUID | None] = mapped_column(default=None)
+    purpose: Mapped[str] = mapped_column(Text)
+    endpoint: Mapped[str] = mapped_column(Text)
+    pricing_provider: Mapped[str | None] = mapped_column(Text, default=None)
+    requested_model: Mapped[str] = mapped_column(Text)
+    served_model: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    stop_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    cached_input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    billing: Mapped[str] = mapped_column(Text)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), default=None)
+    cost_basis: Mapped[str] = mapped_column(Text)
+    price_refs: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
+    provider_request_id: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

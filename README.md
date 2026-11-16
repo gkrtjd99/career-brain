@@ -39,7 +39,18 @@ curl -H "Authorization: Bearer <token>" -F file=@resume.pdf localhost:8000/api/c
 npm run dev                                             # http://localhost:5173
 ```
 
-DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md)
+모델(LLM) 연결과 비용:
+
+```bash
+cp models.example.toml models.toml       # 엔드포인트·라우트·월 예산 (키는 환경변수로)
+uv run personal-api models               # 설정 상태 (키 값은 출력하지 않음)
+uv run personal-api pricing              # 단가표 점검 (--fetch-xai: xAI 공식 단가 API와 대조)
+CAREER_API_TOKEN=<token> uv run personal-api ping       # 짧은 합성 요청으로 연결 확인 (과금됨)
+CAREER_API_TOKEN=<token> uv run personal-api usage --by model
+curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=day&days=30"
+```
+
+DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md)
 
 ## 원칙
 

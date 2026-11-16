@@ -8,6 +8,7 @@ workspace는 요청 body·path·query로 받지 않는다. 항상 ``IdentityReso
 # 의존성을 Annotated로 참조하므로 FastAPI가 런타임에 타입을 해석할 수 있어야 한다.
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -28,6 +29,7 @@ from career_core.db.models import (
 )
 from career_core.db.session import Database
 from career_core.domain.workspace import ScopePermissionPolicy
+from career_core.interfaces.http.usage import add_usage_routes
 from career_core.ports import ActorContext, BlobStore, IdentityResolver, PermissionPolicy
 from career_core.uploads import UploadRejected
 from career_core.usecases.sources import upload_source
@@ -41,6 +43,8 @@ class CoreDeps:
     # 없으면 원본 업로드 경로를 등록하지 않는다.
     blobs: BlobStore | None = None
     max_upload_bytes: int = 20 * 1024 * 1024
+    # 사용량 응답에 같이 보여줄 월 예산 (models.toml [budget]).
+    monthly_budget_usd: Decimal | None = None
 
 
 class WorkspaceOut(BaseModel):
@@ -167,6 +171,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
             MemberOut(actor_id=r.actor_id, display_name=r.display_name, role=r.role) for r in rows
         ]
 
+    add_usage_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 

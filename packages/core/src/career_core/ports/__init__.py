@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
+from career_core.llm.types import ModelCompletion, ModelRequest
+
 
 @dataclass(frozen=True, slots=True)
 class ActorContext:
@@ -41,6 +43,13 @@ class EgressPolicy(Protocol):
     """어떤 자료를 어떤 외부 제공자(LLM/OCR/검색)에 보낼 수 있는지 판단한다."""
 
     def allows(self, actor: ActorContext, provider: str, data_class: str, purpose: str) -> bool: ...
+
+
+@runtime_checkable
+class ModelClient(Protocol):
+    """LLM 제공자 하나. 게이트웨이(`career_core.llm.gateway`)만 직접 부른다."""
+
+    async def complete(self, model: str, request: ModelRequest) -> ModelCompletion: ...
 
 
 @runtime_checkable
@@ -152,6 +161,7 @@ __all__ = [
     "IdentityResolver",
     "LocalParseResult",
     "LocalParser",
+    "ModelClient",
     "NotificationSink",
     "ParseError",
     "ParsedBlock",
