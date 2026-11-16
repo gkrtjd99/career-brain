@@ -32,11 +32,19 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [dataClass, setDataClass] = useState("private");
+  // DOCX 숨김 서식 글(w:vanish)을 원본 블록에서 뺄지 (기본은 넣고 검사가 경고)
+  const [dropHidden, setDropHidden] = useState(false);
+  const isDocx = !!file && /\.docx$/i.test(file.name);
   const [uploaded, setUploaded] = useState<UploadOut | null>(null);
   const [extractionId, setExtractionId] = useState<string | null>(null);
 
   const upload = useMutation({
-    mutationFn: () => api.uploadSource(file!, { title: title.trim() || undefined, dataClass }),
+    mutationFn: () =>
+      api.uploadSource(file!, {
+        title: title.trim() || undefined,
+        dataClass,
+        hiddenText: isDocx && dropHidden ? "exclude" : undefined,
+      }),
     onSuccess: setUploaded,
   });
   const source = useQuery({
@@ -69,6 +77,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
   const reset = () => {
     setFile(null);
     setTitle("");
+    setDropHidden(false);
     setUploaded(null);
     setExtractionId(null);
     upload.reset();
@@ -123,6 +132,22 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
               <option value="public">공개 자료</option>
             </Select>
           </div>
+          {isDocx ? (
+            <label className="flex items-start gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={dropHidden}
+                onChange={(e) => setDropHidden(e.target.checked)}
+              />
+              <span>
+                숨김 서식 글은 빼고 읽기
+                <span className="block text-xs text-muted">
+                  Word에서 숨김으로 표시한 글을 경험 추출·검색에 넣지 않습니다. 숨김 글 검사는 그대로 경고합니다.
+                </span>
+              </span>
+            </label>
+          ) : null}
           {uploadErr ? <p className="text-[13px] text-danger">{uploadErr}</p> : <ErrorText error={upload.error} />}
           <Button type="submit" variant="primary" disabled={!file || upload.isPending}>
             {upload.isPending ? <Spinner /> : null} 올리기
@@ -135,6 +160,10 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
             <div className="text-[13px] text-muted">
               {version?.original_filename ?? file?.name}
               {uploaded.deduplicated ? " · 이미 올린 파일과 같아 기존 것을 씁니다" : ""}
+              {uploaded.hidden_text === "exclude" ? " · 숨김 서식 글은 빼고 읽습니다" : ""}
+              {uploaded.deduplicated && dropHidden && uploaded.hidden_text === "keep"
+                ? " (처음 올릴 때 숨김 글을 넣고 읽어 그대로 씁니다)"
+                : ""}
             </div>
           </li>
           <li className="space-y-1">

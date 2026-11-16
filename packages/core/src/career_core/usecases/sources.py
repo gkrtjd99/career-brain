@@ -14,9 +14,13 @@ from career_core.db.models import ExtractionRun, Job, ParseRun, Source, SourceVe
 from career_core.db.session import Database
 from career_core.domain.sources import PIPELINE_VERSION, DataClass, ParseStatus
 from career_core.ports import ActorContext, BlobStore
-from career_core.uploads import UploadRejected, clean_filename, resolve_mime
+from career_core.uploads import DOCX_MIME, UploadRejected, clean_filename, resolve_mime
 
 PARSE_JOB = "parse"
+# c0029 ``parse_runs.hidden_text``: 숨김 서식 글을 블록에 넣는다 / 뺀다
+HIDDEN_TEXT_CHOICES = ("keep", "exclude")
+# ``exclude``를 따르는 형식 (나머지는 ``keep``으로 저장한다)
+HIDDEN_TEXT_EXCLUDABLE = frozenset({DOCX_MIME})
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +29,7 @@ class UploadResult:
     version_id: UUID
     parse_run_id: UUID | None
     deduplicated: bool
+    hidden_text: str = "keep"  # 그 파싱 실행이 실제로 쓰는 값 (같은 파일이면 처음 올린 때의 값)
 
 
 _STRICTNESS = {DataClass.PUBLIC: 0, DataClass.PRIVATE: 1, DataClass.RESTRICTED: 2}
@@ -41,13 +46,21 @@ async def _existing(
         source = await s.get(Source, version.source_id)
         if _STRICTNESS[data_class] > _STRICTNESS[DataClass(source.data_class)]:
             source.data_class = data_class.value
-        run_id = await s.scalar(
-            select(ParseRun.id).where(
-                ParseRun.source_version_id == version.id,
-                ParseRun.pipeline_version == PIPELINE_VERSION,
+        run = (
+            await s.execute(
+                select(ParseRun.id, ParseRun.hidden_text).where(
+                    ParseRun.source_version_id == version.id,
+                    ParseRun.pipeline_version == PIPELINE_VERSION,
+                )
             )
+        ).first()
+        return UploadResult(
+            version.source_id,
+            version.id,
+            run[0] if run else None,
+            deduplicated=True,
+            hidden_text=run[1] if run else "keep",
         )
-        return UploadResult(version.source_id, version.id, run_id, deduplicated=True)
 
 
 async def upload_source(
@@ -61,7 +74,10 @@ async def upload_source(
     max_bytes: int,
     title: str | None = None,
     data_class: str = DataClass.PRIVATE,
+    hidden_text: str = "keep",
 ) -> UploadResult:
+    """``hidden_text``: ``exclude``면 숨김 서식 글을 원본 블록에서 뺀다 (DOCX만, 다른 형식은 ``keep``).
+    같은 파일을 다시 올리면 처음 파싱의 값을 그대로 돌려준다 (다시 파싱하지 않는다)."""
     if not data:
         raise UploadRejected("empty", 400)
     if len(data) > max_bytes:
@@ -70,8 +86,12 @@ async def upload_source(
         dc = DataClass(data_class)
     except ValueError as exc:
         raise UploadRejected("invalid_data_class", 422) from exc
+    if hidden_text not in HIDDEN_TEXT_CHOICES:
+        raise UploadRejected("invalid_hidden_text", 422)
     name = clean_filename(filename)
     mime = resolve_mime(data, declared_mime, name)
+    if mime not in HIDDEN_TEXT_EXCLUDABLE:
+        hidden_text = "keep"
     sha256 = hashlib.sha256(data).hexdigest()
     ws = actor.workspace_id
 
@@ -104,6 +124,7 @@ async def upload_source(
         pipeline_version=PIPELINE_VERSION,
         status=ParseStatus.PENDING,
         requested_by=actor.subject_id,
+        hidden_text=hidden_text,
     )
     try:
         async with db.workspace_session(ws) as s:
@@ -121,7 +142,7 @@ async def upload_source(
         if found := await _existing(db, ws, sha256, dc):
             return found
         raise
-    return UploadResult(source.id, version.id, run.id, deduplicated=False)
+    return UploadResult(source.id, version.id, run.id, deduplicated=False, hidden_text=hidden_text)
 
 
 # ---------------------------------------------------------------- 목록

@@ -111,11 +111,15 @@ export function createClient({
     me: () => get<T.Me>("/core/me"),
 
     // 원본
-    uploadSource: (file: File, opts: { title?: string; dataClass?: string } = {}) => {
+    uploadSource: (
+      file: File,
+      opts: { title?: string; dataClass?: string; hiddenText?: T.HiddenTextMode } = {},
+    ) => {
       const form = new FormData();
       form.set("file", file);
       if (opts.title) form.set("title", opts.title);
       if (opts.dataClass) form.set("data_class", opts.dataClass);
+      if (opts.hiddenText) form.set("hidden_text", opts.hiddenText);
       return json<T.UploadOut>("POST", "/core/sources", { form });
     },
     sources: (limit?: number) => get<T.SourceListItem[]>("/core/sources", { limit }),

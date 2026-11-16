@@ -372,3 +372,17 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내기·복원 대상이 자동으로 된다 (`test_export.py`). 원문 토큰·키·PDF 바이트는 들어 있지 않다.
 - downgrade: 표를 지우고 `needs_confirmation` 실행을 `failed`/`needs_manual_check`로 돌린 뒤 CHECK를 되돌린다 (FORCE RLS는 소유자에게도 걸리므로 그동안만 `NO FORCE`, c0021과 같은 방식).
 - 흐름·규칙: `postings.md` "스캔 PDF 쪽 고르기·비용 확인".
+
+## 원본 파싱의 숨김 서식 글 빼기 (c0029)
+
+`c0029_docx_hidden_runs` (`down_revision = c0025`; 같은 때 병렬로 만든 다른 migration과 합칠 때 번호 순서로 다시 잇는다).
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `parse_runs.hidden_text` | text NOT NULL DEFAULT `'keep'`, CHECK `ck_parse_runs_hidden_text` (`keep`·`exclude`). 그 파싱 실행이 숨김 서식 글(DOCX `w:vanish`·`specVanish`·`webHidden`)을 블록에 넣었는지(`keep`) 뺐는지(`exclude`) | 기존 권한 그대로 |
+
+- 업로드 때 정한다 (`POST /core/sources` 폼 `hidden_text`). 지금은 DOCX만 `exclude`를 따르고, 다른 형식은 `keep`으로 저장한다. 같은 파일 중복 업로드는 처음 실행의 값을 돌려준다.
+- 기존 행은 `keep`(지금까지의 동작). RLS·FORCE·FK는 그대로 (칸 하나).
+- 내보내기: `parse_runs`는 내보내는 표라 `@schema_step("c0029")`가 옛 묶음 행에 `hidden_text = 'keep'`을 넣는다 (`test_schema_steps_cover_every_migration`).
+- downgrade: CHECK와 칸을 지운다.
+- 규칙: `applications.md` "DOCX 원본" — 숨김 run 빼기.

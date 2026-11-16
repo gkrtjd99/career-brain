@@ -28,7 +28,11 @@ export interface UploadOut {
   version_id: Uuid;
   parse_run_id: Uuid | null;
   deduplicated: boolean;
+  /** c0029: 숨김 서식 글을 블록에 넣는지·빼는지 (DOCX만 exclude). 같은 파일이면 처음 값 */
+  hidden_text: HiddenTextMode;
 }
+
+export type HiddenTextMode = "keep" | "exclude";
 
 export interface ParseOut {
   run_id: Uuid;
@@ -36,6 +40,7 @@ export interface ParseOut {
   pages_total: number | null;
   missing_pages: number[];
   error_code: string | null;
+  hidden_text: HiddenTextMode;
 }
 
 export interface SourceVersion {
@@ -1307,7 +1312,9 @@ export type HiddenTextCode =
   // c0023 PDF: 배경과 같은 색, 숨긴 주석·양식 칸, 인쇄되지 않는 주석 글(참고)
   | "hidden_text_same_color"
   | "hidden_text_annotation"
-  | "annotation_text";
+  | "annotation_text"
+  // PDF 글 뒤에 칠한 불투명 도형·이미지가 글을 덮음
+  | "hidden_text_covered";
 
 /** 올린 DOCX·PDF 숨김 글 검사 결과. 경고만 한다 (파일을 고치거나 저장하지 않는다) */
 export interface FileCheck {
