@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 from uuid import UUID
+
+from career_core.llm.types import ModelCompletion, ModelRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +46,13 @@ class EgressPolicy(Protocol):
 
 
 @runtime_checkable
+class ModelClient(Protocol):
+    """LLM 제공자 하나. 게이트웨이(`career_core.llm.gateway`)만 직접 부른다."""
+
+    async def complete(self, model: str, request: ModelRequest) -> ModelCompletion: ...
+
+
+@runtime_checkable
 class BudgetPolicy(Protocol):
     """작업 시작 전 예약, 완료 후 정산. 같은 idempotency_key로 이중 차감하지 않는다."""
 
@@ -57,9 +67,63 @@ class BudgetPolicy(Protocol):
 
 @runtime_checkable
 class BlobStore(Protocol):
-    async def put(self, actor: ActorContext, key: str, data: bytes, content_type: str) -> str: ...
+    """원본·결과 저장. key는 내용의 sha256 hex. 권한 검사는 호출하는 usecase가 먼저 한다."""
 
-    async def get(self, actor: ActorContext, key: str) -> bytes: ...
+    async def put(self, workspace_id: UUID, key: str, data: bytes, content_type: str) -> str: ...
+
+    async def get(self, workspace_id: UUID, key: str) -> bytes: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedBlock:
+    page: int | None
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class LocalParseResult:
+    """``pages_total``이 None이면 쪽 개념이 없는 자료(텍스트·HTML)."""
+
+    blocks: tuple[ParsedBlock, ...]
+    pages_total: int | None
+    pages_with_text: frozenset[int] = frozenset()
+
+
+class ParseError(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@runtime_checkable
+class LocalParser(Protocol):
+    """외부 전송 없이 이 서버 안에서 실행하는 추출기."""
+
+    def parse(self, data: bytes) -> LocalParseResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderParseStatus:
+    state: str  # "pending" | "done" | "failed"
+    blocks: tuple[ParsedBlock, ...] = ()
+    returned_pages: frozenset[int] = frozenset()
+    error: str | None = None
+
+
+@runtime_checkable
+class ParserProvider(Protocol):
+    """외부 파서(OCR 등). 제출 후에는 provider_job_id로 상태만 조회한다.
+
+    호출 전에 반드시 EgressPolicy를 검사한다. 다른 제공자로의 자동 전환도 새 전송이다.
+    """
+
+    name: str
+
+    async def submit(
+        self, data: bytes, mime_type: str, pages: Sequence[int], idempotency_key: str
+    ) -> str: ...
+
+    async def poll(self, provider_job_id: str) -> ProviderParseStatus: ...
 
 
 @runtime_checkable
@@ -95,6 +159,13 @@ __all__ = [
     "DenyAllPermissionPolicy",
     "EgressPolicy",
     "IdentityResolver",
+    "LocalParseResult",
+    "LocalParser",
+    "ModelClient",
     "NotificationSink",
+    "ParseError",
+    "ParsedBlock",
+    "ParserProvider",
     "PermissionPolicy",
+    "ProviderParseStatus",
 ]

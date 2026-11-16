@@ -33,11 +33,25 @@ uv run pytest                                           # DB 테스트는 임시
 uv run personal-api migrate                             # core → personal migration
 uv run personal-api bootstrap                           # 공간 + owner + API 토큰 (한 번만 출력)
 uv run uvicorn personal_api.main:app --reload           # http://127.0.0.1:8000
+uv run personal-api worker                              # 파싱 등 백그라운드 작업
 curl -H "Authorization: Bearer <token>" localhost:8000/api/core/me
+curl -H "Authorization: Bearer <token>" -F file=@resume.pdf localhost:8000/api/core/sources
 npm run dev                                             # http://localhost:5173
 ```
 
-DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md)
+모델(LLM) 연결과 비용:
+
+```bash
+cp models.example.toml models.toml       # 엔드포인트·라우트·월 예산 (키는 환경변수로)
+cp .env.example .env                     # 키·토큰 (git 제외, 셸 환경변수가 우선)
+uv run personal-api models               # 설정 상태 (키 값은 출력하지 않음)
+uv run personal-api pricing              # 단가표 점검 (--fetch-xai: xAI 공식 단가 API와 대조)
+uv run personal-api ping                 # 짧은 합성 요청으로 연결 확인 (종량제면 과금)
+uv run personal-api usage --by model     # CAREER_API_TOKEN 의 공간
+curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=day&days=30"
+```
+
+DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md)
 
 ## 원칙
 

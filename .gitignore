@@ -27,3 +27,7 @@ storage/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# 개인 모델 설정·단가 덮어쓰기
+models.toml
+prices.local.toml

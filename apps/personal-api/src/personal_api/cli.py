@@ -2,20 +2,63 @@
 
 personal-api migrate     # core → personal 순서로 migration (소유자 계정)
 personal-api bootstrap   # 공간 + owner + API 토큰 생성 (앱 계정), 토큰은 한 번만 출력
+personal-api worker      # 백그라운드 작업 처리
+personal-api models      # 엔드포인트·라우트·단가·키 설정 상태 (키 값은 출력하지 않음)
+personal-api pricing     # 단가표 점검 (오래된 항목, 단가 없는 라우트)
+personal-api usage       # 모델 사용량·비용 (CAREER_API_TOKEN 의 공간)
+personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 설정을 확인 (과금됨)
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import os
+import sys
+import urllib.request
+from datetime import UTC, date, datetime, timedelta
 
+from career_core.adapters.blobstore import LocalBlobStore
+from career_core.adapters.parsers import default_local_parsers
 from career_core.db import Database
 from career_core.db.migrate import upgrade
+from career_core.jobs.worker import parsing_handlers, run_once, run_until_idle
+from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
+from career_core.llm.config import BILLING_METERED
+from career_core.llm.pricing_check import XAI_LANGUAGE_MODELS_URL, check_prices, compare_xai
+from career_core.policies import ProviderEgressPolicy
+from career_core.ports import ActorContext
+from career_core.usecases.parsing import ParsingDeps
+from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
-from personal_api.identity import issue_token
+from personal_api.identity import PersonalTokenResolver, issue_token
 from personal_api.migrations import PERSONAL_CHAIN
+from personal_api.models import build_gateway, load_config, load_prices
 from personal_api.settings import Settings
+
+TOKEN_ENV = "CAREER_API_TOKEN"
+
+
+async def _worker(settings: Settings, *, once: bool) -> None:
+    db = Database(settings.database_url)
+    deps = ParsingDeps(
+        db=db,
+        blobs=LocalBlobStore(settings.blob_dir),
+        egress=ProviderEgressPolicy({}),  # 외부 제공자 미설정 = 외부 전송 없음
+        local_parsers=default_local_parsers(),
+    )
+    handlers = parsing_handlers(deps)
+    try:
+        if once:
+            print(f"processed {await run_until_idle(db, handlers)} job(s)")
+            return
+        while True:
+            if not await run_once(db, handlers):
+                await asyncio.sleep(1)
+    finally:
+        await db.dispose()
 
 
 async def _bootstrap(settings: Settings, workspace_name: str, display_name: str) -> str:
@@ -27,6 +70,130 @@ async def _bootstrap(settings: Settings, workspace_name: str, display_name: str)
         await db.dispose()
 
 
+async def _actor(db: Database) -> ActorContext:
+    token = os.environ.get(TOKEN_ENV)
+    if not token:
+        sys.exit(f"set {TOKEN_ENV} to an API token from `personal-api bootstrap`")
+    actor = await PersonalTokenResolver(db).resolve(token)
+    if actor is None:
+        sys.exit(f"{TOKEN_ENV} is not a valid token")
+    return actor
+
+
+def _models(settings: Settings) -> None:
+    config = load_config(settings)
+    prices = load_prices(config)
+    if not config.endpoints:
+        print(f"no endpoints configured ({settings.models_config}); all model calls are denied")
+        return
+    print("endpoints:")
+    for ep in config.endpoints.values():
+        key = (
+            "-"
+            if not ep.api_key_env
+            else (f"{ep.api_key_env}={'set' if os.environ.get(ep.api_key_env) else 'MISSING'}")
+        )
+        classes = ",".join(sorted(ep.data_classes - {"restricted"})) or "none"
+        print(f"  {ep.name:<12} {ep.kind:<9} {ep.billing:<12} key {key:<28} data {classes}")
+    print("routes:")
+    for purpose, route in sorted(config.routes.items()):
+        ep = config.endpoints[route.endpoint]
+        provider = ep.pricing_provider if ep.billing == BILLING_METERED else ep.price_as
+        price = prices.lookup(provider, route.model) if provider else None
+        shown = f"in {price.rates.input} / out {price.rates.output} USD/1M" if price else "no price"
+        print(f"  {purpose:<12} {route.endpoint}/{route.model:<28} {shown}")
+    if config.budget.monthly_usd is not None:
+        print(f"monthly budget: {config.budget.monthly_usd} USD (metered endpoints only)")
+
+
+def _fetch_xai() -> dict:
+    """xAI 공식 단가 API. 키는 xAI에만 보낸다."""
+    key = os.environ.get("XAI_API_KEY")
+    if not key:
+        sys.exit("set XAI_API_KEY to fetch xAI prices")
+    req = urllib.request.Request(
+        XAI_LANGUAGE_MODELS_URL,
+        headers={"Authorization": f"Bearer {key}", "User-Agent": "career-brain-pricing-check"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.load(resp)
+
+
+def _pricing(settings: Settings, max_age_days: int, fetch_xai: bool) -> int:
+    config = load_config(settings)
+    prices = load_prices(config)
+    findings = check_prices(prices, config, today=date.today(), max_age_days=max_age_days)
+    if fetch_xai:
+        findings += compare_xai(_fetch_xai(), prices)
+    for f in findings:
+        print(f"{f.level:<5} {f.code:<20} {f.subject}  {f.detail}")
+    if not findings:
+        print("pricing ok")
+    return 1 if any(f.level == "error" for f in findings) else 0
+
+
+async def _usage(settings: Settings, days: int, group_by: str) -> None:
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        now = datetime.now(UTC)
+        s = await usage_summary(
+            db,
+            actor.workspace_id,
+            since=now - timedelta(days=days),
+            group_by=group_by,
+            monthly_budget_usd=load_config(settings).budget.monthly_usd,
+            now=now,
+        )
+    finally:
+        await db.dispose()
+    print(
+        f"{group_by:<28} {'calls':>6} {'err':>4} {'deny':>4} {'in':>10} {'cached':>9} "
+        f"{'out':>9} {'spent$':>11} {'equiv$':>10}"
+    )
+    for r in [*s.rows, s.total]:
+        print(
+            f"{r.key:<28} {r.calls:>6} {r.errors:>4} {r.denied:>4} {r.input_tokens:>10} "
+            f"{r.cached_input_tokens:>9} {r.output_tokens:>9} {r.spent_usd:>11.4f} "
+            f"{r.equivalent_usd:>10.4f}"
+        )
+    line = f"this month: {s.month_spent_usd:.4f} USD"
+    if s.monthly_budget_usd is not None:
+        line += f" of {s.monthly_budget_usd} (remaining {s.budget_remaining_usd:.4f})"
+    print(line)
+    for note in s.notes:
+        print(f"note: {note}")
+
+
+async def _ping(settings: Settings, purpose: str) -> int:
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        gateway = build_gateway(settings, db)
+        request = ModelRequest(
+            messages=(ChatMessage("user", "Reply with the single word OK."),),
+            max_output_tokens=256,
+            data_classes=frozenset({"public"}),  # 합성 문장만 보낸다
+        )
+        try:
+            result = await gateway.run(actor, purpose, request)
+        except ModelDenied as exc:
+            print(f"denied: {exc.code}")
+            return 1
+        except ModelCallError as exc:
+            print(f"error: {exc.code}")
+            return 1
+    finally:
+        await db.dispose()
+    u = result.usage
+    print(f"{result.endpoint}/{result.model} stop={result.stop_reason} text={result.text[:40]!r}")
+    print(
+        f"tokens in {u.input_tokens} cached {u.cached_input_tokens} out {u.output_tokens} "
+        f"(reasoning {u.reasoning_tokens}) cost {result.cost_usd} USD [{result.cost_basis}]"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="personal-api")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -34,6 +201,17 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("bootstrap", help="create a workspace, owner and API token (run once)")
     b.add_argument("--workspace-name", default="내 커리어")
     b.add_argument("--display-name", default="me")
+    w = sub.add_parser("worker", help="process background jobs")
+    w.add_argument("--once", action="store_true", help="process pending jobs and exit")
+    sub.add_parser("models", help="show model endpoints, routes and price status")
+    pr = sub.add_parser("pricing", help="check the price catalog against configured routes")
+    pr.add_argument("--max-age-days", type=int, default=60)
+    pr.add_argument("--fetch-xai", action="store_true", help="compare with xAI's pricing API")
+    u = sub.add_parser("usage", help=f"model usage and cost for the {TOKEN_ENV} workspace")
+    u.add_argument("--days", type=int, default=30)
+    u.add_argument("--by", default="day", choices=["day", "model", "purpose", "endpoint", "status"])
+    pg = sub.add_parser("ping", help="send a tiny synthetic request through a route (billed)")
+    pg.add_argument("purpose", nargs="?", default="default")
     args = parser.parse_args(argv)
     settings = Settings.from_env()
 
@@ -44,6 +222,16 @@ def main(argv: list[str] | None = None) -> None:
         token = asyncio.run(_bootstrap(settings, args.workspace_name, args.display_name))
         print("API token (shown once, store it safely):")
         print(token)
+    elif args.cmd == "worker":
+        asyncio.run(_worker(settings, once=args.once))
+    elif args.cmd == "models":
+        _models(settings)
+    elif args.cmd == "pricing":
+        sys.exit(_pricing(settings, args.max_age_days, args.fetch_xai))
+    elif args.cmd == "usage":
+        asyncio.run(_usage(settings, args.days, args.by))
+    elif args.cmd == "ping":
+        sys.exit(asyncio.run(_ping(settings, args.purpose)))
 
 
 if __name__ == "__main__":
