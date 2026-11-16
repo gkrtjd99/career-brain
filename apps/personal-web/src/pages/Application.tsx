@@ -26,10 +26,11 @@ import {
 } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
-import { ChevronRight, Copy, FileText, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Download, FileText, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
+import { ExportSheet } from "../components/doc/ExportSheet";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime, formatDeadline, int } from "../lib/format";
 import {
@@ -591,12 +592,30 @@ function FrozenView({ app }: { app: Application }) {
     enabled: !!app.submission_id,
     staleTime: Infinity,
   });
+  const [exporting, setExporting] = useState(false);
   if (!app.submission_id)
     return <EmptyState>제출본 없이 끝난 지원입니다 (제출 전 철회).</EmptyState>;
   return (
     <div className="space-y-8">
       <StagesSection app={app} />
-      <Loaded query={q}>{(sub) => <SubmissionBody sub={sub} />}</Loaded>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <Button size="sm" onClick={() => setExporting(true)}>
+            <Download size={14} /> 제출본 내보내기
+          </Button>
+        </div>
+        <Loaded query={q}>{(sub) => <SubmissionBody sub={sub} />}</Loaded>
+      </div>
+      <ExportSheet
+        open={exporting}
+        onClose={() => setExporting(false)}
+        title="제출본 내보내기"
+        description="고정된 제출본(모든 문서)을 한 파일로 만듭니다. 문서 내보내기와 같은 writer 를 쓰고, 만든 파일을 다시 읽어 숨김 글·조작 문구·민감 정보를 검사합니다. 경고만 합니다."
+        queryKey={["submission-export-check", app.id, app.submission_id]}
+        check={(format) => api.submissionExportCheck(app.id, format)}
+        download={(format) => api.submissionExportFile(app.id, format)}
+        label="제출본"
+      />
     </div>
   );
 }

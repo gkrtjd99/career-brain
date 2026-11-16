@@ -355,6 +355,49 @@ export function createClient({
     },
     submission: (applicationId: string) =>
       get<T.Submission>(`/core/applications/${id(applicationId)}/submission`),
+    // c0016 제출본(불변 스냅샷) 내보내기: 문서 내보내기와 같은 writer·검사
+    submissionExportCheck: (applicationId: string, format: T.ExportFormat) =>
+      get<T.ExportCheck>(`/core/applications/${id(applicationId)}/submission/export/check`, {
+        format,
+      }),
+    submissionExportFile: async (
+      applicationId: string,
+      format: T.ExportFormat,
+    ): Promise<T.ExportFile> => {
+      const res = await request(
+        "GET",
+        `/core/applications/${id(applicationId)}/submission/export`,
+        { query: { format } },
+      );
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const m = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+      const codes = res.headers.get("X-Export-Codes") ?? "";
+      return {
+        filename: m?.[1] ? decodeURIComponent(m[1]) : `submission.${format}`,
+        blob: await res.blob(),
+        findings: Number(res.headers.get("X-Export-Findings") ?? "0"),
+        codes: codes ? codes.split(",") : [],
+      };
+    },
+    /** c0016 수정안 요청 기록 (모델이 되물은 질문). runId 를 주면 그 일괄 실행 것만 */
+    suggestionRequests: (
+      applicationId: string | null,
+      documentId: string,
+      opts: { runId?: string; limit?: number } = {},
+    ) =>
+      get<T.SuggestionRequest[]>(`${docPath(applicationId, documentId)}/suggestion-requests`, {
+        run_id: opts.runId,
+        limit: opts.limit,
+      }),
+    /** c0016 제출할 DOCX·PDF 숨김 글 검사. 저장하지 않는다 */
+    checkHiddenText: (file: File) => {
+      const form = new FormData();
+      form.set("file", file);
+      return json<T.FileCheck>("POST", "/core/file-checks/hidden-text", { form });
+    },
+    /** c0016 올린 원본(PDF) 한 버전의 숨김 글 검사 */
+    sourceHiddenText: (sourceId: string, versionId?: string) =>
+      get<T.FileCheck>(`/core/sources/${id(sourceId)}/hidden-text`, { version_id: versionId }),
 
     // 학습 (O09)
     coverage: (postingId: string) =>

@@ -5,7 +5,9 @@
 해도, 이미 저장한 수정안이 있으면 모델을 부르지 않고 그것을 쓴다 — 재개해도 수정안이 늘지 않는다.
 
 실행 기록(position·result)에는 문단 ID와 개수만 남긴다. 수정안 본문은 문서의 수정안 목록에서 본다.
-모델이 되물은 질문은 개수만 남는다 (질문 글을 보려면 문서 화면에서 문단별로 다시 요청한다).
+모델이 되물은 질문 글은 문서 쪽 요청 기록(``document_suggestion_requests``, c0016)에 ``run_id``와 함께
+남는다 (``GET …/suggestion-requests?run_id=``). 수정안이 0개였던 문단도 요청 기록이 있으므로 재개 때
+모델을 다시 부르지 않는다.
 
 수정안은 초안이다. 적용은 사람이 문서 화면에서 한다 (이 workflow는 문서·브레인에 쓰지 않는다).
 시작 뒤 문서가 바뀌면(base_revision 불일치) 남은 문단은 하지 않고 ``revision_conflict``로 끝난다.
@@ -100,6 +102,7 @@ async def _suggest_next(ctx: StepContext) -> StepResult:
             instruction=ctx.input.get("instruction"),
             idempotency_key=ctx.effect_key(f"block:{block_id}"),
             call_model=ctx.model,
+            run_id=ctx.run_id,
         )
     except RevisionConflict as exc:
         raise StepFailed("revision_conflict") from exc

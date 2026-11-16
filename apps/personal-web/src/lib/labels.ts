@@ -279,6 +279,14 @@ export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
   company_confidential: { label: "대외비·기밀 표시", group: "sensitive" },
   cliche: { label: "상투어", group: "info" },
   paragraph_not_specific: { label: "구체성 부족", group: "info" },
+  // c0016 올린 DOCX·PDF 숨김 글 검사
+  hidden_text_vanish: { label: "숨김 서식 글", group: "manipulation" },
+  hidden_text_invisible: { label: "보이지 않게 그린 글", group: "manipulation" },
+  hidden_text_white: { label: "흰 글씨", group: "manipulation" },
+  hidden_text_tiny: { label: "1pt 미만 글자", group: "manipulation" },
+  hidden_text_outside_page: { label: "쪽 밖 글", group: "manipulation" },
+  pages_unreadable: { label: "읽지 못한 쪽", group: "info" },
+  pages_not_checked: { label: "검사하지 않은 쪽", group: "info" },
 };
 
 export const FINDING_GROUP: Record<FindingGroup, { label: string; tone: BadgeTone }> = {

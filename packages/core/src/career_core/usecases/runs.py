@@ -9,6 +9,9 @@
   다른 제공자·유료 경로로 바꾸지 않는다. 기다려도 안 풀리는 한도·예산은 사유를 남기고 실패한다.
 - worker는 시작한 사람의 범위를 그대로 믿지 않는다. 매 단계 현재 역할의 범위와 시작 당시 범위의
   교집합을 쓴다 (역할이 줄면 실행도 줄어든 범위로, 멤버가 아니면 실패).
+- 비용(c0016): ``StepContext.model``은 장부(``model_calls``) 행에 실행 ID·단계를 붙인다. 실행 비용은
+  단계를 저장할 때마다 그 장부 행에서 다시 계산한다(``cost_from_ledger``). 단계 도중 worker가 죽어
+  그 시도의 비용이 실행에 더해지지 못했어도, 재개 때(그리고 다음 저장 때) 장부에서 맞춰진다.
 """
 
 from __future__ import annotations
@@ -20,10 +23,10 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from career_core.db import Database, Job, Membership
+from career_core.db import Database, Job, Membership, ModelCall
 from career_core.db.base import utcnow
 from career_core.db.models import Run, RunEvent
 from career_core.domain.runs import (
@@ -92,7 +95,10 @@ class StepContext:
         gateway = self.deps.gateway
         if gateway is None:
             raise StepFailed("no_model_gateway")
-        result = await gateway.run(self.actor, purpose, request)
+        # 장부 행에 실행·단계를 남긴다: 이 단계가 끝나기 전에 worker가 죽어도 재개 때 비용을 맞춘다
+        result = await gateway.run(
+            self.actor, purpose, request, run_id=self.run_id, run_step=self.step
+        )
         self.model_calls += 1
         if result.cost_usd is None:
             self.cost_unknown = self.cost_unknown or result.cost_basis == "unknown"
@@ -310,6 +316,7 @@ async def start_run(
             cost_usd=Decimal(0),
             cost_unknown=False,
             model_calls=0,
+            cost_from_ledger=True,
             resumes=0,
             actor_kind=actor.kind,
             actor_scopes=sorted(actor.scopes),
@@ -428,7 +435,56 @@ async def _actor(s: AsyncSession, run: Run) -> ActorContext | None:
     return ActorContext(run.created_by, run.workspace_id, scopes, kind=run.actor_kind)
 
 
-def _add_cost(run: Run, ctx: StepContext) -> None:
+# 실지출로 세지 않는 비용 근거 (StepContext.model과 같은 규칙)
+_NOT_SPENT = ("list_price_equivalent", "none")
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerCost:
+    model_calls: int
+    cost_usd: Decimal
+    cost_unknown: bool
+
+
+async def ledger_cost(s: AsyncSession, run_id: UUID) -> LedgerCost:
+    """장부에서 이 실행의 성공한 호출 수·실지출·단가 미상 여부를 센다 (``StepContext.model``과 같은 규칙)."""
+    ok = ModelCall.status == "ok"
+    spent = and_(ok, ModelCall.cost_usd.isnot(None), ModelCall.cost_basis.notin_(_NOT_SPENT))
+    unknown = and_(ok, ModelCall.cost_usd.is_(None), ModelCall.cost_basis == "unknown")
+    row = (
+        await s.execute(
+            select(
+                func.count().filter(ok),
+                func.coalesce(func.sum(ModelCall.cost_usd).filter(spent), 0),
+                func.coalesce(func.bool_or(unknown), False),
+            ).where(ModelCall.run_id == run_id)
+        )
+    ).one()
+    return LedgerCost(int(row[0]), Decimal(row[1]), bool(row[2]))
+
+
+async def reconcile_cost(s: AsyncSession, run: Run) -> LedgerCost | None:
+    """실행 비용을 장부 기준으로 맞춘다. 바뀐 만큼(호출 수·비용)을 돌려준다. 예전 실행은 건드리지 않는다."""
+    if not run.cost_from_ledger:
+        return None
+    led = await ledger_cost(s, run.id)
+    delta = LedgerCost(
+        led.model_calls - run.model_calls,
+        led.cost_usd - (run.cost_usd or Decimal(0)),
+        led.cost_unknown and not run.cost_unknown,
+    )
+    run.model_calls = led.model_calls
+    run.cost_usd = led.cost_usd
+    run.cost_unknown = led.cost_unknown
+    return delta
+
+
+async def _add_cost(s: AsyncSession, run: Run, ctx: StepContext) -> None:
+    if run.cost_from_ledger:
+        # 장부가 원장이다: 이번 시도 + 앞서 죽은 시도의 호출까지 같은 값으로 맞는다.
+        # lease를 잃은 옛 worker가 늦게 저장해도 두 번 더해지지 않는다.
+        await reconcile_cost(s, run)
+        return
     run.cost_usd = (run.cost_usd or Decimal(0)) + ctx.cost_usd
     run.cost_unknown = run.cost_unknown or ctx.cost_unknown
     run.model_calls += ctx.model_calls
@@ -459,9 +515,17 @@ async def process_run(deps: RunDeps, ws: UUID, run_id: UUID) -> StepOutcome:
         if await _apply_stop(s, run):
             return StepOutcome(done=True)
         if run.status == RunStatus.RUNNING:
-            # 앞선 worker가 단계 도중에 멈췄다: 저장된 위치부터 다시 한다
+            # 앞선 worker가 단계 도중에 멈췄다: 저장된 위치부터 다시 한다.
+            # 그 시도의 모델 비용은 장부에만 있다 → 장부에서 실행 비용을 맞춘다 (c0016)
             run.resumes += 1
-            await add_event(s, run, RunEventKind.RESUMED, data={"step": run.step})
+            data: dict[str, Any] = {"step": run.step}
+            delta = await reconcile_cost(s, run)
+            if delta is not None and (delta.model_calls or delta.cost_usd or delta.cost_unknown):
+                data["reconciled"] = {
+                    "model_calls": delta.model_calls,
+                    "cost_usd": str(delta.cost_usd),
+                }
+            await add_event(s, run, RunEventKind.RESUMED, data=data)
         else:
             run.status = RunStatus.RUNNING.value
             run.started_at = run.started_at or utcnow()
@@ -511,13 +575,13 @@ async def process_run(deps: RunDeps, ws: UUID, run_id: UUID) -> StepOutcome:
             # 예상 못 한 오류: 사유를 남기고 작업 큐의 재시도에 맡긴다 (같은 위치부터 다시)
             async with db.workspace_session(ws) as s:
                 run = await _lock(s, run_id)
-                _add_cost(run, ctx)
+                await _add_cost(s, run, ctx)
                 await add_event(s, run, RunEventKind.ERROR, code=type(exc).__name__)
             raise
 
         async with db.workspace_session(ws) as s:
             run = await _lock(s, run_id)
-            _add_cost(run, ctx)
+            await _add_cost(s, run, ctx)
             if failure is not None:
                 await _finish(s, run, RunStatus.FAILED, code=failure)
                 return StepOutcome(done=True)
@@ -575,6 +639,7 @@ async def give_up_run(deps: RunDeps, ws: UUID, run_id: UUID) -> None:
 
 
 __all__ = [
+    "LedgerCost",
     "RunDeps",
     "RunEventView",
     "RunView",
@@ -588,8 +653,10 @@ __all__ = [
     "get_run",
     "give_up_run",
     "interrupt_run",
+    "ledger_cost",
     "list_runs",
     "process_run",
+    "reconcile_cost",
     "resume_run",
     "run_events",
     "start_run",

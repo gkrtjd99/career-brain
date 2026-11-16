@@ -1,4 +1,4 @@
-import type { Suggestion, SuggestOut } from "@career-brain/client";
+import type { Suggestion, SuggestionRequest, SuggestOut } from "@career-brain/client";
 import { Badge, Button, EmptyState, Label, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check, Sparkles, X } from "lucide-react";
@@ -67,7 +67,15 @@ export function SuggestionsPanel({
     queryKey: ["suggestions", docId],
     queryFn: () => api.suggestions(appId, docId),
   });
-  const refresh = () => qc.invalidateQueries({ queryKey: ["suggestions", docId] });
+  // c0016: 요청마다 남긴 모델 질문 (일괄 실행에서 나온 것 포함). 실행 이벤트에는 글을 싣지 않는다.
+  const requests = useQuery({
+    queryKey: ["suggestion-requests", docId],
+    queryFn: () => api.suggestionRequests(appId, docId, { limit: 20 }),
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["suggestions", docId] });
+    qc.invalidateQueries({ queryKey: ["suggestion-requests", docId] });
+  };
   // 응답을 못 받고 같은 요청을 다시 보내면 같은 키를 쓴다 → 서버가 모델을 다시 부르지 않고 저장된 수정안을 준다
   const attempt = useRef<{ params: string; key: string } | null>(null);
   const ask = useMutation({
@@ -162,6 +170,8 @@ export function SuggestionsPanel({
         </div>
       ) : null}
 
+      <PastQuestions rows={(requests.data ?? []).filter((r) => r.questions.length && r.id !== last?.request_id)} />
+
       <ErrorText error={apply.error ?? dismiss.error} />
       <Loaded query={list}>
         {(rows) => {
@@ -198,6 +208,35 @@ export function SuggestionsPanel({
         }}
       </Loaded>
     </div>
+  );
+}
+
+/** 지난 요청에서 AI가 사실 대신 물어본 것. 답은 브레인 인터뷰에 직접 적는다. */
+function PastQuestions({ rows }: { rows: SuggestionRequest[] }) {
+  if (!rows.length) return null;
+  const total = rows.reduce((n, r) => n + r.questions.length, 0);
+  return (
+    <details className="text-[13px]">
+      <summary className="cursor-pointer text-muted">지난 요청에서 AI가 물어본 것 {total}개</summary>
+      <ul className="mt-2 space-y-2">
+        {rows.map((r) => (
+          <li key={r.id} className="rounded-md border border-line bg-surface px-2.5 py-2">
+            <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+              {formatDateTime(r.created_at)}
+              {r.run_id ? <Badge tone="neutral">일괄 실행</Badge> : null}
+              <span>
+                · 제안 {r.proposed} · 거부 {r.rejected}
+              </span>
+            </p>
+            <ul className="list-disc space-y-0.5 pl-4">
+              {r.questions.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

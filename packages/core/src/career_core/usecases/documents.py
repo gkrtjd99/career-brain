@@ -8,24 +8,27 @@
 - 상투어 목록은 공간 설정(``document_settings.cliches``)에 저장한다. 비어 있으면(NULL) 기본 목록.
   검사 요청의 ``extra_cliches``는 계속 받는다(설정 목록에 더한다).
 - 내보내기(md·docx·인쇄용 html)는 만든 파일을 다시 읽어 숨김 글·조작 문구를 검사하고 경고를 같이 준다.
+- 제출본 내보내기(c0016)는 불변 스냅샷(``application_submissions``)의 문서들을 같은 writer로 한 파일에 쓴다.
+  지금 문서·주장이 아니라 제출 당시 복사본만 쓴다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from career_core.db import Database
-from career_core.db.models import ApplicationDocument, DocumentSettings
+from career_core.db.models import Application, ApplicationDocument, DocumentSettings
 from career_core.domain.document_export import (
     FORMATS,
     MEDIA_TYPES,
     ExportError,
+    ExportSection,
     export_filename,
     export_summary,
     inspect_export,
@@ -328,6 +331,54 @@ async def export_document(
     )
 
 
+def _submission_sections(documents: Sequence[dict]) -> list[ExportSection]:
+    out = []
+    for d in documents:
+        paragraphs = tuple(b.get("text", "") for b in d.get("blocks") or [] if b.get("text"))
+        note = d.get("question_prompt")
+        out.append(
+            ExportSection(
+                paragraphs,
+                heading=d.get("title") or None,
+                note=f"문항: {note}" if note else None,
+            )
+        )
+    return out
+
+
+async def export_submission(
+    db: Database, actor: ActorContext, application_id: UUID, *, fmt: str
+) -> ExportResult:
+    """제출본(불변 스냅샷)을 파일로 (md·docx·html). 문서 내보내기와 같은 writer·같은 검사."""
+    if fmt not in FORMATS:
+        raise DocumentRuleError("invalid_format")
+    sub = await app_uc.get_submission(db, actor, application_id)
+    async with db.workspace_session(actor.workspace_id) as s:
+        app = await s.get(Application, application_id)
+        own = await app_uc.own_contacts(s)
+    title = (app.title if app is not None else None) or "제출본"
+    stamp = sub.submitted_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    meta = ExportSection((f"제출본 · {stamp} 고정 · 내용 해시 {sub.content_hash[:12]}",))
+    sections = [meta, *_submission_sections(sub.documents)]
+    data = render(fmt, title, sections=sections)
+    try:
+        found: list[Finding] = inspect_export(fmt, data)
+    except ExportError as exc:
+        raise DocumentRuleError(exc.code) from exc
+    for d in sub.documents:
+        for b in d.get("blocks") or []:
+            found.extend(sensitive_findings(b.get("text", ""), own=own, block_id=b.get("id")))
+    return ExportResult(
+        filename=export_filename(f"{title} 제출본", fmt),
+        media_type=MEDIA_TYPES[fmt],
+        data=data,
+        format=fmt,
+        revision=0,
+        findings=[f.as_dict() for f in found],
+        summary=export_summary(found),
+    )
+
+
 __all__ = [
     "DocumentSettingsView",
     "ExportResult",
@@ -335,6 +386,7 @@ __all__ = [
     "copy_to_application",
     "create_shared_document",
     "export_document",
+    "export_submission",
     "get_settings",
     "list_shared_documents",
     "update_settings",

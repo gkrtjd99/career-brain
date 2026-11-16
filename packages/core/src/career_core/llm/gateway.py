@@ -137,7 +137,17 @@ class ModelGateway:
             self._clients[endpoint.name] = client
         return client
 
-    async def run(self, actor: ActorContext, purpose: str, request: ModelRequest) -> ModelResult:
+    async def run(
+        self,
+        actor: ActorContext,
+        purpose: str,
+        request: ModelRequest,
+        *,
+        run_id: UUID | None = None,
+        run_step: int | None = None,
+    ) -> ModelResult:
+        """``run_id``·``run_step``: 실행 단계 안의 호출이면 장부 행에 같이 남긴다 (실행 비용 보정용)."""
+        tag = (run_id, run_step) if run_id is not None else None
         route = self._config.route_for(purpose)
         if route is None:
             raise ModelDenied("no_route")
@@ -147,18 +157,22 @@ class ModelGateway:
 
         denial = await self._precheck(actor, purpose, request.data_classes, plan)
         if denial:
-            await self._record(actor, purpose, plan, status="denied", error_code=denial)
+            await self._record(actor, purpose, plan, status="denied", error_code=denial, tag=tag)
             raise ModelDenied(denial)
 
         api_key = self._env.get(endpoint.api_key_env) if endpoint.api_key_env else None
         if endpoint.api_key_env and not api_key:
-            await self._record(actor, purpose, plan, status="denied", error_code="api_key_missing")
+            await self._record(
+                actor, purpose, plan, status="denied", error_code="api_key_missing", tag=tag
+            )
             raise ModelDenied("api_key_missing")
 
         prompt_chars = len(request.system or "") + sum(len(m.content) for m in request.messages)
         prompt_chars += IMAGE_TOKEN_ESTIMATE * len(request.images)  # 예산 추정용 상한
         reservation = (
-            await self._reserve(actor, purpose, prompt_chars, request.max_output_tokens, plan)
+            await self._reserve(
+                actor, purpose, prompt_chars, request.max_output_tokens, plan, tag=tag
+            )
             if metered
             else None
         )
@@ -168,7 +182,13 @@ class ModelGateway:
         except ModelCallError as exc:
             await self._release(reservation)
             await self._record(
-                actor, purpose, plan, status="error", error_code=exc.code, latency=started
+                actor,
+                purpose,
+                plan,
+                status="error",
+                error_code=exc.code,
+                latency=started,
+                tag=tag,
             )
             raise
         except Exception as exc:
@@ -180,6 +200,7 @@ class ModelGateway:
                 status="error",
                 error_code=type(exc).__name__,
                 latency=started,
+                tag=tag,
             )
             raise
 
@@ -195,6 +216,7 @@ class ModelGateway:
             cost=cost,
             basis=basis,
             latency=started,
+            tag=tag,
         )
         if reservation is not None and self._budget is not None:
             actual = int((cost.usd or Decimal(0)) * 1_000_000) if basis != "unknown" else 0
@@ -263,7 +285,14 @@ class ModelGateway:
         return int(usd * 1_000_000) + 1
 
     async def _reserve(
-        self, actor: ActorContext, purpose: str, prompt_chars: int, max_output: int, plan: _Plan
+        self,
+        actor: ActorContext,
+        purpose: str,
+        prompt_chars: int,
+        max_output: int,
+        plan: _Plan,
+        *,
+        tag: tuple[UUID, int | None] | None = None,
     ) -> str | None:
         if self._budget is None:
             return None
@@ -272,7 +301,9 @@ class ModelGateway:
             actor, BUDGET_KIND, self._estimate_micro_usd(prompt_chars, max_output, plan), key
         )
         if reservation is None:
-            await self._record(actor, purpose, plan, status="denied", error_code="budget_exceeded")
+            await self._record(
+                actor, purpose, plan, status="denied", error_code="budget_exceeded", tag=tag
+            )
             raise ModelDenied("budget_exceeded")
         return reservation
 
@@ -411,6 +442,7 @@ class ModelGateway:
         cost: Cost | None = None,
         basis: str | None = None,
         latency: float | None = None,
+        tag: tuple[UUID, int | None] | None = None,
     ) -> UUID:
         usage = completion.usage if completion else None
         row = ModelCall(
@@ -438,6 +470,8 @@ class ModelGateway:
             price_refs=list(cost.refs) if cost else [],
             latency_ms=int((time.perf_counter() - latency) * 1000) if latency else None,
             provider_request_id=completion.request_id if completion else None,
+            run_id=tag[0] if tag else None,
+            run_step=tag[1] if tag else None,
             created_at=self._clock(),
         )
         async with self._db.workspace_session(actor.workspace_id) as session:

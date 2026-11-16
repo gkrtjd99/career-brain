@@ -477,7 +477,9 @@ export interface ActivityItem {
       | "document_id"
       | "revision_no"
       | "assessment_id"
-      | "study_item_id",
+      | "study_item_id"
+      /** "true" = 공용 문서의 revision (application_id 없음, c0016) */
+      | "shared",
       string
     >
   >;
@@ -735,6 +737,8 @@ export interface SuggestOut {
   model_call_id: Uuid | null;
   /** 같은 idempotency_key로 다시 요청해 모델을 부르지 않고 저장된 수정안을 돌려줬다 */
   replayed?: boolean;
+  /** c0016 요청 기록 ID (질문 글·개수는 suggestionRequests 로 다시 본다) */
+  request_id?: Uuid | null;
 }
 
 export interface SubmissionDocument {
@@ -1204,4 +1208,43 @@ export interface RequirementFrequency {
   groups: FrequencyGroup[];
   statuses: PostingStatus[];
   basis: "saved_postings_only";
+}
+
+// ---------------------------------------------------------------- c0016 요청 기록·파일 검사
+
+/** 수정안 요청 1회 기록. questions 는 모델이 사실 대신 물어본 것 (근거가 아니다) */
+export interface SuggestionRequest {
+  id: Uuid;
+  document_id: Uuid;
+  block_ids: string[];
+  questions: string[];
+  proposed: number;
+  rejected: number;
+  dropped: number;
+  /** 일괄 실행(suggest_document_batch)에서 나온 요청이면 그 실행 */
+  run_id: Uuid | null;
+  model_call_id: Uuid | null;
+  created_at: IsoDateTime;
+}
+
+export type HiddenTextCode =
+  | "hidden_text_vanish"
+  | "hidden_text_invisible"
+  | "hidden_text_white"
+  | "hidden_text_tiny"
+  | "hidden_text_outside_page";
+
+/** 올린 DOCX·PDF 숨김 글 검사 결과. 경고만 한다 (파일을 고치거나 저장하지 않는다) */
+export interface FileCheck {
+  format: "docx" | "pdf";
+  filename: string | null;
+  bytes: number;
+  pages: number | null;
+  pages_checked: number | null;
+  chars: number;
+  /** detail.count = 곳 수, detail.samples = [{page?, part?, text}] */
+  findings: Finding[];
+  summary: Record<string, number>;
+  source_id?: Uuid | null;
+  version_id?: Uuid | null;
 }

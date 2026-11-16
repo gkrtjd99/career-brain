@@ -839,7 +839,8 @@ async def test_batch_suggestions_run_resumes_without_duplicates(db, env):
     await run_until_idle(db, handlers)
     done = await run_uc.get_run(db, owner, view.id)
     assert done.status == "done" and done.resumes == 1
-    assert done.result == {"blocks": 3, "proposed": 2, "rejected": 1, "questions": 2}
+    # 재개한 둘째 문단은 저장된 요청 기록에서 질문까지 돌려받는다 (c0016: 질문 글은 문서 쪽 표에)
+    assert done.result == {"blocks": 3, "proposed": 2, "rejected": 1, "questions": 3}
     async with db.workspace_session(owner.workspace_id) as s:
         per_block = (
             await s.execute(
@@ -853,8 +854,13 @@ async def test_batch_suggestions_run_resumes_without_duplicates(db, env):
         )
     assert sorted(n for _, n in per_block) == [1, 1, 1]  # 재개해도 중복 없음
     assert llm.calls == 3 and ledger == 3  # 재개 때 저장된 문단은 모델을 다시 부르지 않았다
-    # 비용은 실행에 쌓인다. 죽은 시도(둘째 문단)의 호출은 장부(model_calls 표)에만 남는다
-    assert done.model_calls == 2 and Decimal(done.cost_usd) > 0
+    # 비용은 실행에 쌓인다. 죽은 시도(둘째 문단)의 호출도 재개 때 장부에서 맞춘다 (c0016)
+    assert done.model_calls == 3 and Decimal(done.cost_usd) > 0
+    async with db.workspace_session(owner.workspace_id) as s:
+        tagged = await s.scalar(
+            select(func.sum(ModelCall.cost_usd)).where(ModelCall.run_id == view.id)
+        )
+    assert Decimal(done.cost_usd) == tagged
     # 실행 기록에 문서 글을 남기지 않는다
     assert "주문" not in json.dumps(done.position, ensure_ascii=False)
     # 수정안은 초안이다: 문서 revision은 그대로

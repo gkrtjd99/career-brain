@@ -336,6 +336,8 @@ function activityLink(it: ActivityItem): { to: string; params?: Record<string, s
       to: "/applications/$applicationId/documents/$documentId",
       params: { applicationId: r.application_id, documentId: r.document_id },
     };
+  // 공용 문서 revision (지원에 묶이지 않음)
+  if (r.document_id) return { to: "/documents/$documentId", params: { documentId: r.document_id } };
   if (r.experience_id) return { to: "/brain/$experienceId", params: { experienceId: r.experience_id } };
   if (r.posting_id) return { to: "/postings/$postingId", params: { postingId: r.posting_id } };
   if (r.study_item_id) return { to: "/study/items/$itemId", params: { itemId: r.study_item_id } };

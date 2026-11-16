@@ -2,6 +2,7 @@
 
 읽기 전용이다. 따로 기록하는 이벤트 테이블은 없고, 각 테이블의 시각 열을 그대로 모은다.
 그래서 "무엇이 언제 생겼다/확인됐다"만 알 수 있고 지워진 것은 나오지 않는다.
+문서 저장은 지원 문서와 공용 문서(``refs.shared``, ``application_id`` 없음) 모두 나온다.
 보는 사람에게 권한이 없는 종류는 `kinds`에서 빼고 부른다 (경로가 정한다).
 """
 
@@ -29,6 +30,7 @@ from career_core.ports import ActorContext
 KINDS = ("claim", "posting", "fetch_run", "document_revision", "study_attempt")
 MAX_LIMIT = 100
 TITLE_CHARS = 120
+SHARED_LABEL = "공용 문서"
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,7 +204,8 @@ async def recent_activity(
                         ApplicationDocument,
                         ApplicationDocument.id == DocumentRevision.document_id,
                     )
-                    .join(Application, Application.id == ApplicationDocument.application_id)
+                    # 공용 문서(지원 없음, c0012)의 revision도 나온다 (outer join)
+                    .outerjoin(Application, Application.id == ApplicationDocument.application_id)
                     .where(older(DocumentRevision.created_at))
                     .order_by(DocumentRevision.created_at.desc())
                     .limit(limit)
@@ -217,11 +220,13 @@ async def recent_activity(
                         rev.created_at,
                         _cut(doc.title),
                         rev.origin,
-                        f"{_cut(app_title)} · r{rev.revision_no}",
+                        f"{_cut(app_title) if doc.application_id else SHARED_LABEL}"
+                        f" · r{rev.revision_no}",
                         _ref(
                             application_id=doc.application_id,
                             document_id=doc.id,
                             revision_no=rev.revision_no,
+                            shared="true" if doc.application_id is None else None,
                         ),
                     )
                 )

@@ -36,6 +36,7 @@ from career_core.db.models import (
     DocumentRevision,
     DocumentSettings,
     DocumentSuggestion,
+    DocumentSuggestionRequest,
 )
 from career_core.domain.brain import CONFIRMED_STATUSES
 from career_core.domain.documents import (
@@ -224,6 +225,24 @@ class SuggestResult:
     model_call_id: UUID | None
     # 같은 멱등 키로 이미 만든 수정안을 돌려줬다 (모델을 다시 부르지 않았다)
     replayed: bool = False
+    # c0016 요청 기록 (질문 글·개수). 예전 요청을 돌려준 경우 없을 수 있다
+    request_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionRequestView:
+    """수정안 요청 1회의 기록. 질문은 모델이 사실 대신 물어본 것이다 (근거가 아니다)."""
+
+    id: UUID
+    document_id: UUID
+    block_ids: list[str]
+    questions: list[str]
+    proposed: int
+    rejected: int
+    dropped: int
+    run_id: UUID | None
+    model_call_id: UUID | None
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1067,6 +1086,68 @@ def _replayed(rows: Sequence[DocumentSuggestion]) -> SuggestResult:
     )
 
 
+async def _replay_request(s: AsyncSession, document_id: UUID, key: str) -> SuggestResult | None:
+    """같은 키의 요청 기록이 있으면 그 결과(수정안 + 질문)를 돌려준다. 수정안 0개였던 요청도 포함."""
+    req = await s.scalar(
+        select(DocumentSuggestionRequest).where(
+            DocumentSuggestionRequest.document_id == document_id,
+            DocumentSuggestionRequest.idempotency_key == key,
+        )
+    )
+    if req is None:
+        # c0016 이전에 만든 수정안 (요청 기록 없음): 수정안만 돌려준다
+        done = await _replay(s, document_id, key)
+        return _replayed(done) if done else None
+    rows = await _replay(s, document_id, key)
+    return SuggestResult(
+        [_suggestion_view(r) for r in rows],
+        list(req.questions),
+        req.dropped,
+        req.model_call_id,
+        replayed=True,
+        request_id=req.id,
+    )
+
+
+def _request_view(r: DocumentSuggestionRequest) -> SuggestionRequestView:
+    return SuggestionRequestView(
+        r.id,
+        r.document_id,
+        list(r.block_ids),
+        list(r.questions),
+        r.proposed,
+        r.rejected,
+        r.dropped,
+        r.run_id,
+        r.model_call_id,
+        r.created_at,
+    )
+
+
+async def list_suggestion_requests(
+    db: Database,
+    actor: ActorContext,
+    application_id: UUID | None,
+    document_id: UUID,
+    *,
+    run_id: UUID | None = None,
+    limit: int = 20,
+) -> list[SuggestionRequestView]:
+    """수정안 요청 기록(최근 것부터). 일괄 실행(run)이 받은 질문도 여기서 본다 (실행 기록에는 글이 없다)."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        await _get_doc(s, application_id, document_id)
+        q = (
+            select(DocumentSuggestionRequest)
+            .where(DocumentSuggestionRequest.document_id == document_id)
+            .order_by(DocumentSuggestionRequest.created_at.desc(), DocumentSuggestionRequest.id)
+            .limit(max(1, min(limit, 100)))
+        )
+        if run_id is not None:
+            q = q.where(DocumentSuggestionRequest.run_id == run_id)
+        rows = (await s.execute(q)).scalars().all()
+    return [_request_view(r) for r in rows]
+
+
 async def suggest_edits(
     db: Database,
     gateway: ModelGateway | None,
@@ -1079,22 +1160,25 @@ async def suggest_edits(
     instruction: str | None = None,
     idempotency_key: str | None = None,
     call_model: ModelCaller | None = None,
+    run_id: UUID | None = None,
 ) -> SuggestResult:
     """모델에게 최소 수정안을 받는다 (용도 `doc_suggest`, 자료 등급은 근거 원본을 따른다).
 
     코드가 원문·연결 근거와 대조해 사실을 바꾼 수정안은 `rejected`로 남긴다(사유와 함께).
     수정안은 문서에도 브레인에도 바로 들어가지 않는다. 사용자가 적용해야 새 revision이 된다.
 
-    - ``idempotency_key``: 같은 키로 이미 만든 수정안이 있으면 모델을 부르지 않고 그것을 돌려준다
-      (요청 재시도·실행 재개에서 중복 생성 없음). 수정안이 0건이었던 호출은 기록이 없으니 다시 부른다.
+    - ``idempotency_key``: 같은 키의 요청 기록이 있으면 모델을 부르지 않고 그 결과를 돌려준다
+      (요청 재시도·실행 재개에서 중복 생성 없음). 수정안이 0건이었던 요청도 기록(c0016)이 있어 다시
+      부르지 않는다.
+    - 요청마다 ``document_suggestion_requests`` 1행: 대상 문단 ID, 모델이 되물은 질문, 개수, ``run_id``.
     - ``call_model``: 모델 호출 함수. 실행(run) 단계는 ``StepContext.model``을 넘겨 비용을 실행에 쌓는다.
       없으면 ``gateway.run``.
     """
     key = (idempotency_key or "").strip()[:200] or None
     async with db.workspace_session(actor.workspace_id) as s:
         app, doc = await _get_doc(s, application_id, document_id)
-        if key and (done := await _replay(s, doc.id, key)):
-            return _replayed(done)
+        if key and (done := await _replay_request(s, doc.id, key)):
+            return done
         _ensure_editable(app)
         if base_revision != doc.current_revision:
             raise RevisionConflict(doc.current_revision)
@@ -1177,21 +1261,40 @@ async def suggest_edits(
                 created_by=actor.subject_id,
             )
         )
-    if rows:
-        try:
-            async with db.workspace_session(actor.workspace_id) as s:
-                s.add_all(rows)
-        except IntegrityError:
-            # 같은 키의 동시 요청이 먼저 저장했다: 그 결과를 돌려준다 (이번 모델 결과는 버린다)
-            if not key:
-                raise
-            async with db.workspace_session(actor.workspace_id) as s:
-                done = await _replay(s, doc.id, key)
-            if not done:
-                raise
-            return _replayed(done)
     questions = [q.strip()[:500] for q in parsed.questions if q and q.strip()][:10]
-    return SuggestResult([_suggestion_view(r) for r in rows], questions, dropped, call_id)
+    req = DocumentSuggestionRequest(
+        id=uuid4(),
+        workspace_id=actor.workspace_id,
+        document_id=doc.id,
+        base_revision_id=rev_id,
+        block_ids=[b["id"] for b in targets],
+        questions=questions,
+        proposed=sum(1 for r in rows if r.status == SuggestionStatus.PROPOSED),
+        rejected=sum(1 for r in rows if r.status == SuggestionStatus.REJECTED),
+        dropped=dropped,
+        idempotency_key=key,
+        run_id=run_id,
+        model_call_id=call_id,
+        created_by=actor.subject_id,
+    )
+    try:
+        # 요청 기록과 수정안을 한 트랜잭션에: 기록이 있으면 수정안도 있다 (재개 판단의 기준)
+        async with db.workspace_session(actor.workspace_id) as s:
+            s.add(req)
+            await s.flush()
+            s.add_all(rows)
+    except IntegrityError:
+        # 같은 키의 동시 요청이 먼저 저장했다: 그 결과를 돌려준다 (이번 모델 결과는 버린다)
+        if not key:
+            raise
+        async with db.workspace_session(actor.workspace_id) as s:
+            done = await _replay_request(s, doc.id, key)
+        if done is None:
+            raise
+        return done
+    return SuggestResult(
+        [_suggestion_view(r) for r in rows], questions, dropped, call_id, request_id=req.id
+    )
 
 
 async def list_suggestions(
@@ -1761,6 +1864,7 @@ __all__ = [
     "SensitiveUnacknowledged",
     "SubmissionView",
     "SuggestResult",
+    "SuggestionRequestView",
     "SuggestionView",
     "add_document",
     "application_checks",
@@ -1772,6 +1876,7 @@ __all__ = [
     "get_submission",
     "list_applications",
     "list_revisions",
+    "list_suggestion_requests",
     "list_suggestions",
     "review_suggestion",
     "save_revision",
