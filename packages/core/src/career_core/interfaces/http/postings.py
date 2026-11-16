@@ -38,6 +38,8 @@ class SummaryOut(BaseModel):
     pending_changes: list[str]
     last_fetch_status: str | None
     last_fetch_error: str | None
+    created_at: datetime | None
+    saved_at: datetime | None
 
 
 class RunOut(BaseModel):
@@ -125,6 +127,14 @@ def add_posting_routes(router: APIRouter, deps, authorize) -> None:
         except NotFound as exc:
             raise HTTPException(404, "not found") from exc
         return PostingOut.model_validate(view, from_attributes=True)
+
+    @router.get("/job-postings/{posting_id}/versions", response_model=list[VersionOut])
+    async def versions(actor: reader, posting_id: UUID) -> list[VersionOut]:
+        try:
+            rows = await uc.list_versions(db, actor, posting_id)
+        except NotFound as exc:
+            raise HTTPException(404, "not found") from exc
+        return [VersionOut.model_validate(v, from_attributes=True) for v in rows]
 
     @router.get("/job-postings/{posting_id}/versions/{version_id}", response_model=VersionOut)
     async def version(actor: reader, posting_id: UUID, version_id: UUID) -> VersionOut:

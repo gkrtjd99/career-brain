@@ -29,6 +29,7 @@ from career_core.db.models import (
 )
 from career_core.db.session import Database
 from career_core.domain.workspace import ScopePermissionPolicy
+from career_core.interfaces.http.activity import add_activity_routes
 from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
@@ -194,6 +195,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_approval_routes(router, deps, authorize)
     add_mcp_routes(router, deps)
     add_maintenance_routes(router, deps, authorize)
+    add_activity_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 

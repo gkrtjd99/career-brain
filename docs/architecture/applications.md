@@ -20,11 +20,12 @@ AI 수정안(선택) ─▶ 코드가 사실 변경·조작 문구 거부 ─▶
 | 메서드·경로 | 권한(행동 → scope) | 내용 |
 |---|---|---|
 | `POST /applications {posting_id, title?}` | `applications.write` → draft-write | 저장한 공고만. 문항마다 문서 생성 (201) |
-| `GET /applications` · `GET /applications/{id}` | `applications.read` → read | 목록·상세(문서 요약, 제출본 ID) |
+| `GET /applications` · `GET /applications/{id}` | `applications.read` → read | 목록(문항 수 `questions`, 아직 안 쓴 문항 `unwritten`)·상세(문서 요약, 제출본 ID) |
 | `POST /applications/{id}/status {status, note?}` | `applications.write` | passed·rejected·withdrawn만. `submitted`는 제출로만 |
 | `POST /applications/{id}/documents` | `applications.write` | 문서 추가 (`kind`, `title`, 제한·세는 기준) |
 | `GET/PATCH /applications/{id}/documents/{doc}` | read / write | 최신(또는 `?revision=N`) 본문·블록·근거·글자 수. PATCH는 설정만 |
 | `GET/POST .../documents/{doc}/revisions` | read / write | 목록 / 저장 (201, 충돌 409) |
+| `POST .../documents/{doc}/count {blocks}` | read | 저장 전 글자/바이트 수. 저장과 같은 정규화(NFC, 앞뒤 공백, 빈 문단 제외, `\n` 연결). 60,000자 넘으면 422 |
 | `POST .../documents/{doc}/validate {revision?, extra_cliches?}` | read | 검사 결과 (artifact_validate) |
 | `POST .../documents/{doc}/suggestions {base_revision, block_ids?, instruction?}` | `documents.ai` → egress | AI 수정안. 모델 미설정 503 `models_not_configured` |
 | `GET .../documents/{doc}/suggestions` | read | 수정안 목록(거부 사유 포함) |

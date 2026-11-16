@@ -1,4 +1,4 @@
-import type { ExperienceSummary } from "@career-brain/client";
+import type { ExperienceSummary, SourceListItem } from "@career-brain/client";
 import { Badge, Button, EmptyState, Input, Label, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
@@ -7,7 +7,8 @@ import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
-import { ORIGIN_LABEL } from "../lib/labels";
+import { formatDate } from "../lib/format";
+import { EXTRACTION_STATUS, ORIGIN_LABEL, PARSE_STATUS } from "../lib/labels";
 
 const route = getRouteApi("/brain");
 
@@ -103,6 +104,8 @@ export function BrainPage() {
         }}
       </Loaded>
 
+      <SourcesList />
+
       <CreateExperienceSheet open={creating} onClose={() => setCreating(false)} />
       <UploadSheet open={uploading} onClose={() => setUploading(false)} />
     </div>
@@ -159,5 +162,69 @@ function CreateExperienceSheet({ open, onClose }: { open: boolean; onClose: () =
         </Button>
       </form>
     </Sheet>
+  );
+}
+
+function size(n: number | null) {
+  if (n === null) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 올린 원본과 읽기·추출 상태. 화면의 중심이 아니라 아래에 접어 둔다 (plan §13). */
+function SourcesList() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["sources"],
+    queryFn: () => api.sources(),
+    refetchInterval: (query) =>
+      query.state.data?.some((s) => s.parse_status === "pending" || s.extraction_status === "pending") ? 4000 : false,
+  });
+  const extract = useMutation({
+    mutationFn: (runId: string) => api.requestExtraction(runId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
+  });
+  const rows = q.data ?? [];
+  if (!rows.length && !q.isError) return null;
+  return (
+    <details className="mt-8">
+      <summary className="cursor-pointer text-[13px] font-medium text-muted">올린 자료 {rows.length}개</summary>
+      <ErrorText error={q.error ?? extract.error} className="mt-2" />
+      <List className="mt-2">
+        {rows.map((src: SourceListItem) => {
+          const parse = src.parse_status ? PARSE_STATUS[src.parse_status] : null;
+          const ext = src.extraction_status ? EXTRACTION_STATUS[src.extraction_status] : null;
+          const canExtract =
+            src.parse_run_id && (src.parse_status === "complete" || src.parse_status === "partial") && !src.extraction_status;
+          return (
+            <li key={src.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{src.title}</div>
+                <div className="truncate text-xs text-muted">
+                  {[src.original_filename, size(src.size_bytes), src.pages_total ? `${src.pages_total}쪽` : null, formatDate(src.created_at)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  {src.parse_error ? ` · ${src.parse_error}` : ""}
+                </div>
+              </div>
+              {parse ? <Badge tone={parse.tone}>{parse.label}</Badge> : null}
+              {ext ? (
+                <Badge tone={ext.tone}>
+                  {ext.label}
+                  {src.claims_created ? ` ${src.claims_created}` : ""}
+                </Badge>
+              ) : null}
+              {canExtract ? (
+                <Button size="sm" onClick={() => extract.mutate(src.parse_run_id!)} disabled={extract.isPending}>
+                  경험 추출 요청
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
+      </List>
+      <p className="mt-1 text-xs text-muted">경험 추출은 원문을 모델로 보내며 비용이 듭니다. 추출한 주장은 확인 전까지 근거로 쓰지 않습니다.</p>
+    </details>
   );
 }

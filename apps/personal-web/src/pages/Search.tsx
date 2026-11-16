@@ -5,6 +5,7 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { FileText, MessageSquareQuote, Quote, Search as SearchIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Loaded, PageHeader } from "../components/common";
+import { SourceSheet, type SourceTarget } from "../components/SourceSheet";
 import { api } from "../lib/api";
 
 const route = getRouteApi("/search");
@@ -116,7 +117,9 @@ export function SearchPage() {
 }
 
 function Hits({ hits }: { hits: SearchHit[] }) {
+  const [source, setSource] = useState<SourceTarget | null>(null);
   return (
+    <>
     <ul className="space-y-2">
         {hits.map((h) => {
           const info = KIND_INFO[h.kind] ?? KIND_INFO.claim;
@@ -141,6 +144,23 @@ function Hits({ hits }: { hits: SearchHit[] }) {
                     {h.experience_title ?? "경험"} 열기
                   </Link>
                 ) : null}
+                {h.kind === "block" && h.parse_run_id && h.block_id ? (
+                  <button
+                    className="text-accent underline-offset-2 hover:underline"
+                    onClick={() =>
+                      setSource({
+                        parseRunId: h.parse_run_id!,
+                        blockId: h.block_id!,
+                        sourceTitle: h.source_title,
+                        page: h.page,
+                        matchStart: h.match_start,
+                        matchEnd: h.match_end,
+                      })
+                    }
+                  >
+                    원본 보기
+                  </button>
+                ) : null}
                 {h.source_title ? (
                   <span className="text-muted">
                     {h.source_title}
@@ -152,5 +172,7 @@ function Hits({ hits }: { hits: SearchHit[] }) {
           );
         })}
     </ul>
+    <SourceSheet target={source} onClose={() => setSource(null)} />
+    </>
   );
 }

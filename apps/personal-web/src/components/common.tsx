@@ -53,7 +53,7 @@ export function PageHeader({
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
-  back?: { to: string; label: string };
+  back?: { to: string; label: string; search?: Record<string, string> };
   actions?: ReactNode;
 }) {
   return (
@@ -61,6 +61,7 @@ export function PageHeader({
       {back ? (
         <Link
           to={back.to}
+          search={back.search}
           className="-ml-1 inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"
         >
           <ChevronLeft size={16} />
@@ -90,7 +91,7 @@ export function Tabs<T extends string>({
   return (
     <div
       role="tablist"
-      className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line [scrollbar-width:none]"
+      className="mb-4 flex gap-0.5 overflow-x-auto sm:gap-1 overflow-y-hidden border-b border-line [scrollbar-width:none]"
     >
       {items.map((it) => (
         <button
@@ -99,7 +100,7 @@ export function Tabs<T extends string>({
           aria-selected={value === it.value}
           onClick={() => onChange(it.value)}
           className={cn(
-            "-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap",
+            "-mb-px border-b-2 px-2 py-2 text-sm whitespace-nowrap sm:px-3",
             value === it.value
               ? "border-accent font-medium text-fg"
               : "border-transparent text-muted hover:text-fg",

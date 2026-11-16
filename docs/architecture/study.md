@@ -74,6 +74,7 @@
 | `POST /core/study/items/{id}/claim-candidates` | study.write |
 | `GET/POST /core/study/assessments`, `GET/PATCH /core/study/assessments/{id}` | read / write |
 | `POST /core/study/attempts` (결과 passed/failed/unknown, 점수/만점) | study.write |
+| `GET /core/study/mistakes?status=open\|resolved` (다음 복습순) | study.read |
 | `POST /core/study/mistakes`, `PATCH /core/study/mistakes/{id}` | study.write |
 | `POST /core/study/mistakes/{id}/reviews {grade}` | study.write |
 | `GET /core/study/reviews/due` | study.read |

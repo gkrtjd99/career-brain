@@ -54,6 +54,26 @@ export interface Source {
   versions: SourceVersion[];
 }
 
+export interface SourceListItem {
+  id: Uuid;
+  title: string;
+  data_class: string;
+  created_at: IsoDateTime;
+  versions: number;
+  latest_version_id: Uuid | null;
+  original_filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  parse_run_id: Uuid | null;
+  parse_status: string | null;
+  pages_total: number | null;
+  missing_pages: number[];
+  parse_error: string | null;
+  extraction_run_id: Uuid | null;
+  extraction_status: string | null;
+  claims_created: number | null;
+}
+
 export interface Block {
   id: Uuid;
   page: number | null;
@@ -127,6 +147,16 @@ export interface Experience {
   claims: Claim[];
 }
 
+export interface ClaimBrief {
+  id: Uuid;
+  statement: string;
+  status: ClaimStatus;
+  kind: ClaimKind;
+  contribution: Contribution;
+  experience_id: Uuid;
+  experience_title: string;
+}
+
 export interface ExperienceIn {
   title: string;
   organization?: string | null;
@@ -188,6 +218,17 @@ export interface InterviewQuestion {
   answers: string[];
 }
 
+export interface InterviewSummary {
+  id: Uuid;
+  experience_id: Uuid | null;
+  experience_title: string | null;
+  status: string;
+  questions: number;
+  answered: number;
+  created_at: IsoDateTime;
+  last_answer_at: IsoDateTime | null;
+}
+
 export interface Interview {
   id: Uuid;
   experience_id: Uuid | null;
@@ -239,6 +280,12 @@ export interface SearchHit {
   source_title: string | null;
   page: number | null;
   question: string | null;
+  /** 원문(block) 결과만: 원본 보기를 열 위치. match_* 는 블록 원문 안 첫 일치 낱말의 글자 범위 */
+  block_id?: Uuid | null;
+  parse_run_id?: Uuid | null;
+  ordinal?: number | null;
+  match_start?: number | null;
+  match_end?: number | null;
 }
 
 export interface SearchResult {
@@ -322,6 +369,8 @@ export interface PostingSummary {
   pending_changes: string[];
   last_fetch_status: FetchStatus | null;
   last_fetch_error: FetchError | string | null;
+  created_at: IsoDateTime | null;
+  saved_at: IsoDateTime | null;
 }
 
 export interface FetchRun {
@@ -399,4 +448,504 @@ export interface Usage {
   monthly_budget_usd: DecimalString | null;
   budget_remaining_usd: DecimalString | null;
   notes: string[];
+}
+
+// ---------------------------------------------------------------- activity
+
+export type ActivityKind = "claim" | "posting" | "fetch_run" | "document_revision" | "study_attempt";
+
+export interface ActivityItem {
+  kind: ActivityKind;
+  action: "created" | "confirmed" | "saved" | "fetched" | "revised" | "attempted" | string;
+  id: Uuid;
+  at: IsoDateTime;
+  title: string;
+  status: string | null;
+  detail: string | null;
+  refs: Partial<
+    Record<
+      | "experience_id"
+      | "posting_id"
+      | "version_id"
+      | "application_id"
+      | "document_id"
+      | "revision_no"
+      | "assessment_id"
+      | "study_item_id",
+      string
+    >
+  >;
+}
+
+// ---------------------------------------------------------------- applications (O07)
+
+export type ApplicationStatus = "draft" | "submitted" | "passed" | "rejected" | "withdrawn";
+export type DocumentKind = "question" | "resume" | "cover_letter" | "portfolio" | "other";
+
+export interface CountRule {
+  spaces: "include" | "exclude";
+  newlines: "one" | "two" | "none";
+  encoding: "utf-8" | "cp949" | "euc-kr";
+}
+
+/** 서버 코드가 센 글자·바이트 수. 모델이 센 값이 아니다. */
+export interface TextCounts {
+  chars: number;
+  chars_with_spaces: number;
+  chars_without_spaces: number;
+  bytes: number;
+  newlines: number;
+  rule: CountRule;
+  char_limit: number | null;
+  byte_limit: number | null;
+  over_char_limit: boolean;
+  over_byte_limit: boolean;
+  unencodable: string[];
+}
+
+export interface ApplicationSummary {
+  id: Uuid;
+  posting_id: Uuid;
+  title: string;
+  status: ApplicationStatus;
+  company: string | null;
+  job_title: string | null;
+  deadline: string | null;
+  documents: number;
+  submitted_at: IsoDateTime | null;
+  created_at: IsoDateTime;
+  /** 공고 문항 문서 수와 그중 아직 글이 없는 수 */
+  questions: number;
+  unwritten: number;
+}
+
+export interface DocumentSummary {
+  id: Uuid;
+  kind: DocumentKind;
+  title: string;
+  question_index: number | null;
+  question_prompt: string | null;
+  char_limit: number | null;
+  byte_limit: number | null;
+  current_revision: number;
+  counts: TextCounts | null;
+}
+
+export interface Application {
+  id: Uuid;
+  posting_id: Uuid;
+  posting_version_id: Uuid | null;
+  title: string;
+  status: ApplicationStatus;
+  result_note: string | null;
+  submitted_at: IsoDateTime | null;
+  posting: Record<string, unknown>;
+  posting_pending_changes: string[];
+  documents: DocumentSummary[];
+  submission_id: Uuid | null;
+}
+
+export interface DocBlock {
+  id: string;
+  text: string;
+  origin: "user" | "ai" | string;
+  claim_ids: string[];
+}
+
+export interface AppDocument {
+  id: Uuid;
+  application_id: Uuid;
+  kind: DocumentKind;
+  title: string;
+  question_index: number | null;
+  question_prompt: string | null;
+  char_limit: number | null;
+  byte_limit: number | null;
+  count_rule: CountRule;
+  current_revision: number;
+  revision_no: number;
+  revision_id: Uuid | null;
+  blocks: DocBlock[];
+  text: string;
+  counts: TextCounts;
+  ai_ratio: number;
+  editable: boolean;
+}
+
+export interface DocumentIn {
+  kind: DocumentKind;
+  title: string;
+  question_prompt?: string | null;
+  char_limit?: number | null;
+  byte_limit?: number | null;
+  count_rule?: Partial<CountRule> | null;
+}
+
+export interface DocumentPatch {
+  title?: string;
+  char_limit?: number | null;
+  byte_limit?: number | null;
+  count_rule?: Partial<CountRule>;
+}
+
+export interface RevisionSummary {
+  id: Uuid;
+  revision_no: number;
+  origin: string;
+  reason: string | null;
+  content_hash: string;
+  counts: TextCounts;
+  created_by: Uuid;
+  created_at: IsoDateTime;
+}
+
+export type DocOperation =
+  | { op: "replace"; block_id: string; text: string; claim_ids?: Uuid[] }
+  | { op: "insert"; text: string; index?: number; claim_ids?: Uuid[] }
+  | { op: "delete"; block_id: string }
+  | { op: "link"; block_id: string; claim_ids: Uuid[] }
+  | { op: "set_blocks"; blocks: { id?: string | null; text: string; claim_ids?: Uuid[] }[] };
+
+export interface RevisionIn {
+  base_revision: number;
+  operations: DocOperation[];
+  reason?: string | null;
+  idempotency_key?: string | null;
+}
+
+export interface RevisionOut {
+  id: Uuid;
+  revision_no: number;
+  created: boolean;
+}
+
+/** 409 `revision_conflict` 의 detail */
+export interface RevisionConflictDetail {
+  code: "revision_conflict";
+  current_revision: number;
+  stale: unknown[];
+}
+
+export interface Finding {
+  code: string;
+  severity: "error" | "warning" | "info" | string;
+  message: string;
+  block_id: string | null;
+  sentence: string | null;
+  detail: Record<string, unknown>;
+}
+
+export type Visibility = "met_visible" | "missing" | "overclaim_risk" | "unmet" | "not_checkable";
+
+export interface RequirementVisibility {
+  kind: "requirements" | "preferred" | string;
+  requirement: string;
+  terms: string[];
+  verdict: Visibility;
+  brain_claim_ids: string[];
+  document_terms: string[];
+  linked: boolean;
+  suggestion: string;
+}
+
+export interface ValidateResult {
+  document_id: Uuid;
+  revision: number;
+  counts: TextCounts;
+  ai_ratio: number;
+  findings: Finding[];
+  requirements: RequirementVisibility[];
+  summary: Record<string, number>;
+}
+
+export interface ApplicationChecks {
+  application_id: Uuid;
+  documents: {
+    document_id: Uuid;
+    title: string;
+    revision: number;
+    counts: TextCounts;
+    summary: Record<string, number>;
+  }[];
+  requirements: RequirementVisibility[];
+  posting_pending_changes: string[];
+}
+
+/** 수정안 거부 사유: number·role·organization·new_term·ats_manipulation */
+export interface RejectReason {
+  code: string;
+  values?: string[];
+}
+
+export interface Suggestion {
+  id: Uuid;
+  block_id: string;
+  base_revision_id: Uuid;
+  original_text: string;
+  suggested_text: string;
+  reason: string | null;
+  status: "proposed" | "rejected" | "applied" | "dismissed";
+  reject_reasons: RejectReason[];
+  applied_revision_id: Uuid | null;
+  created_at: IsoDateTime;
+}
+
+export interface SuggestOut {
+  suggestions: Suggestion[];
+  questions: string[];
+  dropped: number;
+  model_call_id: Uuid | null;
+}
+
+export interface SubmissionDocument {
+  document_id: Uuid;
+  kind: DocumentKind;
+  title: string;
+  question_index: number | null;
+  question_prompt: string | null;
+  char_limit: number | null;
+  byte_limit: number | null;
+  count_rule: CountRule;
+  revision_id: Uuid;
+  revision_no: number;
+  content_hash: string;
+  blocks: DocBlock[];
+  text: string;
+  counts: TextCounts;
+  ai_ratio: number;
+  /** 제출 당시 연결된 주장의 그때 문장 */
+  evidence: {
+    claim_id: string;
+    statement: string;
+    kind: string;
+    status: string;
+    contribution: string;
+    experience: { id: string; title: string; organization: string | null; role: string | null; period_text: string | null };
+  }[];
+}
+
+export interface Submission {
+  id: Uuid;
+  application_id: Uuid;
+  posting_id: Uuid;
+  posting_version_id: Uuid | null;
+  posting: { fields?: Record<string, unknown>; pending_changes?: string[]; [key: string]: unknown };
+  documents: SubmissionDocument[];
+  checks: {
+    documents?: Record<string, { summary: Record<string, number>; findings: Finding[] }>;
+    requirements?: RequirementVisibility[];
+  };
+  content_hash: string;
+  note: string | null;
+  submitted_by: Uuid;
+  submitted_at: IsoDateTime;
+}
+
+// ---------------------------------------------------------------- study (O09)
+
+export type RequirementField = "requirements" | "preferred" | "process";
+export type StudyItemKind = "skill" | "topic" | "other";
+export type StudyItemStatus = "planned" | "in_progress" | "done" | "dropped";
+export type AssessmentKind =
+  | "coding_test"
+  | "written_test"
+  | "assignment"
+  | "interview"
+  | "certification"
+  | "other";
+export type AssessmentStatus = "planned" | "done" | "cancelled";
+export type AttemptResult = "passed" | "failed" | "unknown";
+export type MistakeReason = "concept" | "careless" | "time" | "misread" | "unknown";
+export type ReviewGrade = "again" | "hard" | "good" | "easy";
+export type CoverageStatus = "evidenced" | "claim_pending" | "studied" | "studying" | "uncovered";
+
+export interface RequirementRef {
+  id: Uuid;
+  posting_id: Uuid;
+  field: RequirementField;
+  text: string;
+  posting_title: string | null;
+}
+
+export interface StudyItemSummary {
+  id: Uuid;
+  title: string;
+  kind: StudyItemKind;
+  status: StudyItemStatus;
+  requirement: RequirementRef | null;
+  assessment_id: Uuid | null;
+  total_minutes: number;
+  open_mistakes: number;
+  completed_at: IsoDateTime | null;
+  updated_at: IsoDateTime;
+}
+
+export interface StudyItemIn {
+  title?: string | null;
+  kind?: StudyItemKind;
+  notes?: string | null;
+  posting_id?: Uuid | null;
+  field?: RequirementField | null;
+  text?: string | null;
+  assessment_id?: Uuid | null;
+}
+
+export interface StudySession {
+  id: Uuid;
+  started_at: IsoDateTime;
+  minutes: number;
+  notes: string | null;
+  resources: { title: string; url?: string | null }[];
+}
+
+export interface Attempt {
+  id: Uuid;
+  assessment_id: Uuid | null;
+  study_item_id: Uuid | null;
+  taken_at: IsoDateTime;
+  result: AttemptResult;
+  score: DecimalString | null;
+  max_score: DecimalString | null;
+  minutes: number | null;
+  notes: string | null;
+}
+
+export interface Mistake {
+  id: Uuid;
+  attempt_id: Uuid | null;
+  study_item_id: Uuid | null;
+  question: string;
+  wrong_answer: string | null;
+  correct_answer: string | null;
+  reason: MistakeReason;
+  reason_note: string | null;
+  status: "open" | "resolved";
+  repetitions: number;
+  interval_days: number;
+  due_at: IsoDateTime;
+  last_reviewed_at: IsoDateTime | null;
+}
+
+export interface MistakeListItem extends Mistake {
+  study_item_title: string | null;
+  created_at: IsoDateTime;
+}
+
+export interface StudyItem {
+  id: Uuid;
+  title: string;
+  kind: StudyItemKind;
+  status: StudyItemStatus;
+  notes: string | null;
+  requirement: RequirementRef | null;
+  assessment_id: Uuid | null;
+  completed_at: IsoDateTime | null;
+  total_minutes: number;
+  sessions: StudySession[];
+  attempts: Attempt[];
+  mistakes: Mistake[];
+  claim_candidates: { claim_id: Uuid; attempt_id: Uuid | null; statement: string; status: string }[];
+}
+
+export interface Assessment {
+  id: Uuid;
+  title: string;
+  kind: AssessmentKind;
+  status: AssessmentStatus;
+  scheduled_at: IsoDateTime | null;
+  notes: string | null;
+  requirement: RequirementRef | null;
+  attempts: Attempt[];
+  items: Uuid[];
+  mistakes: Mistake[];
+  last_attempt: Attempt | null;
+}
+
+export interface AssessmentIn {
+  title: string;
+  kind: AssessmentKind;
+  scheduled_at?: IsoDateTime | null;
+  notes?: string | null;
+  posting_id?: Uuid | null;
+  process_text?: string | null;
+}
+
+export interface AttemptIn {
+  result: AttemptResult;
+  assessment_id?: Uuid | null;
+  study_item_id?: Uuid | null;
+  score?: number | string | null;
+  max_score?: number | string | null;
+  taken_at?: IsoDateTime | null;
+  minutes?: number | null;
+  notes?: string | null;
+}
+
+export interface MistakeIn {
+  question: string;
+  reason?: MistakeReason;
+  attempt_id?: Uuid | null;
+  study_item_id?: Uuid | null;
+  wrong_answer?: string | null;
+  correct_answer?: string | null;
+  reason_note?: string | null;
+}
+
+export interface ReviewOut {
+  mistake_id: Uuid;
+  grade: ReviewGrade;
+  repetitions: number;
+  interval_days: number;
+  ease: number;
+  due_at: IsoDateTime;
+}
+
+export interface DueReview {
+  id: Uuid;
+  question: string;
+  wrong_answer: string | null;
+  correct_answer: string | null;
+  reason: MistakeReason;
+  reason_note: string | null;
+  due_at: IsoDateTime;
+  repetitions: number;
+  interval_days: number;
+  study_item_id: Uuid | null;
+  study_item_title: string | null;
+  attempt_id: Uuid | null;
+}
+
+export interface RequirementCoverage {
+  field: RequirementField;
+  text: string;
+  requirement_id: Uuid | null;
+  current: boolean;
+  coverage: CoverageStatus;
+  claims: { id: Uuid; statement: string; status: string }[];
+  items: { id: Uuid; title: string; status: StudyItemStatus; last_attempt: Attempt | null }[];
+  assessments: {
+    id: Uuid;
+    title: string;
+    kind: AssessmentKind;
+    status: AssessmentStatus;
+    scheduled_at: IsoDateTime | null;
+    last_attempt: Attempt | null;
+  }[];
+  steps: { step: string; kind: AssessmentKind | null }[];
+}
+
+export interface Coverage {
+  posting_id: Uuid;
+  title: string | null;
+  company: string | null;
+  status: PostingStatus;
+  requirements: RequirementCoverage[];
+  counts: Record<string, number>;
+  basis: string;
+}
+
+export interface PlanOut {
+  items_created: Uuid[];
+  assessments_created: Uuid[];
+  skipped: number;
 }

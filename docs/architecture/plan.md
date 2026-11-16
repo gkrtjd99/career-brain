@@ -429,7 +429,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 검색: OpenAI 임베딩 재현율 측정 (키 확보 후 `search_eval --models`).
 - 검색: potion 로컬 모델 메모리(~1.6GB) 줄이기 — 양자화·더 작은 모델 비교.
 - 공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터, 초안 정리 주기 실행.
-- 웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API 없음, 공고 목록 응답에 생성·저장 시각 없음, 블록 검색 결과에 block_id·위치 없음 (원본 보기 연결 불가).
+- ~~웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API, 공고 목록 시각, 블록 검색 위치~~ → 해결 (`web.md` "화면용 조회 API").
 - 테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존).
 - 검색: 키워드 질의가 trigram GIN 색인을 못 쓴다. 원인은 RLS: pg_trgm 연산자(`<%`, `ILIKE`)가 LEAKPROOF가 아니라 정책 조건보다 먼저 색인 조건으로 쓸 수 없다 (테이블별 필터로 바꿔 측정: 주장 2만 개 p50 104ms → 104ms, 변화 없음). 대신 `workspace_id` 색인으로 한 공간의 행만 훑으므로 비용은 서비스 전체가 아니라 사용자 한 명의 자료량에 비례한다. 공간당 수만 건을 넘으면 검토: 공간별 파티션, 검색 전용 요약 테이블, 또는 superuser가 만든 LEAKPROOF 래퍼.
 - 운영: API 토큰 폐기·재발급 CLI (`revoke_token`은 있음, 명령 없음).

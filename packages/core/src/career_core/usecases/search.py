@@ -35,18 +35,20 @@ WITH items AS (
     SELECT 'claim' AS kind, c.id, c.statement AS body, c.status,
            c.experience_id, ex.title AS experience_title,
            NULL::uuid AS source_id, NULL::text AS source_title, NULL::int AS page,
-           NULL::text AS question
+           NULL::text AS question, NULL::uuid AS parse_run_id, NULL::int AS ordinal
     FROM core.claims c JOIN core.experiences ex ON ex.id = c.experience_id
     WHERE c.status <> 'retired'
     UNION ALL
-    SELECT 'block', b.id, b.text, NULL, NULL, NULL, s.id, s.title, b.page, NULL
+    SELECT 'block', b.id, b.text, NULL, NULL, NULL, s.id, s.title, b.page, NULL,
+           b.parse_run_id, b.ordinal
     FROM core.document_blocks b
     JOIN core.parse_runs pr ON pr.id = b.parse_run_id
     JOIN core.source_versions sv ON sv.id = pr.source_version_id
     JOIN core.sources s ON s.id = sv.source_id
     WHERE b.parse_run_id IN ({CURRENT_BLOCKS})
     UNION ALL
-    SELECT 'answer', a.id, a.answer, NULL, se.experience_id, ex.title, NULL, NULL, NULL, q.prompt
+    SELECT 'answer', a.id, a.answer, NULL, se.experience_id, ex.title, NULL, NULL, NULL, q.prompt,
+           NULL, NULL
     FROM core.interview_answers a
     JOIN core.interview_questions q ON q.id = a.question_id
     JOIN core.interview_sessions se ON se.id = q.session_id
@@ -99,6 +101,12 @@ class SearchHit:
     source_title: str | None = None
     page: int | None = None
     question: str | None = None
+    # 원문(block) 결과만: 원본 보기를 열 위치. match_*는 블록 원문 안에서 처음 일치한 낱말의 글자 범위.
+    block_id: UUID | None = None
+    parse_run_id: UUID | None = None
+    ordinal: int | None = None
+    match_start: int | None = None
+    match_end: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,7 +144,20 @@ def snippet(body: str, terms: list[str], width: int = SNIPPET_CHARS) -> str:
     return ("…" if start else "") + piece + ("…" if start + width < len(body) else "")
 
 
+def first_match(body: str, terms: list[str]) -> tuple[int, int] | None:
+    """원문에서 가장 앞에 나오는 검색 낱말의 글자 범위 (대소문자 무시). 없으면 None."""
+    lower = body.lower()
+    best: tuple[int, int] | None = None
+    for t in terms:
+        i = lower.find(t.lower())
+        if i >= 0 and (best is None or i < best[0]):
+            best = (i, i + len(t))
+    return best
+
+
 def _hit(row, terms: list[str], **extra) -> SearchHit:
+    block = row.kind == "block"
+    match = first_match(row.body, terms) if block else None
     return SearchHit(
         kind=row.kind,
         id=row.id,
@@ -149,6 +170,11 @@ def _hit(row, terms: list[str], **extra) -> SearchHit:
         source_title=row.source_title,
         page=row.page,
         question=row.question,
+        block_id=row.id if block else None,
+        parse_run_id=row.parse_run_id if block else None,
+        ordinal=row.ordinal if block else None,
+        match_start=match[0] if match else None,
+        match_end=match[1] if match else None,
         **extra,
     )
 

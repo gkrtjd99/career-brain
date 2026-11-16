@@ -2,39 +2,27 @@ import type { ClaimKind, Contribution, InterviewQuestion } from "@career-brain/c
 import { Badge, Button, EmptyState, Label, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
-import { api, ApiError } from "../lib/api";
+import { useState } from "react";
+import { api } from "../lib/api";
+import { formatDate } from "../lib/format";
 import { FOCUS_LABEL, KIND_LABEL } from "../lib/labels";
 import { ErrorText, Loaded } from "./common";
-
-// 서버에 인터뷰 목록 API가 없어서, 이 브라우저에서 시작한 세션 ID를 경험별로 기억한다.
-const key = (experienceId: string) => `career-brain:interview:${experienceId}`;
-function rememberedSession(experienceId: string): string | null {
-  try {
-    return localStorage.getItem(key(experienceId));
-  } catch {
-    return null;
-  }
-}
-function remember(experienceId: string, sessionId: string | null) {
-  try {
-    if (sessionId) localStorage.setItem(key(experienceId), sessionId);
-    else localStorage.removeItem(key(experienceId));
-  } catch {
-    // 저장 못 하면 이번 화면에서만 유지
-  }
-}
 
 /** 인터뷰형 경험 정리: 정해진 질문 + (선택) AI 보충 질문. 답변은 근거가 연결된 주장으로 저장된다. */
 export function InterviewPanel({ experienceId }: { experienceId: string }) {
   const qc = useQueryClient();
-  const [sessionId, setSessionId] = useState(() => rememberedSession(experienceId));
+  const sessions = useQuery({
+    queryKey: ["interviews", experienceId],
+    queryFn: () => api.interviews({ experienceId }),
+  });
+  const [chosen, setChosen] = useState<string | null>(null);
+  const sessionId = chosen ?? sessions.data?.[0]?.id ?? null;
   const start = useMutation({
     mutationFn: () => api.startInterview(experienceId),
     onSuccess: (iv) => {
-      remember(experienceId, iv.id);
       qc.setQueryData(["interview", iv.id], iv);
-      setSessionId(iv.id);
+      qc.invalidateQueries({ queryKey: ["interviews", experienceId] });
+      setChosen(iv.id);
     },
   });
   const q = useQuery({
@@ -47,15 +35,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
     onSuccess: (iv) => qc.setQueryData(["interview", iv.id], iv),
   });
 
-  // 기억한 세션이 지워졌으면 잊는다.
-  const gone = !!sessionId && q.error instanceof ApiError && q.error.status === 404;
-  useEffect(() => {
-    if (gone) {
-      remember(experienceId, null);
-      setSessionId(null);
-    }
-  }, [gone, experienceId]);
-
+  if (sessions.isPending) return <Loaded query={sessions}>{() => null}</Loaded>;
   if (!sessionId)
     return (
       <EmptyState className="space-y-3">
@@ -63,14 +43,35 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
         <Button variant="primary" onClick={() => start.mutate()} disabled={start.isPending}>
           인터뷰 시작
         </Button>
-        <ErrorText error={start.error} />
+        <ErrorText error={start.error ?? sessions.error} />
       </EmptyState>
     );
 
+  const list = sessions.data ?? [];
   return (
     <Loaded query={q}>
       {(iv) => (
         <div className="space-y-4">
+          {list.length > 1 ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-[13px]" role="radiogroup" aria-label="인터뷰 세션">
+              {list.map((se, i) => (
+                <button
+                  key={se.id}
+                  role="radio"
+                  aria-checked={se.id === sessionId}
+                  onClick={() => setChosen(se.id)}
+                  className={
+                    se.id === sessionId
+                      ? "rounded-full bg-accent-soft px-2.5 py-0.5 font-medium text-accent"
+                      : "rounded-full border border-line bg-surface px-2.5 py-0.5 text-muted hover:text-fg"
+                  }
+                >
+                  {formatDate(se.created_at)} · {se.answered}/{se.questions}
+                  {i === 0 ? " (최근)" : ""}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted">
               답변은 인터뷰 근거가 붙은 주장으로 저장됩니다. 기여(본인/팀)를 고르면 바로 “본인 확인” 상태가 됩니다.
@@ -136,6 +137,7 @@ function QuestionCard({
       setStatement("");
       setOpen(false);
       qc.invalidateQueries({ queryKey: ["interview", sessionId] });
+      qc.invalidateQueries({ queryKey: ["interviews", experienceId] });
       qc.invalidateQueries({ queryKey: ["experience", experienceId] });
       qc.invalidateQueries({ queryKey: ["experiences"] });
       qc.invalidateQueries({ queryKey: ["wiki-md", experienceId] });

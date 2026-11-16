@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from career_core.domain.brain import ClaimRuleError, ClaimStatus
@@ -166,6 +166,27 @@ class InterviewOut(BaseModel):
     questions: list[QuestionOut]
 
 
+class ClaimBriefOut(BaseModel):
+    id: UUID
+    statement: str
+    status: str
+    kind: str
+    contribution: str
+    experience_id: UUID
+    experience_title: str
+
+
+class InterviewSummaryOut(BaseModel):
+    id: UUID
+    experience_id: UUID | None
+    experience_title: str | None
+    status: str
+    questions: int
+    answered: int
+    created_at: datetime
+    last_answer_at: datetime | None
+
+
 class AiQuestionsIn(BaseModel):
     count: int = Field(default=3, ge=1, le=interviews.MAX_AI_QUESTIONS)
 
@@ -263,6 +284,20 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
         except brain.NotFound as exc:
             raise _not_found() from exc
         return ExperienceOut.model_validate(view, from_attributes=True)
+
+    @router.get("/claims", response_model=list[ClaimBriefOut])
+    async def claims_by_ids(
+        actor: reader,
+        ids: Annotated[str, Query(max_length=8000, description="쉼표로 구분한 주장 ID")],
+    ) -> list[ClaimBriefOut]:
+        try:
+            wanted = list(dict.fromkeys(UUID(x.strip()) for x in ids.split(",") if x.strip()))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid_claim_ids") from exc
+        if len(wanted) > brain.MAX_BRIEF_IDS:
+            raise HTTPException(status_code=422, detail="too_many_ids")
+        rows = await brain.claims_by_ids(db, actor, wanted)
+        return [ClaimBriefOut.model_validate(r, from_attributes=True) for r in rows]
 
     @router.post("/experiences/{experience_id}/claims", response_model=StatusOut, status_code=201)
     async def add_claim(actor: writer, experience_id: UUID, body: ClaimIn) -> StatusOut:
@@ -368,6 +403,15 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
         except brain.NotFound as exc:
             raise _not_found() from exc
         return _interview_out(await interviews.get_interview(db, actor, sid))
+
+    @router.get("/interviews", response_model=list[InterviewSummaryOut])
+    async def list_interviews(
+        actor: reader,
+        experience_id: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> list[InterviewSummaryOut]:
+        rows = await interviews.list_interviews(db, actor, experience_id=experience_id, limit=limit)
+        return [InterviewSummaryOut.model_validate(r, from_attributes=True) for r in rows]
 
     @router.get("/interviews/{session_id}", response_model=InterviewOut)
     async def get_interview(actor: reader, session_id: UUID) -> InterviewOut:
