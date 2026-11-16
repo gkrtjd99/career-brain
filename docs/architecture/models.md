@@ -114,7 +114,8 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 
 ## 아직 안 한 것
 
-- 스트리밍, 도구 호출, 구조화 출력, 이미지 입력 (O04 이후 필요할 때 `ModelRequest`를 넓힌다).
+- 스트리밍, 도구 호출, 구조화 출력 (필요할 때 `ModelRequest`를 넓힌다).
+- 이미지 입력은 `ModelRequest.images`(`ImageInput(media_type, data)`)로 넣는다. 마지막 user 메시지에 붙는다 (Anthropic `image` base64 블록, OpenAI 호환 `image_url` data URL). 비전 모델로 가는 라우트는 호출하는 쪽이 고른다 (공고 이미지는 명시 라우트 `job_extract_image`만, default로 넘어가지 않는다). 예산 추정은 이미지 한 장을 입력 2,000토큰으로 잡는다.
 - OpenAI Responses API (Chat Completions만 쓴다. 12시간 캐시 쓰기 내역은 Responses API에만 있다).
 - 동시 호출 예산 경합: 개인용은 사전 확인 방식이라 동시에 여러 호출이 출발하면 한도를 조금 넘을 수 있다. 서비스는 `BudgetPolicy`로 예약·정산한다.
 

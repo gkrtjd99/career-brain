@@ -430,7 +430,11 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 검색: 색인 job 실행 중에 바뀐 항목은 다음 트리거까지 반영이 늦을 수 있다 (재큐잉 보강).
 - 검색: OpenAI 임베딩 재현율 측정 (키 확보 후 `search_eval --models`).
 - 검색: potion 로컬 모델 메모리(~1.6GB) 줄이기 — 양자화·더 작은 모델 비교.
-- 공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터, 초안 정리 주기 실행.
+- ~~공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터~~ → 해결 (`postings.md` "채용 시스템 어댑터"·"PDF·이미지 공고": greenhouse·greeting·lever·workday, PDF 본문, 비전 라우트 `job_extract_image`). 초안 정리 주기 실행은 아래 운영 항목.
+- ~~공고: LLM 추출이 같은 줄을 자격·우대 양쪽에 넣음, 제목을 페이지 제목의 조각으로 고름~~ → 해결 (`postings.md` "LLM 출력 보정", 인용 규칙 그대로).
+- 공고: 스캔 PDF(글자 없는 쪽)를 쪽 이미지로 바꿔 비전 경로로 — 렌더러 의존성 필요, 지금은 `pdf_no_text`로 직접 확인.
+- 공고: Workday 등 Cloudflare 앞단 사이트가 httpx 요청에 429를 준다 (curl은 200, 봇 차단으로 보임). 우회하지 않는다. 봇 차단을 `rate_limited`와 구분해 안내하기.
+- 공고: 그리팅 `questionnairesInfo`(자기소개서 문항·글자 수) 구조화 — 실제 예시 확인 후.
 - ~~웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API, 공고 목록 시각, 블록 검색 위치~~ → 해결 (`web.md` "화면용 조회 API").
 - 테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존).
 - 검색: 키워드 질의가 trigram GIN 색인을 못 쓴다. 원인은 RLS: pg_trgm 연산자(`<%`, `ILIKE`)가 LEAKPROOF가 아니라 정책 조건보다 먼저 색인 조건으로 쓸 수 없다 (테이블별 필터로 바꿔 측정: 주장 2만 개 p50 104ms → 104ms, 변화 없음). 대신 `workspace_id` 색인으로 한 공간의 행만 훑으므로 비용은 서비스 전체가 아니라 사용자 한 명의 자료량에 비례한다. 공간당 수만 건을 넘으면 검토: 공간별 파티션, 검색 전용 요약 테이블, 또는 superuser가 만든 LEAKPROOF 래퍼.

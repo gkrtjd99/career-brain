@@ -46,6 +46,8 @@ from career_core.ports import (
 
 ClientFactory = Callable[[EndpointConfig, str | None], "ModelClient | EmbeddingClient"]
 BUDGET_KIND = "llm_usd_micro"  # BudgetPolicy에 넘기는 단위: 백만분의 1 달러
+# 이미지 한 장의 입력 토큰 상한 추정 (Anthropic 기준 큰 이미지 ≈ 1,600 토큰, 여유를 둔다)
+IMAGE_TOKEN_ESTIMATE = 2_000
 
 
 def default_client_factory(
@@ -154,6 +156,7 @@ class ModelGateway:
             raise ModelDenied("api_key_missing")
 
         prompt_chars = len(request.system or "") + sum(len(m.content) for m in request.messages)
+        prompt_chars += IMAGE_TOKEN_ESTIMATE * len(request.images)  # 예산 추정용 상한
         reservation = (
             await self._reserve(actor, purpose, prompt_chars, request.max_output_tokens, plan)
             if metered
