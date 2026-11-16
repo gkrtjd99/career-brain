@@ -22,11 +22,11 @@
 
 ## 임베딩: API 또는 로컬
 
-`models.toml`의 `routes.embed` 하나로 고른다. 예시 설정(`models.example.toml`)의 기본은 `openai/text-embedding-3-small` + `[embedding] dimensions = 512`다. 라우트가 없거나 그 엔드포인트의 키 환경변수가 비어 있으면 색인·검색어 임베딩을 부르지 않고(장부 기록도 없음) 키워드 검색만 한다. 검색 결과의 `semantic_note`는 각각 `no_embedding_route`, `embedding_api_key_missing`.
+`models.toml`의 `routes.embed` 하나로 고른다. 예시 설정(`models.example.toml`)의 기본은 `openai/text-embedding-3-large` + `[embedding] dimensions = 1024`다. 라우트가 없거나 그 엔드포인트의 키 환경변수가 비어 있으면 색인·검색어 임베딩을 부르지 않고(장부 기록도 없음) 키워드 검색만 한다. 검색 결과의 `semantic_note`는 각각 `no_embedding_route`, `embedding_api_key_missing`.
 
 | 방식 | 설정 | 비용·자원 | 자료 등급 |
 |---|---|---|---|
-| OpenAI API | `embed = "openai/text-embedding-3-small"` (+ `[embedding] dimensions`) | $0.02 / 1M 토큰, 로컬 메모리 거의 없음 | 엔드포인트 `data_classes`가 허용한 등급만 (restricted는 항상 제외) |
+| OpenAI API | `embed = "openai/text-embedding-3-large"` + `[embedding] dimensions = 1024` (기본) 또는 `text-embedding-3-small` | $0.13 / $0.02 per 1M 토큰, 로컬 메모리 거의 없음 | 엔드포인트 `data_classes`가 허용한 등급만 (restricted는 항상 제외) |
 | 로컬 (fastembed, ONNX/numpy, torch 없음) | `preset = "local"` 엔드포인트 + `embed = "<그 이름>/<모델>"` | 무료, 모델 파일 + 사용 중 RAM (아래) | 모든 등급 (기계 밖으로 안 나감) |
 
 - 임베딩도 대화 호출과 같은 게이트웨이를 지난다: egress → 단가 → 월 예산 → 호출 → 장부(`purpose = 'embed'`).
@@ -64,7 +64,7 @@
 - potion 메모리의 내역: float32 임베딩 행렬 ~0.49GB, Rust Unigram 토크나이저 상주 ~0.73GB(줄일 수 없는 바닥), fastembed가 18MB `tokenizer.json`을 `json.load`할 때 순간 ~0.22GB. `mmap=True`는 행렬을 파일에서 바로 읽어 행렬 사본과 일부 순간 메모리를 없앤다. 벡터·재현율은 그대로다. (이전 표의 ~1.6GB는 import 메모리까지 센 값이다.)
 - potion-base-8M·retrieval-32M은 메모리가 아주 작지만 영어 WordPiece라 한글을 자모로 쪼갠다. 이 평가에서 점수가 비슷한 것은 질문 대부분이 원문 낱말을 포함해 키워드 검색이 끌어올리기 때문이라 기본값으로 두지 않는다.
 - embeddinggemma-300m은 다른 표현 재현율이 같고 RSS가 약간 작지만 모델 파일이 2.4배이고 트랜스포머라 정적 모델보다 계산이 무겁다. 뚜렷이 낫지 않아 기본값을 바꾸지 않았다.
-- 결론 (2026-11-17 갱신): 예시 설정 기본은 OpenAI `text-embedding-3-small` 512차원. 정확도가 더 필요하면 `text-embedding-3-large` 1024차원, 오프라인이면 `potion-multilingual-128M`(`mmap=True` + 어휘 자르기로 모델 단독 ~0.44GB) 또는 메모리 여유가 있으면 `multilingual-e5-large`. 근거는 아래 "임베딩만 비교".
+- 결론 (2026-11-17 갱신): 예시 설정 기본은 OpenAI `text-embedding-3-large` 1024차원. 더 싸게는 `text-embedding-3-small` 512차원(정확도는 아래 표만큼 낮다), 오프라인이면 `potion-multilingual-128M`(`mmap=True` + 어휘 자르기로 모델 단독 ~0.44GB) 또는 메모리 여유가 있으면 `multilingual-e5-large`. 근거는 아래 "임베딩만 비교".
 - OpenAI 임베딩 (2026-11-17 측정, 결합 검색 기준): `text-embedding-3-small`은 1536차원과 `dimensions = 512` 모두 키워드만보다 다른 표현 R@5가 4/6 → 5/6으로 오르고 R@1은 25/30 그대로다 (512차원으로 줄여도 같은 결과라 저장·검색이 가벼운 512를 권한다). `text-embedding-3-large`는 R@1 28/30, 다른 표현 R@1 2/6 → 4/6으로 이 표에서 가장 좋지만 단가가 6.5배($0.13 / 1M)다. 평가 1회는 합성 글 약 3,500자 + 질문 30개라 수천 토큰, 모델과 상관없이 $0.001 미만이다.
 - 표본이 작다. 실제 자료로 늘린 평가 세트는 사용자 공간 밖(임시 DB)에서만 돌린다.
 
@@ -74,10 +74,10 @@
 
 | 모델 (차원) | R@1 | R@5 | MRR | 한국어 바꿔 말하기 R@5 | 영→한 R@5 | 한→영 R@5 | 약어 R@5 | 단가 / 1M 토큰 |
 |---|---|---|---|---|---|---|---|---|
-| OpenAI 3-small (512, **기본**) | 25/52 | 36/52 | 0.607 | 15/24 | 10/12 | 3/7 | 8/9 | $0.02 |
+| OpenAI 3-small (512) | 25/52 | 36/52 | 0.607 | 15/24 | 10/12 | 3/7 | 8/9 | $0.02 |
 | OpenAI 3-small (1024) | 26/52 | 37/52 | 0.611 | 15/24 | 10/12 | 4/7 | 8/9 | $0.02 |
 | OpenAI 3-small (1536, 원래 차원) | 25/52 | 36/52 | 0.600 | 14/24 | 10/12 | 4/7 | 8/9 | $0.02 |
-| OpenAI 3-large (1024) | **40/52** | 47/52 | **0.837** | 20/24 | 12/12 | 6/7 | 9/9 | $0.13 |
+| OpenAI 3-large (1024, **기본**) | **40/52** | 47/52 | **0.837** | 20/24 | 12/12 | 6/7 | 9/9 | $0.13 |
 | OpenAI 3-large (3072, 원래 차원) | 39/52 | **48/52** | 0.828 | 21/24 | 12/12 | 6/7 | 9/9 | $0.13 |
 | 로컬 potion-multilingual-128M (256) | 22/52 | 34/52 | 0.545 | 17/24 | 7/12 | 3/7 | 7/9 | 무료, RAM ~0.44GB |
 | 로컬 multilingual-e5-large (1024) | 32/52 | 47/52 | 0.746 | 20/24 | 12/12 | 6/7 | 9/9 | 무료, RAM ~3.7GB |
@@ -85,7 +85,7 @@
 - **차원은 정확도를 거의 바꾸지 않는다.** 3-small은 512·1024·1536이 오차 범위 안(R@5 36~37/52)이고, 3-large도 1024와 3072가 같다. 차원을 줄이면 저장(벡터 1개 512차원 = 2KB, 3072차원 = 12KB)과 검색 계산이 가벼워진다. pgvector HNSW 색인은 2,000차원까지라 3-large를 그대로 쓰면 나중에 색인을 붙일 수 없다는 점도 1024를 고르는 이유다.
 - **차이를 만드는 것은 모델이다.** 3-large는 3-small보다 R@5가 11문항 많다. 특히 한국어 바꿔 말하기(15 → 20/24)와 영어 질문으로 한국어 글 찾기(10 → 12/12).
 - **다국어:** 셋 다 한국어·영어를 한 공간에 둔다(영→한 질문도 찾는다). 다만 한국어 질문으로 영어 글을 찾는 것은 모든 모델이 약하다(7문항 중 3~6).
-- **비용:** 이 평가 1회는 2,352 토큰(3-small $0.00005, 3-large $0.0003). 개인 자료 전체(수십만 토큰)를 색인해도 3-large가 몇 센트다. 기본을 3-small로 둔 것은 사용자가 고른 값이고, 정확도가 중요하면 `embed = "openai/text-embedding-3-large"` + `dimensions = 1024`로 바꾸고 `personal-api reindex`.
+- **비용:** 이 평가 1회는 2,352 토큰(3-small $0.00005, 3-large $0.0003). 개인 자료 전체(수십만 토큰)를 색인해도 3-large가 몇 센트라 정확도가 나은 3-large 1024차원을 기본으로 둔다. 비용을 더 줄이려면 `embed = "openai/text-embedding-3-small"` + `dimensions = 512`로 바꾸고 `personal-api reindex`.
 - 실제 검색은 키워드 + 의미 결합(RRF)이라 이 표보다 결과가 좋다(원문 낱말이 있으면 키워드가 찾는다). 이 표는 낱말이 겹치지 않는 질문에서의 차이다.
 - 표본이 작다(52문항). ±2문항 차이는 의미를 두지 않는다.
 

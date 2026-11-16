@@ -52,7 +52,7 @@ uv run --no-sync personal-api serve                      # http://127.0.0.1:8000
 
 **업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ... && personal-api migrate`. 그 전에 `pg_dump` 백업 또는 `personal-api export` ([backup.md](docs/operations/backup.md)).
 
-**검색 임베딩**: 예시 설정의 기본은 OpenAI `text-embedding-3-small` 512차원(`OPENAI_API_KEY`가 없으면 키워드 검색만). 더 정확하게는 `text-embedding-3-large` 1024차원, 자료를 밖으로 보내지 않으려면 로컬 모델(이미지 `CAREER_EXTRAS=local-embed`). 비교: [search.md](docs/architecture/search.md)
+**검색 임베딩**: 예시 설정의 기본은 OpenAI `text-embedding-3-large` 1024차원(`OPENAI_API_KEY`가 없으면 키워드 검색만). 더 싸게는 `text-embedding-3-small` 512차원, 자료를 밖으로 보내지 않으려면 로컬 모델(이미지 `CAREER_EXTRAS=local-embed`). 비교: [search.md](docs/architecture/search.md)
 
 ## 구조
 
