@@ -174,6 +174,12 @@ export const ERROR_TEXT: Record<string, string> = {
   requirement_not_in_posting: "공고에 없는 요건 문장입니다.",
   attempt_not_for_item: "이 학습 항목의 응시 기록이 아닙니다.",
   text_too_long: "글이 너무 깁니다.",
+  // 학습 백로그 (c0013)
+  item_merged: "다른 항목에 합쳐진 학습 항목입니다. 합친 항목에서 기록하세요.",
+  item_has_records: "응시·경험 후보·복습 기록이 있어 지울 수 없습니다. 그만둠으로 두거나 다른 항목에 합치세요.",
+  merge_same_item: "같은 항목끼리는 합칠 수 없습니다.",
+  requirement_current: "지금 공고에 있는 요건은 정리하지 않습니다.",
+  invalid_timezone: "알 수 없는 시간대입니다 (예: Asia/Seoul).",
 };
 
 // ---------------------------------------------------------------- O07 지원·문서
@@ -281,6 +287,7 @@ export const ITEM_STATUS: Record<StudyItemStatus, { label: string; tone: BadgeTo
   in_progress: { label: "진행 중", tone: "accent" },
   done: { label: "완료", tone: "ok" },
   dropped: { label: "그만둠", tone: "none" },
+  merged: { label: "합쳐짐", tone: "none" },
 };
 
 export const ITEM_KIND: Record<StudyItemKind, string> = {

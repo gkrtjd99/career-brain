@@ -118,7 +118,7 @@ export const documentRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Document"), "DocumentPage"),
 });
 
-const STUDY_TABS: StudyTab[] = ["reviews", "coverage", "items", "assessments", "mistakes"];
+const STUDY_TABS: StudyTab[] = ["reviews", "coverage", "frequency", "items", "assessments", "mistakes"];
 export const studyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/study",

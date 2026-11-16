@@ -5,6 +5,8 @@
 - 의미 검색은 본문 해시가 지금 본문과 같은 벡터만 쓴다. 고친 주장의 옛 벡터는 쓰지 않는다.
 - 두 순위는 RRF(reciprocal rank fusion)로 합친다. 점수 척도가 달라도 섞을 수 있다.
 - 작은 개인 자료 기준으로 정확(전수) 검색을 한다. HNSW 색인은 측정 후 필요할 때 추가한다.
+- 학습 메모(`study_note`)·오답(`study_mistake`)은 `kinds`로 요청하면 찾는다. 결과의 `record`는 `study`로,
+  경험(`experience`)과 구분한다. 학습 기록은 경험의 근거가 아니다 (경험 제목·주장 상태를 붙이지 않는다).
 """
 
 from __future__ import annotations
@@ -20,9 +22,20 @@ from career_core.db.types import to_pgvector
 from career_core.llm import EMBED_QUERY, ModelCallError, ModelDenied
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
-from career_core.usecases.indexing import CURRENT_BLOCKS, MAX_TEXT_CHARS
+from career_core.usecases.indexing import CURRENT_BLOCKS, MAX_TEXT_CHARS, STUDY_MISTAKE_BODY
 
+# 기본 검색 대상(브레인: 경험·원문). 학습 기록은 `kinds`로 요청할 때만 (MCP·문서 근거 찾기의 기본값은 그대로).
 KINDS = ("claim", "block", "answer")
+STUDY_KINDS = ("study_note", "study_mistake")
+ALL_KINDS = KINDS + STUDY_KINDS
+# 결과 묶음 표시: 경험(주장·인터뷰 답) / 원문(파싱 블록) / 학습 기록(메모·오답, 경험 아님)
+RECORDS = {
+    "claim": "experience",
+    "answer": "experience",
+    "block": "source",
+    "study_note": "study",
+    "study_mistake": "study",
+}
 RRF_K = 60
 # 의미 검색 순위의 비중. 합성 30문항에서 0.5~1.0 사이 차이가 거의 없어 표준 RRF(1.0)를 쓴다.
 SEMANTIC_WEIGHT = 1.0
@@ -35,12 +48,13 @@ WITH items AS (
     SELECT 'claim' AS kind, c.id, c.statement AS body, c.status,
            c.experience_id, ex.title AS experience_title,
            NULL::uuid AS source_id, NULL::text AS source_title, NULL::int AS page,
-           NULL::text AS question, NULL::uuid AS parse_run_id, NULL::int AS ordinal
+           NULL::text AS question, NULL::uuid AS parse_run_id, NULL::int AS ordinal,
+           NULL::uuid AS study_item_id, NULL::text AS study_title
     FROM core.claims c JOIN core.experiences ex ON ex.id = c.experience_id
     WHERE c.status <> 'retired'
     UNION ALL
     SELECT 'block', b.id, b.text, NULL, NULL, NULL, s.id, s.title, b.page, NULL,
-           b.parse_run_id, b.ordinal
+           b.parse_run_id, b.ordinal, NULL, NULL
     FROM core.document_blocks b
     JOIN core.parse_runs pr ON pr.id = b.parse_run_id
     JOIN core.source_versions sv ON sv.id = pr.source_version_id
@@ -48,11 +62,23 @@ WITH items AS (
     WHERE b.parse_run_id IN ({CURRENT_BLOCKS})
     UNION ALL
     SELECT 'answer', a.id, a.answer, NULL, se.experience_id, ex.title, NULL, NULL, NULL, q.prompt,
-           NULL, NULL
+           NULL, NULL, NULL, NULL
     FROM core.interview_answers a
     JOIN core.interview_questions q ON q.id = a.question_id
     JOIN core.interview_sessions se ON se.id = q.session_id
     LEFT JOIN core.experiences ex ON ex.id = se.experience_id
+    UNION ALL
+    SELECT 'study_note', ss.id, ss.notes, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+           NULL, NULL, si.id, si.title
+    FROM core.study_sessions ss JOIN core.study_items si ON si.id = ss.study_item_id
+    WHERE ss.notes IS NOT NULL AND btrim(ss.notes) <> ''
+    UNION ALL
+    SELECT 'study_mistake', m.id, {STUDY_MISTAKE_BODY}, NULL, NULL, NULL, NULL, NULL, NULL,
+           m.question, NULL, NULL, m.study_item_id, COALESCE(si.title, sa.title)
+    FROM core.study_mistakes m
+    LEFT JOIN core.study_items si ON si.id = m.study_item_id
+    LEFT JOIN core.study_attempts at ON at.id = m.attempt_id
+    LEFT JOIN core.study_assessments sa ON sa.id = at.assessment_id
 )
 """
 
@@ -107,6 +133,11 @@ class SearchHit:
     ordinal: int | None = None
     match_start: int | None = None
     match_end: int | None = None
+    # experience | source | study. study(학습 메모·오답)는 경험이 아니다.
+    record: str = "experience"
+    # 학습 기록만: 그 기록의 학습 항목(없으면 None)과 항목·시험 제목
+    study_item_id: UUID | None = None
+    study_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +206,9 @@ def _hit(row, terms: list[str], **extra) -> SearchHit:
         ordinal=row.ordinal if block else None,
         match_start=match[0] if match else None,
         match_end=match[1] if match else None,
+        record=RECORDS[row.kind],
+        study_item_id=row.study_item_id,
+        study_title=row.study_title,
         **extra,
     )
 
@@ -189,7 +223,7 @@ async def search(
     limit: int = 10,
 ) -> SearchResult:
     query = " ".join((query or "").split())[:MAX_QUERY_CHARS]
-    kinds = tuple(k for k in kinds if k in KINDS) or KINDS
+    kinds = tuple(k for k in kinds if k in ALL_KINDS) or KINDS
     limit = max(1, min(limit, 50))
     if not query:
         return SearchResult(query, [], "keyword", "empty_query")

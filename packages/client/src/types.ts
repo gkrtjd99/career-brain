@@ -264,7 +264,9 @@ export interface WikiPage {
 
 // ---------------------------------------------------------------- search
 
-export type SearchKind = "claim" | "block" | "answer";
+/** study_note·study_mistake: 학습 메모·오답 (학습 기록, 경험 아님). 기본 검색에는 없고 kinds로 요청한다 */
+export type SearchKind = "claim" | "block" | "answer" | "study_note" | "study_mistake";
+export type SearchRecord = "experience" | "source" | "study";
 
 export interface SearchHit {
   kind: SearchKind;
@@ -286,6 +288,10 @@ export interface SearchHit {
   ordinal?: number | null;
   match_start?: number | null;
   match_end?: number | null;
+  /** experience(주장·인터뷰 답) | source(원문) | study(학습 메모·오답 — 경험이 아님) */
+  record?: SearchRecord;
+  study_item_id?: Uuid | null;
+  study_title?: string | null;
 }
 
 export interface SearchResult {
@@ -745,7 +751,7 @@ export interface Submission {
 
 export type RequirementField = "requirements" | "preferred" | "process";
 export type StudyItemKind = "skill" | "topic" | "other";
-export type StudyItemStatus = "planned" | "in_progress" | "done" | "dropped";
+export type StudyItemStatus = "planned" | "in_progress" | "done" | "dropped" | "merged";
 export type AssessmentKind =
   | "coding_test"
   | "written_test"
@@ -845,6 +851,10 @@ export interface StudyItem {
   attempts: Attempt[];
   mistakes: Mistake[];
   claim_candidates: { claim_id: Uuid; attempt_id: Uuid | null; statement: string; status: string }[];
+  /** status = merged면 합친 항목 */
+  merged_into_id?: Uuid | null;
+  /** 이 항목으로 합쳐진 항목 (응시·후보 기록은 원래 항목에 남고 여기서 함께 보인다) */
+  merged_from?: { id: Uuid; title: string }[];
 }
 
 export interface Assessment {
@@ -948,4 +958,92 @@ export interface PlanOut {
   items_created: Uuid[];
   assessments_created: Uuid[];
   skipped: number;
+}
+
+// ---------------------------------------------------------------- study backlog (c0013)
+
+export interface StudySettings {
+  /** IANA 시간대. 복습 마감 = 이 시간대의 오늘 끝, D-day 기준 */
+  timezone: string;
+  is_default: boolean;
+  today: string;
+  day_ends_at: IsoDateTime;
+}
+
+export interface UpcomingAssessment {
+  id: Uuid;
+  title: string;
+  kind: AssessmentKind;
+  scheduled_at: IsoDateTime;
+  /** 0 = 오늘, 1 = 내일 (표시 시간대 날짜 기준) */
+  d_day: number;
+  requirement: RequirementRef | null;
+}
+
+export interface MergeOut {
+  target_id: Uuid;
+  sessions_moved: number;
+  mistakes_moved: number;
+  attempts_kept: number;
+  candidates_kept: number;
+}
+
+export interface DeleteItemOut {
+  item_id: Uuid;
+  sessions_deleted: number;
+  mistakes_deleted: number;
+  merged_items_deleted: number;
+}
+
+export interface CleanupOut {
+  removed: Uuid[];
+  items_unlinked: number;
+  assessments_unlinked: number;
+  items_dropped: number;
+  assessments_cancelled: number;
+  claim_links_removed: number;
+}
+
+export interface ClaimSuggestion {
+  claim_id: Uuid;
+  statement: string;
+  status: ClaimStatus;
+  experience_id: Uuid | null;
+  experience_title: string | null;
+  score: number;
+  keyword_rank: number | null;
+  semantic_rank: number | null;
+}
+
+/** 요건 → 주장 후보 (검색 제안). 사용자가 하나씩 연결해야 반영되고 충족 판정에 쓰지 않는다 */
+export interface ClaimSuggestions {
+  posting_id: Uuid;
+  lines: {
+    field: RequirementField;
+    text: string;
+    requirement_id: Uuid | null;
+    query: string;
+    candidates: ClaimSuggestion[];
+  }[];
+  mode: string;
+  semantic_note: string | null;
+  basis: "search_suggestion";
+}
+
+export interface FrequencyGroup {
+  key: string;
+  label: string;
+  postings: number;
+  required: number;
+  preferred: number;
+  examples: string[];
+  posting_ids: Uuid[];
+}
+
+/** 저장 공고 요건 빈도. 사용자가 저장한 공고만 센다 (시장 통계 아님) */
+export interface RequirementFrequency {
+  total_postings: number;
+  groups: FrequencyGroup[];
+  statuses: PostingStatus[];
+  basis: "saved_postings_only";
 }

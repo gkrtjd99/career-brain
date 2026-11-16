@@ -33,6 +33,10 @@ class HitOut(BaseModel):
     ordinal: int | None = None
     match_start: int | None = None
     match_end: int | None = None
+    # experience | source | study (학습 메모·오답은 학습 기록이지 경험이 아니다)
+    record: str = "experience"
+    study_item_id: UUID | None = None
+    study_title: str | None = None
 
 
 class SearchOut(BaseModel):
@@ -54,7 +58,10 @@ def add_search_routes(router: APIRouter, deps, authorize) -> None:
     async def search(
         actor: reader,
         q: Annotated[str, Query(max_length=search_uc.MAX_QUERY_CHARS)],
-        kinds: Annotated[str | None, Query(description="claim,block,answer")] = None,
+        kinds: Annotated[
+            str | None,
+            Query(description="claim,block,answer (기본) + study_note,study_mistake (학습 기록)"),
+        ] = None,
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
     ) -> SearchOut:
         wanted = tuple(k.strip() for k in kinds.split(",")) if kinds else search_uc.KINDS

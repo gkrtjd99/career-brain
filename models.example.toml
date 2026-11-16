@@ -58,7 +58,7 @@ extract = "claude/claude-haiku-5-5"      # 자료에서 경험 후보 추출 (�
 interview = "claude/claude-opus-5-5"     # 인터뷰 질문 생성
 # 의미 검색용 임베딩. 없으면 키워드 검색만 한다 (가장 가볍다). default로 넘어가지 않는다.
 #   API(가벼운 서버 권장):  embed = "openai/text-embedding-3-small"    # $0.02 / 1M 토큰
-#   로컬(오프라인·비공개):  embed = "embed-local/minishlab/potion-multilingual-128M"  # 약 0.5GB, 사용 중 RAM ~1.6GB
+#   로컬(오프라인·비공개):  embed = "embed-local/minishlab/potion-multilingual-128M"  # 약 0.5GB, 사용 중 RAM ~1GB
 # 바꾼 뒤에는 `personal-api reindex`로 다시 색인한다. 모델·차원이 다른 벡터는 섞지 않는다.
 # embed = "openai/text-embedding-3-small"
 

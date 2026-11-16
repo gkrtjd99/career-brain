@@ -2,7 +2,7 @@ import type { SearchHit, SearchKind } from "@career-brain/client";
 import { Badge, Button, EmptyState, Input, StatusBadge } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { FileText, MessageSquareQuote, Quote, Search as SearchIcon } from "lucide-react";
+import { BookOpen, FileText, MessageSquareQuote, NotebookPen, Quote, Search as SearchIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Loaded, PageHeader } from "../components/common";
 import { SourceSheet, type SourceTarget } from "../components/SourceSheet";
@@ -14,8 +14,11 @@ const KIND_INFO: Record<SearchKind, { label: string; icon: typeof Quote }> = {
   claim: { label: "주장", icon: Quote },
   block: { label: "원문", icon: FileText },
   answer: { label: "인터뷰 답변", icon: MessageSquareQuote },
+  study_note: { label: "학습 메모", icon: NotebookPen },
+  study_mistake: { label: "오답", icon: BookOpen },
 };
-const ALL: SearchKind[] = ["claim", "block", "answer"];
+// 학습 메모·오답은 학습 기록이다. 경험이 아니므로 결과에 "경험 아님"을 붙인다.
+const ALL: SearchKind[] = ["claim", "block", "answer", "study_note", "study_mistake"];
 
 function semanticNote(note: string) {
   if (note === "no_embedding_route") return "임베딩 모델 미설정";
@@ -57,7 +60,7 @@ export function SearchPage() {
 
   return (
     <div>
-      <PageHeader title="검색" subtitle="확인한 주장, 올린 원문, 인터뷰 답변에서 찾습니다." />
+      <PageHeader title="검색" subtitle="확인한 주장, 올린 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다." />
       <form
         role="search"
         className="mb-3 flex gap-2"
@@ -131,8 +134,9 @@ function Hits({ hits }: { hits: SearchHit[] }) {
                 <span>{info.label}</span>
                 {h.claim_status ? <StatusBadge status={h.claim_status} /> : null}
                 {h.kind === "block" ? <Badge tone="none">원문 그대로</Badge> : null}
+                {h.record === "study" ? <Badge tone="warn">학습 기록 · 경험 아님</Badge> : null}
               </div>
-              {h.question ? <p className="text-xs text-muted">질문: {h.question}</p> : null}
+              {h.question && h.kind === "answer" ? <p className="text-xs text-muted">질문: {h.question}</p> : null}
               <p className="text-sm leading-6 whitespace-pre-wrap">{h.snippet}</p>
               <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
                 {h.experience_id ? (
@@ -160,6 +164,17 @@ function Hits({ hits }: { hits: SearchHit[] }) {
                   >
                     원본 보기
                   </button>
+                ) : null}
+                {h.record === "study" && h.study_item_id ? (
+                  <Link
+                    to="/study/items/$itemId"
+                    params={{ itemId: h.study_item_id }}
+                    className="text-accent underline-offset-2 hover:underline"
+                  >
+                    {h.study_title ?? "학습 항목"} 열기
+                  </Link>
+                ) : h.record === "study" && h.study_title ? (
+                  <span className="text-muted">{h.study_title}</span>
                 ) : null}
                 {h.source_title ? (
                   <span className="text-muted">

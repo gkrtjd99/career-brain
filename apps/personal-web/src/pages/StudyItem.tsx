@@ -1,7 +1,7 @@
 import type { ClaimKind, StudyItem, StudyItemStatus } from "@career-brain/client";
 import { Badge, Button, Input, Label, Section, Select, StatusBadge, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getRouteApi, Link } from "@tanstack/react-router";
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { AttemptForm, AttemptRow, MistakeForm, ReviewCard, useStudyInvalidate } from "../components/study/parts";
@@ -37,6 +37,20 @@ function ItemView({ item }: { item: StudyItem }) {
           </span>
         }
       />
+      {item.status === "merged" && item.merged_into_id ? (
+        <p className="mb-4 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
+          다른 항목에 합쳐졌습니다. 기록은{" "}
+          <Link to="/study/items/$itemId" params={{ itemId: item.merged_into_id }} className="text-accent hover:underline">
+            합친 항목
+          </Link>
+          에서 이어 갑니다. 응시·경험 후보 기록은 고치지 않는 기록이라 이 항목에 남아 합친 항목에서 함께 보입니다.
+        </p>
+      ) : null}
+      {item.merged_from?.length ? (
+        <p className="mb-4 text-xs text-muted">
+          합쳐 온 항목: {item.merged_from.map((m) => m.title).join(", ")} (응시·경험 후보 기록은 원래 항목에 남아 여기서 함께 보입니다)
+        </p>
+      ) : null}
       {item.requirement ? (
         <p className="mb-4 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
           <Link to="/study" search={{ tab: "coverage", posting: item.requirement.posting_id }} className="text-accent hover:underline">
@@ -45,6 +59,8 @@ function ItemView({ item }: { item: StudyItem }) {
           · {REQ_FIELD[item.requirement.field]}: {item.requirement.text}
         </p>
       ) : null}
+      {item.status === "merged" ? null : (
+      <>
       <div className="mb-6 flex flex-wrap gap-1.5" role="radiogroup" aria-label="상태">
         {STATUSES.map((s) => (
           <Button
@@ -119,7 +135,85 @@ function ItemView({ item }: { item: StudyItem }) {
         <Section title="경험 후보로 올리기">
           <CandidateForm item={item} />
         </Section>
+
+        <Section title="합치기·지우기">
+          <MergeDelete item={item} />
+        </Section>
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+function MergeDelete({ item }: { item: StudyItem }) {
+  const invalidate = useStudyInvalidate();
+  const navigate = useNavigate();
+  const items = useQuery({ queryKey: ["study-items", ""], queryFn: () => api.studyItems() });
+  const [into, setInto] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const merge = useMutation({
+    mutationFn: () => api.mergeStudyItem(item.id, into),
+    onSuccess: (r) => {
+      invalidate();
+      void navigate({ to: "/study/items/$itemId", params: { itemId: r.target_id } });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteStudyItem(item.id),
+    onSuccess: () => {
+      invalidate();
+      void navigate({ to: "/study", search: { tab: "items" } });
+    },
+  });
+  const others = (items.data ?? []).filter((x) => x.id !== item.id);
+  return (
+    <div className="space-y-3 text-[13px]">
+      <p className="text-xs text-muted">
+        같은 내용을 두 번 만들었으면 합칩니다. 학습 기록·오답은 고른 항목으로 옮기고, 응시·경험 후보 기록은 이 항목에 그대로 남아 고른 항목에서 함께 보입니다.
+      </p>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (into) merge.mutate();
+        }}
+      >
+        <div className="min-w-0 flex-1">
+          <Label htmlFor="mg-into">합칠 대상</Label>
+          <Select id="mg-into" value={into} onChange={(e) => setInto(e.target.value)}>
+            <option value="">고르기</option>
+            {others.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.title}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Button type="submit" size="sm" disabled={!into || merge.isPending}>
+          이 항목을 합치기
+        </Button>
+      </form>
+      <ErrorText error={merge.error} />
+      <div className="flex flex-wrap items-center gap-2">
+        {confirmDelete ? (
+          <>
+            <span>학습 기록 {item.sessions.length}개·오답 {item.mistakes.length}개도 함께 지웁니다.</span>
+            <Button size="sm" variant="danger" disabled={remove.isPending} onClick={() => remove.mutate()}>
+              지우기
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+              취소
+            </Button>
+          </>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
+            항목 지우기
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted">응시·경험 후보·복습 기록이 있는 항목은 지우지 않습니다 (그만둠으로 두세요).</p>
+      <ErrorText error={remove.error} />
     </div>
   );
 }

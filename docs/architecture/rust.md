@@ -16,7 +16,7 @@
 | 텍스트 자료 300개 파싱 | 약 11초 (그동안 health 최대 1.5ms) | DB 쓰기 위주 |
 | HTML 공고 추출 (`extract_page`) | 59KB 4ms, 266KB 33ms | 순수 Python(`html.parser`) |
 | PDF 텍스트 (`pypdf`, 단순 글꼴) | 페이지당 약 1.1ms (50쪽 57ms) | 순수 Python. 복잡한 글꼴·표가 많은 PDF는 더 느리다 |
-| 로컬 임베딩 | 모델 단독 RAM 0.9~1.6GB | ONNX Runtime(C++). Python은 호출만 한다 |
+| 로컬 임베딩 | 모델 단독 RAM 0.7~1GB | ONNX Runtime(C++). Python은 호출만 한다 |
 
 ## 일의 성격: I/O 대기가 대부분
 
@@ -30,7 +30,7 @@
 
 - 같은 API를 Rust(axum + sqlx)로 쓰면 유휴 RSS는 대략 10~30MB일 것이다 (측정 아님, 일반적인 범위). 프로세스당 약 70MB 차이.
 - 개인 서버 전체로 보면: 앱 ~100MB + PostgreSQL ~40MB(+ shared_buffers 128MB) ≈ 300MB. 1GB 서버에서 Python 때문에 더 큰 서버가 필요해지지 않는다.
-- 더 큰 몫은 따로 있다: 로컬 임베딩 1.6GB(→ OpenAI 임베딩이면 0), Chromium 수백 MB(→ 기본 꺼짐), API·worker를 두 프로세스로 나누기(+83MB → `serve`가 한 프로세스로 합침), alembic 상주(+8MB → migrate 때만 import). 이번 작업은 이 쪽을 줄였다.
+- 더 큰 몫은 따로 있다: 로컬 임베딩 ~1GB(mmap 로드 전 1.6GB, → OpenAI 임베딩이면 0), Chromium 수백 MB(→ 기본 꺼짐), API·worker를 두 프로세스로 나누기(+83MB → `serve`가 한 프로세스로 합침), alembic 상주(+8MB → migrate 때만 import). 이번 작업은 이 쪽을 줄였다.
 
 ## 호스팅 서비스로 갈 때의 확장 경로
 

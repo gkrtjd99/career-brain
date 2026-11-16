@@ -763,6 +763,12 @@ async def test_stricter_reupload_raises_data_class(db, blobs, people):
     assert lower.deduplicated
     async with db.workspace_session(owner.workspace_id) as s:
         assert (await s.get(Source, first.source_id)).data_class == "restricted"  # 낮추지 않는다
+    # 이 시험의 파싱 작업을 비운다. 남기면 다른 시험의 worker가 이 tmp 원본을 못 찾고 재시도로 남아
+    # 시간에 따라 다른 시험의 작업 수를 바꾼다.
+    deps = ParsingDeps(
+        db=db, blobs=blobs, egress=ProviderEgressPolicy(), local_parsers=default_local_parsers()
+    )
+    await run_until_idle(db, parsing_handlers(deps))
 
 
 async def test_metered_call_without_usage_counts_toward_budget(db, people):

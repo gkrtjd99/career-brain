@@ -6,6 +6,7 @@ import { AlertTriangle, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { ErrorText, List, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
+import { UpcomingTests } from "../components/study/UpcomingTests";
 import { api } from "../lib/api";
 import { daysLeft, formatDateTime, formatDeadline, hostOf, usd } from "../lib/format";
 import { ACTIVITY_LABEL, FETCH_ERROR, FIELD_LABEL, MISTAKE_REASON, POSTING_STATUS } from "../lib/labels";
@@ -245,6 +246,7 @@ export function TodayPage() {
             </Link>
           }
         >
+          <UpcomingTests />
           {due.data?.length ? (
             <List>
               {due.data.slice(0, 4).map((m) => (

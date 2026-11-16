@@ -773,3 +773,34 @@ class ExportRun(Base):
     rows_total: Mapped[int] = mapped_column(BigInteger)
     blobs_total: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- c0013: 학습 설정
+
+
+class StudySettings(Base):
+    """공간의 학습 설정 (한 공간에 한 행). 표시 시간대: 복습 마감·D-day 기준."""
+
+    __tablename__ = "study_settings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    timezone: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class StudyItemMerge(Base):
+    """학습 항목 병합 기록: 합쳐진 항목(status = merged) → 합친 항목. 원래 항목마다 한 행."""
+
+    __tablename__ = "study_item_merges"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    source_item_id: Mapped[UUID]
+    target_item_id: Mapped[UUID]
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
