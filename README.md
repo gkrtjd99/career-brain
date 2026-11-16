@@ -7,7 +7,40 @@
 1. **바로 설치해서 쓰는 개인용 제품** — `apps/personal-web`(React) + `apps/personal-api`(FastAPI) + PostgreSQL + worker
 2. **공통 엔진** — `packages/core`(Python `career-core`), `packages/ui`, `packages/client`, `skills/`
 
-> 상태: 초기 스캐폴딩. 설계는 [docs/architecture/plan.md](docs/architecture/plan.md).
+> 상태: 개발 중 (O01–O06 + 설치 패키징). 설계는 [docs/architecture/plan.md](docs/architecture/plan.md).
+
+*A self-hosted career "second brain": sources, experiences/claims with evidence, search, job postings. Runs as one Python process + PostgreSQL. Install from this GitHub repo (no registry packages). Docs are in Korean; commands below are the quick path.*
+
+## 설치 (Install)
+
+자세한 설명·백업·업데이트·리버스 프록시: [docs/operations/install.md](docs/operations/install.md)
+
+**Docker (서버)** — 앱 1개(API + worker + 웹) + PostgreSQL/pgvector. 앱 유휴 메모리 약 100MB.
+
+```bash
+git clone https://github.com/gkrtjd99/career-brain.git && cd career-brain/deploy/docker
+cp .env.example .env && cp app.env.example app.env      # DB 비밀번호(openssl rand -hex 24), 모델 키
+mkdir -p config && cp ../../models.example.toml config/models.toml   # 선택
+docker compose up -d --build                             # db → migrate → app (127.0.0.1:8000)
+docker compose run --rm app bootstrap                    # 첫 설치 때 한 번: API 토큰
+```
+
+인터넷에 열 때는 앞에 TLS 리버스 프록시(Caddy 등)를 둔다. DB 포트는 열리지 않고 앱은 기본 localhost에만 열린다.
+
+**로컬 (uv)**
+
+```bash
+uv sync --package personal-api --no-dev                  # 로컬 임베딩까지: --extra local-embed
+docker compose -f deploy/compose/compose.yaml up -d db   # 개발용 DB (127.0.0.1)
+uv run --no-sync personal-api migrate
+uv run --no-sync personal-api bootstrap
+npm ci && npm run build                                  # 선택: 웹 화면
+uv run --no-sync personal-api serve                      # http://127.0.0.1:8000
+```
+
+**업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ... && personal-api migrate`. 그 전에 `pg_dump` 백업. 전체 내보내기·복원(O11)은 아직 없다.
+
+**검색 임베딩**: 기본은 키워드 검색만(가장 가볍다). 작은 서버는 OpenAI `text-embedding-3-small`, 자료를 밖으로 보내지 않으려면 로컬 모델(이미지 `CAREER_EXTRAS=local-embed`, 사용 중 RAM ~1.6GB). [search.md](docs/architecture/search.md)
 
 ## 구조
 
@@ -19,7 +52,8 @@ packages/ui           문서 편집·근거 카드 등 공통 UI
 packages/client       TS API 클라이언트
 contracts/            OpenAPI·JSON Schema·호환성
 skills/               업무 스킬 (SKILL.md)
-deploy/compose/       개인용 compose
+deploy/compose/       개발용 DB compose
+deploy/docker/        서버 배포 compose (Dockerfile은 레포 루트)
 ```
 
 ## 개발
@@ -32,8 +66,9 @@ docker compose -f deploy/compose/compose.yaml up -d db   # PostgreSQL + 앱 역�
 uv run pytest                                           # DB 테스트는 임시 DB를 만들고 지운다
 uv run personal-api migrate                             # core → personal migration
 uv run personal-api bootstrap                           # 공간 + owner + API 토큰 (한 번만 출력)
-uv run uvicorn personal_api.main:app --reload           # http://127.0.0.1:8000
+uv run uvicorn personal_api.main:app --reload           # http://127.0.0.1:8000 (API만)
 uv run personal-api worker                              # 파싱 등 백그라운드 작업
+uv run personal-api serve                               # 또는 한 프로세스로: API + worker + 웹(dist)
 curl -H "Authorization: Bearer <token>" localhost:8000/api/core/me
 curl -H "Authorization: Bearer <token>" -F file=@resume.pdf localhost:8000/api/core/sources
 npm run dev                                             # http://localhost:5173
@@ -53,7 +88,7 @@ curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=
 
 웹(개인 대시보드): `npm run dev` 후 설정 화면에 API 토큰을 넣는다. API 주소가 8000이 아니면 `CAREER_API_PROXY=http://127.0.0.1:8765 npm run dev`. 배포용 정적 파일은 `npm run build` → `apps/personal-web/dist`. 화면 구성: [docs/architecture/web.md](docs/architecture/web.md)
 
-DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md)
+DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md) · 설치·운영: [docs/operations/install.md](docs/operations/install.md) · Rust 검토: [docs/architecture/rust.md](docs/architecture/rust.md)
 
 ## 원칙
 
