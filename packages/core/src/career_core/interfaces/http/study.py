@@ -227,6 +227,24 @@ class DueOut(BaseModel):
     attempt_id: UUID | None
 
 
+class MistakeListOut(BaseModel):
+    id: UUID
+    question: str
+    wrong_answer: str | None
+    correct_answer: str | None
+    reason: str
+    reason_note: str | None
+    status: str
+    due_at: datetime
+    repetitions: int
+    interval_days: int
+    last_reviewed_at: datetime | None
+    study_item_id: UUID | None
+    study_item_title: str | None
+    attempt_id: UUID | None
+    created_at: datetime
+
+
 class LineIn(BaseModel):
     field: str
     text: str = Field(min_length=1, max_length=uc.MAX_TEXT)
@@ -446,6 +464,15 @@ def add_study_routes(router: APIRouter, deps, authorize) -> None:
     @router.post("/study/mistakes", response_model=IdOut, status_code=201)
     async def add_mistake(actor: writer, body: MistakeIn) -> IdOut:
         return IdOut(id=await call(uc.add_mistake, db, actor, **body.model_dump()))
+
+    @router.get("/study/mistakes", response_model=list[MistakeListOut])
+    async def list_mistakes(
+        actor: reader,
+        status: str | None = None,
+        limit: Annotated[int, Query(ge=1, le=uc.DUE_LIMIT)] = 100,
+    ) -> list[MistakeListOut]:
+        rows = await call(uc.list_mistakes, db, actor, status=status, limit=limit)
+        return [_out(MistakeListOut, r) for r in rows]
 
     @router.patch("/study/mistakes/{mistake_id}", response_model=StatusOut)
     async def patch_mistake(actor: writer, mistake_id: UUID, body: MistakePatch) -> StatusOut:

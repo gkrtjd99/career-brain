@@ -7,6 +7,8 @@ export { Card, EmptyState, Section, Spinner } from "./Card";
 export type { SectionProps } from "./Card";
 export { Input, Label, Select, Textarea } from "./Form";
 export { Sheet } from "./Sheet";
+export { ConfirmDialog } from "./Dialog";
+export type { ConfirmDialogProps } from "./Dialog";
 export type { SheetProps } from "./Sheet";
 export { Highlight } from "./Highlight";
 export type { HighlightProps } from "./Highlight";

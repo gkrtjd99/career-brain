@@ -123,6 +123,9 @@ class ApplicationSummary:
     documents: int
     submitted_at: datetime | None
     created_at: datetime
+    # 공고 문항(kind=question) 문서 수와, 그중 아직 글이 없는 수
+    questions: int = 0
+    unwritten: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,8 +523,29 @@ async def list_applications(db: Database, actor: ActorContext) -> list[Applicati
             ).scalars()
         }
         counts: dict[UUID, int] = {}
-        for (aid,) in (await s.execute(select(ApplicationDocument.application_id))).all():
+        questions: dict[UUID, int] = {}
+        unwritten: dict[UUID, int] = {}
+        rows = (
+            await s.execute(
+                select(
+                    ApplicationDocument.application_id,
+                    ApplicationDocument.kind,
+                    ApplicationDocument.current_revision,
+                    DocumentRevision.counts,
+                ).outerjoin(
+                    DocumentRevision,
+                    (DocumentRevision.document_id == ApplicationDocument.id)
+                    & (DocumentRevision.revision_no == ApplicationDocument.current_revision),
+                )
+            )
+        ).all()
+        for aid, kind, current, rev_counts in rows:
             counts[aid] = counts.get(aid, 0) + 1
+            if kind != DocumentKind.QUESTION:
+                continue
+            questions[aid] = questions.get(aid, 0) + 1
+            if current == 0 or not (rev_counts or {}).get("chars_with_spaces"):
+                unwritten[aid] = unwritten.get(aid, 0) + 1
     out = []
     for a in apps:
         f = postings[a.posting_id].fields or {}
@@ -537,6 +561,8 @@ async def list_applications(db: Database, actor: ActorContext) -> list[Applicati
                 counts.get(a.id, 0),
                 a.submitted_at,
                 a.created_at,
+                questions.get(a.id, 0),
+                unwritten.get(a.id, 0),
             )
         )
     return out
@@ -732,6 +758,26 @@ async def get_document(
         if rev is None and no != 0:
             raise NotFound("revision")
     return _document_view(app, doc, rev)
+
+
+async def count_draft(
+    db: Database,
+    actor: ActorContext,
+    application_id: UUID,
+    document_id: UUID,
+    blocks: Sequence[str],
+) -> dict[str, Any]:
+    """저장하지 않은 문단들의 글자·바이트 수. 저장할 때와 같게 문단을 정리(NFC·앞뒤 공백·빈 문단 제외)하고
+    줄바꿈 하나로 이은 뒤 문서의 세는 기준·제한으로 센다. 아무것도 쓰지 않는다."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        _, doc = await _get_doc(s, application_id, document_id)
+    texts = [t for t in (normalize_text(b).strip() for b in blocks) if t]
+    return count_text(
+        "\n".join(texts),
+        CountRule.parse(doc.count_rule),
+        char_limit=doc.char_limit,
+        byte_limit=doc.byte_limit,
+    ).as_dict()
 
 
 async def list_revisions(

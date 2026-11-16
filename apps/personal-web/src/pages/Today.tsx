@@ -1,4 +1,4 @@
-import type { PostingSummary } from "@career-brain/client";
+import type { ActivityItem, ApplicationSummary, PostingSummary } from "@career-brain/client";
 import { Badge, EmptyState, Section, Spinner } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -7,8 +7,8 @@ import type { ReactNode } from "react";
 import { ErrorText, List, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api } from "../lib/api";
-import { daysLeft, formatDeadline, hostOf, usd } from "../lib/format";
-import { FETCH_ERROR, FIELD_LABEL, POSTING_STATUS } from "../lib/labels";
+import { daysLeft, formatDateTime, formatDeadline, hostOf, usd } from "../lib/format";
+import { ACTIVITY_LABEL, FETCH_ERROR, FIELD_LABEL, MISTAKE_REASON, POSTING_STATUS } from "../lib/labels";
 
 const SOON_DAYS = 14;
 
@@ -50,6 +50,9 @@ function postingName(p: PostingSummary) {
 export function TodayPage() {
   const postings = useQuery({ queryKey: ["postings"], queryFn: api.postings });
   const experiences = useQuery({ queryKey: ["experiences"], queryFn: api.experiences });
+  const apps = useQuery({ queryKey: ["applications"], queryFn: api.applications });
+  const due = useQuery({ queryKey: ["due-reviews"], queryFn: () => api.dueReviews({ limit: 100 }) });
+  const activity = useQuery({ queryKey: ["activity"], queryFn: () => api.activity({ limit: 12 }) });
   const usage = useQuery({
     queryKey: ["usage", 30, "status"],
     queryFn: () => api.usage({ days: 30, groupBy: "status" }),
@@ -61,6 +64,9 @@ export function TodayPage() {
     .map((p) => ({ p, n: daysLeft(p.deadline) }))
     .filter((x): x is { p: PostingSummary; n: number } => x.n !== null && x.n >= 0 && x.n <= SOON_DAYS)
     .sort((a, b) => a.n - b.n);
+
+  const appByPosting = new Map<string, ApplicationSummary>();
+  for (const a of apps.data ?? []) if (!appByPosting.has(a.posting_id) || a.status === "draft") appByPosting.set(a.posting_id, a);
 
   const reviewExperiences = (experiences.data ?? []).filter((e) => e.needs_review > 0);
   const drafts = list.filter((p) => p.status === "draft" && p.last_fetch_status === "done");
@@ -104,20 +110,48 @@ export function TodayPage() {
       ) : null}
       <ErrorText error={postings.error ?? experiences.error} className="mb-4" />
 
-      <div className="grid gap-8 lg:grid-cols-2">
-        <Section title="마감 임박" className="lg:col-span-2">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <Section title="마감 임박 · 안 쓴 문항" className="lg:col-span-2">
           {soon.length ? (
             <List>
-              {soon.map(({ p }) => (
-                <Row
-                  key={p.id}
-                  to="/postings/$postingId"
-                  params={{ postingId: p.id }}
-                  title={postingName(p)}
-                  meta={[p.company, formatDeadline(p.deadline)].filter(Boolean).join(" · ")}
-                  right={<DdayBadge deadline={p.deadline} />}
-                />
-              ))}
+              {soon.map(({ p }) => {
+                const a = appByPosting.get(p.id);
+                return a ? (
+                  <Row
+                    key={p.id}
+                    to="/applications/$applicationId"
+                    params={{ applicationId: a.id }}
+                    title={postingName(p)}
+                    meta={[p.company, formatDeadline(p.deadline)].filter(Boolean).join(" · ")}
+                    right={
+                      <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                        {a.status !== "draft" ? (
+                          <Badge tone="ok">제출함</Badge>
+                        ) : a.unwritten ? (
+                          <Badge tone="warn">안 쓴 문항 {a.unwritten}</Badge>
+                        ) : a.questions ? (
+                          <Badge tone="ok">문항 다 씀</Badge>
+                        ) : null}
+                        <DdayBadge deadline={p.deadline} />
+                      </span>
+                    }
+                  />
+                ) : (
+                  <Row
+                    key={p.id}
+                    to="/postings/$postingId"
+                    params={{ postingId: p.id }}
+                    title={postingName(p)}
+                    meta={[p.company, formatDeadline(p.deadline), "지원 준비 전"].filter(Boolean).join(" · ")}
+                    right={
+                      <span className="flex shrink-0 gap-1">
+                        <Badge tone="none">지원 없음</Badge>
+                        <DdayBadge deadline={p.deadline} />
+                      </span>
+                    }
+                  />
+                );
+              })}
             </List>
           ) : (
             <EmptyState>
@@ -127,9 +161,6 @@ export function TodayPage() {
               </Link>
             </EmptyState>
           )}
-          <p className="text-xs text-muted">
-            안 쓴 자기소개서 문항은 지원·문서 단계(O07)에서 함께 표시됩니다.
-          </p>
         </Section>
 
         <Section title="확인 대기">
@@ -207,6 +238,33 @@ export function TodayPage() {
         </Section>
 
         <Section
+          title="오늘 복습"
+          action={
+            <Link to="/study" className="text-[13px] text-muted hover:text-fg">
+              학습
+            </Link>
+          }
+        >
+          {due.data?.length ? (
+            <List>
+              {due.data.slice(0, 4).map((m) => (
+                <Row
+                  key={m.id}
+                  to="/study"
+                  title={m.question}
+                  meta={[m.study_item_title, MISTAKE_REASON[m.reason]].filter(Boolean).join(" · ")}
+                />
+              ))}
+              {due.data.length > 4 ? (
+                <Row to="/study" title={`나머지 ${due.data.length - 4}개`} meta="학습 화면에서 복습" />
+              ) : null}
+            </List>
+          ) : !due.isPending ? (
+            <EmptyState>오늘 복습할 오답이 없습니다.</EmptyState>
+          ) : null}
+        </Section>
+
+        <Section
           title="최근 공고"
           action={
             <Link to="/postings" className="text-[13px] text-muted hover:text-fg">
@@ -232,6 +290,19 @@ export function TodayPage() {
           ) : null}
         </Section>
 
+        <Section title="최근 활동" className="lg:col-span-2">
+          {activity.data?.length ? (
+            <List>
+              {activity.data.map((it) => (
+                <ActivityRow key={`${it.kind}-${it.action}-${it.id}`} it={it} />
+              ))}
+            </List>
+          ) : !activity.isPending ? (
+            <EmptyState>아직 활동이 없습니다.</EmptyState>
+          ) : null}
+          <ErrorText error={activity.error} />
+        </Section>
+
         {nearBudget || troubled ? (
           <Section title="시스템" className="lg:col-span-2">
             <Link
@@ -251,5 +322,39 @@ export function TodayPage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function activityLink(it: ActivityItem): { to: string; params?: Record<string, string> } {
+  const r = it.refs;
+  if (r.document_id && r.application_id)
+    return {
+      to: "/applications/$applicationId/documents/$documentId",
+      params: { applicationId: r.application_id, documentId: r.document_id },
+    };
+  if (r.experience_id) return { to: "/brain/$experienceId", params: { experienceId: r.experience_id } };
+  if (r.posting_id) return { to: "/postings/$postingId", params: { postingId: r.posting_id } };
+  if (r.study_item_id) return { to: "/study/items/$itemId", params: { itemId: r.study_item_id } };
+  return { to: "/study" };
+}
+
+function ActivityRow({ it }: { it: ActivityItem }) {
+  const link = activityLink(it);
+  const label = ACTIVITY_LABEL[`${it.kind}:${it.action}`] ?? it.kind;
+  const detail =
+    it.kind === "fetch_run"
+      ? it.status === "failed"
+        ? `실패: ${FETCH_ERROR[it.detail ?? ""] ?? it.detail ?? "알 수 없음"}`
+        : it.status === "pending"
+          ? "가져오는 중"
+          : null
+      : it.detail;
+  return (
+    <Row
+      to={link.to}
+      params={link.params}
+      title={it.title}
+      meta={[label, detail, formatDateTime(it.at)].filter(Boolean).join(" · ")}
+    />
   );
 }

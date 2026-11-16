@@ -829,6 +829,8 @@ class PostingSummary:
     pending_changes: list[str]
     last_fetch_status: str | None
     last_fetch_error: str | None
+    created_at: datetime | None = None
+    saved_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -941,6 +943,8 @@ async def list_postings(db: Database, actor: ActorContext) -> list[PostingSummar
                 p.pending_changes,
                 run.status if run else None,
                 run.error_code if run else None,
+                p.created_at,
+                p.saved_at,
             )
         )
     return out
@@ -1004,6 +1008,25 @@ async def get_version(
         if v is None or v.posting_id != posting_id:
             raise NotFound("version")
     return _version_view(v, with_text=True)
+
+
+async def list_versions(db: Database, actor: ActorContext, posting_id: UUID) -> list[VersionView]:
+    """공고의 모든 버전 (최신부터). 본문은 빼고 요약만 — 본문은 `get_version`으로."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        if await s.get(JobPosting, posting_id) is None:
+            raise NotFound("posting")
+        rows = (
+            (
+                await s.execute(
+                    select(JobPostingVersion)
+                    .where(JobPostingVersion.posting_id == posting_id)
+                    .order_by(JobPostingVersion.version_no.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return [_version_view(v) for v in rows]
 
 
 async def count_versions(db: Database, actor: ActorContext, posting_id: UUID) -> int:

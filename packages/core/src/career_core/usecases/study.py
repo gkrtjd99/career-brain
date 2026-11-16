@@ -565,6 +565,61 @@ async def due_reviews(
     ]
 
 
+@dataclass(frozen=True, slots=True)
+class MistakeListItem:
+    id: UUID
+    question: str
+    wrong_answer: str | None
+    correct_answer: str | None
+    reason: str
+    reason_note: str | None
+    status: str
+    due_at: datetime
+    repetitions: int
+    interval_days: int
+    last_reviewed_at: datetime | None
+    study_item_id: UUID | None
+    study_item_title: str | None
+    attempt_id: UUID | None
+    created_at: datetime
+
+
+async def list_mistakes(
+    db: Database, actor: ActorContext, *, status: str | None = None, limit: int = DUE_LIMIT
+) -> list[MistakeListItem]:
+    """오답 목록 (다음 복습이 이른 순). `status`가 없으면 전부."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        stmt = (
+            select(StudyMistake, StudyItem.title)
+            .outerjoin(StudyItem, StudyItem.id == StudyMistake.study_item_id)
+            .order_by(StudyMistake.due_at, StudyMistake.created_at)
+            .limit(max(1, min(limit, DUE_LIMIT)))
+        )
+        if status is not None:
+            stmt = stmt.where(StudyMistake.status == _enum(MistakeStatus, status, "invalid_status"))
+        rows = (await s.execute(stmt)).all()
+    return [
+        MistakeListItem(
+            m.id,
+            m.question,
+            m.wrong_answer,
+            m.correct_answer,
+            m.reason,
+            m.reason_note,
+            m.status,
+            m.due_at,
+            m.repetitions,
+            m.interval_days,
+            m.last_reviewed_at,
+            m.study_item_id,
+            title,
+            m.attempt_id,
+            m.created_at,
+        )
+        for m, title in rows
+    ]
+
+
 # ---------------------------------------------------------------- 요건 ↔ 주장, 경험 후보
 
 

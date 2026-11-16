@@ -1,9 +1,20 @@
 import type {
+  ApplicationStatus,
+  AssessmentKind,
+  AssessmentStatus,
+  AttemptResult,
   ClaimKind,
   Contribution,
+  CoverageStatus,
+  DocumentKind,
   FetchStatus,
+  MistakeReason,
   PostingField,
   PostingStatus,
+  ReviewGrade,
+  StudyItemKind,
+  StudyItemStatus,
+  Visibility,
 } from "@career-brain/client";
 import type { BadgeTone } from "@career-brain/ui";
 
@@ -129,4 +140,214 @@ export const ERROR_TEXT: Record<string, string> = {
   forbidden: "이 토큰에는 권한이 없습니다.",
   "not found": "찾을 수 없습니다.",
   authentication_required: "토큰이 필요합니다.",
+  // O07 지원·문서
+  posting_not_saved: "저장(확정)한 공고에서만 만들 수 있습니다.",
+  application_locked: "제출한 지원의 문서는 고칠 수 없습니다. 다음 지원은 새로 만듭니다.",
+  already_submitted: "이미 제출본을 고정했습니다.",
+  suggestion_stale: "그사이 문단이 바뀌어 이 수정안은 적용할 수 없습니다.",
+  suggestion_not_open: "이미 처리한 수정안입니다.",
+  invalid_transition: "이 상태로 바꿀 수 없습니다.",
+  submit_requires_approve: "제출 권한(approve)이 없는 토큰입니다.",
+  invalid_model_output: "모델 출력 형식이 맞지 않았습니다.",
+  unknown_block: "없는 문단입니다. 새로고침 후 다시 시도하세요.",
+  unknown_claim: "없는 주장을 근거로 연결했습니다.",
+  empty_block: "빈 문단은 저장하지 않습니다.",
+  block_too_long: "문단 하나가 너무 깁니다 (최대 1만 자).",
+  document_too_long: "문서가 너무 깁니다 (최대 6만 자).",
+  too_many_blocks: "문단이 너무 많습니다 (최대 200개).",
+  too_many_claims: "문단 하나에 근거는 20개까지입니다.",
+  invalid_count_rule: "글자 수 기준 값이 맞지 않습니다.",
+  nothing_to_submit: "제출할 글이 없습니다.",
+  unknown_document: "지원에 없는 문서입니다.",
+  // O09 학습
+  mistake_resolved: "다 익힌 오답입니다. 다시 열어야 복습할 수 있습니다.",
+  no_study_result: "학습을 마쳤거나 응시 기록이 있어야 경험 후보로 올릴 수 있습니다.",
+  mistake_target_required: "오답은 학습 항목이나 응시 기록에 붙여야 합니다.",
+  attempt_target_required: "응시는 시험 준비나 학습 항목에 붙여야 합니다.",
+  invalid_status: "상태 값이 맞지 않습니다.",
+  invalid_score: "점수 값이 맞지 않습니다 (만점은 0보다 커야 합니다).",
+  score_above_max: "점수가 만점보다 큽니다.",
+  invalid_minutes: "시간(분) 값이 맞지 않습니다.",
+  minutes_required: "공부한 시간(분)을 넣어 주세요.",
+  question_required: "문제(무엇을 틀렸는지)를 적어 주세요.",
+  statement_required: "주장 문장을 직접 적어 주세요.",
+  requirement_not_in_posting: "공고에 없는 요건 문장입니다.",
+  attempt_not_for_item: "이 학습 항목의 응시 기록이 아닙니다.",
+  text_too_long: "글이 너무 깁니다.",
+};
+
+// ---------------------------------------------------------------- O07 지원·문서
+
+export const APP_STATUS: Record<ApplicationStatus, { label: string; tone: BadgeTone }> = {
+  draft: { label: "준비 중", tone: "accent" },
+  submitted: { label: "제출함", tone: "ok" },
+  passed: { label: "통과", tone: "ok" },
+  rejected: { label: "불합격", tone: "none" },
+  withdrawn: { label: "철회", tone: "none" },
+};
+
+export const DOC_KIND: Record<DocumentKind, string> = {
+  question: "자기소개서 문항",
+  resume: "이력서",
+  cover_letter: "자기소개서",
+  portfolio: "포트폴리오",
+  other: "기타 문서",
+};
+
+export const SPACES_RULE: Record<string, string> = { include: "공백 포함", exclude: "공백 제외" };
+export const NEWLINE_RULE: Record<string, string> = {
+  one: "줄바꿈 1자",
+  two: "줄바꿈 2자",
+  none: "줄바꿈 안 셈",
+};
+
+/** 검사 경고 분류: 위험(다른 회사명·범용 문장) / 근거(근거 없는 문장) / 조작 / 분량 / 참고 */
+export type FindingGroup = "limit" | "risk" | "evidence" | "manipulation" | "info";
+
+export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
+  over_char_limit: { label: "글자 수 초과", group: "limit" },
+  over_byte_limit: { label: "바이트 수 초과", group: "limit" },
+  unencodable_characters: { label: "양식 인코딩에 없는 문자", group: "limit" },
+  other_company_name: { label: "다른 회사 이름", group: "risk" },
+  generic_company_swap: { label: "회사만 바꿔도 되는 문장", group: "risk" },
+  unsupported_statement: { label: "근거 없는 경험·수치", group: "evidence" },
+  number_not_in_evidence: { label: "근거에 없는 숫자", group: "evidence" },
+  role_not_in_evidence: { label: "근거에 없는 역할 표현", group: "evidence" },
+  evidence_unconfirmed: { label: "확인 전 근거", group: "evidence" },
+  hidden_characters: { label: "보이지 않는 문자", group: "manipulation" },
+  hidden_text_markup: { label: "숨김 서식", group: "manipulation" },
+  screening_instruction: { label: "심사 프로그램에 지시하는 문장", group: "manipulation" },
+  keyword_repetition: { label: "같은 단어 반복", group: "manipulation" },
+  keyword_list_unsupported: { label: "근거 없는 키워드 나열", group: "manipulation" },
+  cliche: { label: "상투어", group: "info" },
+  paragraph_not_specific: { label: "구체성 부족", group: "info" },
+};
+
+export const FINDING_GROUP: Record<FindingGroup, { label: string; tone: BadgeTone }> = {
+  limit: { label: "분량", tone: "danger" },
+  risk: { label: "위험", tone: "danger" },
+  manipulation: { label: "조작 의심", tone: "danger" },
+  evidence: { label: "근거", tone: "warn" },
+  info: { label: "참고", tone: "neutral" },
+};
+
+export const VISIBILITY: Record<Visibility, { label: string; tone: BadgeTone }> = {
+  met_visible: { label: "충족 표시됨", tone: "ok" },
+  missing: { label: "누락", tone: "warn" },
+  overclaim_risk: { label: "과장 위험", tone: "danger" },
+  unmet: { label: "미충족", tone: "none" },
+  not_checkable: { label: "직접 확인", tone: "neutral" },
+};
+
+/** AI 수정안 거부 사유 (코드가 원문·근거와 비교해 판정) */
+export const REJECT_REASON: Record<string, string> = {
+  number: "새 숫자",
+  role: "새 역할 표현 (예: 참여 → 주도)",
+  organization: "새 조직명",
+  new_term: "새 기술명·고유명사",
+  ats_manipulation: "조작 문구",
+};
+
+export const SUGGESTION_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  proposed: { label: "제안", tone: "accent" },
+  rejected: { label: "사실 변경으로 거부", tone: "danger" },
+  applied: { label: "적용함", tone: "ok" },
+  dismissed: { label: "닫음", tone: "none" },
+};
+
+export const REVISION_ORIGIN: Record<string, string> = {
+  user: "직접 저장",
+  ai_suggestion: "AI 수정안 적용",
+};
+
+// ---------------------------------------------------------------- O09 학습
+
+export const COVERAGE: Record<CoverageStatus, { label: string; tone: BadgeTone }> = {
+  evidenced: { label: "입증함", tone: "ok" },
+  claim_pending: { label: "주장 확인 대기", tone: "warn" },
+  studied: { label: "학습함", tone: "accent" },
+  studying: { label: "학습 중", tone: "accent" },
+  uncovered: { label: "근거 없음", tone: "none" },
+};
+
+export const REQ_FIELD: Record<string, string> = {
+  requirements: "자격 요건",
+  preferred: "우대 사항",
+  process: "전형 절차",
+};
+
+export const ITEM_STATUS: Record<StudyItemStatus, { label: string; tone: BadgeTone }> = {
+  planned: { label: "계획", tone: "neutral" },
+  in_progress: { label: "진행 중", tone: "accent" },
+  done: { label: "완료", tone: "ok" },
+  dropped: { label: "그만둠", tone: "none" },
+};
+
+export const ITEM_KIND: Record<StudyItemKind, string> = {
+  skill: "기술·도구",
+  topic: "개념·지식",
+  other: "기타",
+};
+
+export const ASSESSMENT_KIND: Record<AssessmentKind, string> = {
+  coding_test: "코딩테스트",
+  written_test: "필기·인적성",
+  assignment: "과제",
+  interview: "면접",
+  certification: "자격증",
+  other: "기타",
+};
+
+export const ASSESSMENT_STATUS: Record<AssessmentStatus, { label: string; tone: BadgeTone }> = {
+  planned: { label: "예정", tone: "accent" },
+  done: { label: "마침", tone: "ok" },
+  cancelled: { label: "취소", tone: "none" },
+};
+
+export const ATTEMPT_RESULT: Record<AttemptResult, { label: string; tone: BadgeTone }> = {
+  passed: { label: "통과", tone: "ok" },
+  failed: { label: "못 넘음", tone: "danger" },
+  unknown: { label: "결과 모름", tone: "neutral" },
+};
+
+export const MISTAKE_REASON: Record<MistakeReason, string> = {
+  concept: "개념 부족",
+  careless: "실수",
+  time: "시간 부족",
+  misread: "문제 잘못 읽음",
+  unknown: "모름",
+};
+
+export const GRADE: Record<ReviewGrade, { label: string; hint: string }> = {
+  again: { label: "다시", hint: "1일 뒤" },
+  hard: { label: "어려움", hint: "조금 뒤" },
+  good: { label: "보통", hint: "간격 늘림" },
+  easy: { label: "쉬움", hint: "더 늘림" },
+};
+
+// ---------------------------------------------------------------- 원본·활동
+
+export const PARSE_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  pending: { label: "읽는 중", tone: "accent" },
+  waiting_provider: { label: "외부 처리 대기", tone: "accent" },
+  complete: { label: "읽음", tone: "ok" },
+  partial: { label: "일부만 읽음", tone: "warn" },
+  failed: { label: "읽기 실패", tone: "danger" },
+};
+
+export const EXTRACTION_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
+  pending: { label: "경험 추출 중", tone: "accent" },
+  complete: { label: "추출함", tone: "ok" },
+  partial: { label: "일부 추출", tone: "warn" },
+  failed: { label: "추출 실패", tone: "danger" },
+};
+
+export const ACTIVITY_LABEL: Record<string, string> = {
+  "claim:created": "주장 추가",
+  "claim:confirmed": "주장 확인",
+  "posting:created": "공고 추가",
+  "posting:saved": "공고 저장",
+  "fetch_run:fetched": "공고 가져오기",
+  "document_revision:revised": "문서 저장",
+  "study_attempt:attempted": "응시 기록",
 };

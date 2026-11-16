@@ -28,6 +28,11 @@ class HitOut(BaseModel):
     source_title: str | None
     page: int | None
     question: str | None
+    block_id: UUID | None = None
+    parse_run_id: UUID | None = None
+    ordinal: int | None = None
+    match_start: int | None = None
+    match_end: int | None = None
 
 
 class SearchOut(BaseModel):

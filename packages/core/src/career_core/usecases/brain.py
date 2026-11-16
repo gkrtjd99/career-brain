@@ -510,3 +510,39 @@ async def set_claim_status(
             raise ClaimRuleError("confirm_requires_approve")
         claim.status = status.value
         return claim.status
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimBrief:
+    id: UUID
+    statement: str
+    status: str
+    kind: str
+    contribution: str
+    experience_id: UUID
+    experience_title: str
+
+
+async def claims_by_ids(db: Database, actor: ActorContext, ids: list[UUID]) -> list[ClaimBrief]:
+    """주장 여러 개의 짧은 보기 (문서의 근거 표시용). 없는 ID는 빠진다."""
+    if not ids:
+        return []
+    async with db.workspace_session(actor.workspace_id) as s:
+        rows = (
+            await s.execute(
+                select(Claim, Experience.title)
+                .join(Experience, Experience.id == Claim.experience_id)
+                .where(Claim.id.in_(ids[:MAX_BRIEF_IDS]))
+            )
+        ).all()
+    order = {cid: i for i, cid in enumerate(ids)}
+    return sorted(
+        (
+            ClaimBrief(c.id, c.statement, c.status, c.kind, c.contribution, c.experience_id, t)
+            for c, t in rows
+        ),
+        key=lambda b: order.get(b.id, 0),
+    )
+
+
+MAX_BRIEF_IDS = 200

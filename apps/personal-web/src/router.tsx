@@ -1,15 +1,16 @@
 import type { SearchKind } from "@career-brain/client";
-import { createRootRoute, createRoute, createRouter, redirect } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
 import { BrainPage } from "./pages/Brain";
-import { ComingPage } from "./pages/Coming";
+import { ApplicationsPage } from "./pages/Applications";
 import { ExperiencePage } from "./pages/Experience";
 import { NotFoundPage } from "./pages/NotFound";
 import { PostingPage } from "./pages/Posting";
 import { PostingsPage } from "./pages/Postings";
 import { SearchPage } from "./pages/Search";
 import { SettingsPage } from "./pages/Settings";
+import type { StudyTab } from "./pages/Study";
 import { TodayPage } from "./pages/Today";
 import { UsagePage } from "./pages/Usage";
 
@@ -99,29 +100,41 @@ export const settingsRoute = createRoute({
 const applicationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications",
-  component: () => (
-    <ComingPage
-      title="지원 현황"
-      milestone="O07"
-      lines={[
-        "관심 → 준비 중 → 제출 → 서류 → 면접 → 결과 칸반",
-        "카드에는 회사·직무, D-day, 안 쓴 문항, 다음 행동만",
-        "자기소개서 편집과 제출본 고정",
-      ]}
-    />
-  ),
+  beforeLoad: requireToken,
+  component: ApplicationsPage,
 });
 
-const studyRoute = createRoute({
+export const applicationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/applications/$applicationId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Application"), "ApplicationPage"),
+});
+
+export const documentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/applications/$applicationId/documents/$documentId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Document"), "DocumentPage"),
+});
+
+const STUDY_TABS: StudyTab[] = ["reviews", "coverage", "items", "assessments", "mistakes"];
+export const studyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/study",
-  component: () => (
-    <ComingPage
-      title="학습"
-      milestone="O09"
-      lines={["공고 요구 → 학습 항목 연결", "시험별 준비 목록", "오늘 복습할 오답"]}
-    />
-  ),
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { tab?: StudyTab; posting?: string } => ({
+    ...(STUDY_TABS.includes(s.tab as StudyTab) && s.tab !== "reviews" ? { tab: s.tab as StudyTab } : {}),
+    ...(typeof s.posting === "string" && s.posting ? { posting: s.posting } : {}),
+  }),
+  component: lazyRouteComponent(() => import("./pages/Study"), "StudyPage"),
+});
+
+export const studyItemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/study/items/$itemId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/StudyItem"), "StudyItemPage"),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -134,7 +147,10 @@ const routeTree = rootRoute.addChildren([
   usageRoute,
   settingsRoute,
   applicationsRoute,
+  applicationRoute,
+  documentRoute,
   studyRoute,
+  studyItemRoute,
 ]);
 
 export const router = createRouter({

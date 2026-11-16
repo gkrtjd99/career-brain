@@ -7,7 +7,7 @@ import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { api } from "../lib/api";
-import { formatDeadline, hostOf } from "../lib/format";
+import { formatDate, formatDeadline, hostOf } from "../lib/format";
 import { ERROR_TEXT, FETCH_ERROR, FETCH_STATUS, FIELD_LABEL, POSTING_STATUS } from "../lib/labels";
 
 const MAX_URLS = 20;
@@ -148,7 +148,12 @@ function PostingRow({ p }: { p: PostingSummary }) {
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{p.title ?? <span className="text-muted">제목 없음</span>}</div>
           <div className="truncate text-xs text-muted">
-            {[p.company, p.deadline ? `마감 ${formatDeadline(p.deadline)}` : null, hostOf(p.canonical_url)]
+            {[
+              p.company,
+              p.deadline ? `마감 ${formatDeadline(p.deadline)}` : null,
+              hostOf(p.canonical_url),
+              p.saved_at ? `저장 ${formatDate(p.saved_at)}` : p.created_at ? `추가 ${formatDate(p.created_at)}` : null,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>

@@ -21,11 +21,12 @@ import {
   Textarea,
 } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, Link } from "@tanstack/react-router";
 import { Archive, ExternalLink, FileText, RefreshCw, Trash2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
+import { useCreateApplication } from "./Applications";
 import { api } from "../lib/api";
 import { formatDateTime, formatDeadline, hostOf } from "../lib/format";
 import {
@@ -146,7 +147,7 @@ function PostingView({ p }: { p: Posting }) {
       />
       <ErrorText error={refetch.error ?? archive.error} className="mb-3" />
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
           {run ? <RunNotice run={run} posting={p} /> : null}
           {p.pending_changes.length && p.status === "saved" ? (
@@ -166,6 +167,11 @@ function PostingView({ p }: { p: Posting }) {
           <Section title="가져오기 기록">
             <Runs runs={p.runs} onVersion={setVersionId} />
           </Section>
+          {p.status === "saved" ? (
+            <Section title="다음 단계">
+              <NextSteps p={p} />
+            </Section>
+          ) : null}
           {p.latest ? (
             <Section title="버전">
               <Versions p={p} onOpen={setVersionId} />
@@ -309,29 +315,73 @@ function Runs({ runs, onVersion }: { runs: FetchRun[]; onVersion: (id: string) =
 }
 
 function Versions({ p, onOpen }: { p: Posting; onOpen: (id: string) => void }) {
-  const latest = p.latest!;
+  const q = useQuery({
+    queryKey: ["posting-versions", p.id, p.latest?.id],
+    queryFn: () => api.postingVersions(p.id),
+  });
+  const rows = q.data ?? (p.latest ? [p.latest] : []);
   return (
     <div className="space-y-2 text-xs">
-      <button
-        onClick={() => onOpen(latest.id)}
-        className="block w-full rounded-md border border-line bg-surface px-2.5 py-2 text-left hover:bg-subtle"
-      >
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="font-medium">v{latest.version_no}</span>
-          {latest.id === p.confirmed_version_id ? <Badge tone="ok">확정 기준</Badge> : <Badge tone="warn">최신 · 미확정</Badge>}
-          <span className="text-muted">{formatDateTime(latest.created_at)}</span>
-        </div>
-        <div className="mt-1 text-muted">
-          {METHOD_LABEL[latest.method] ?? latest.method} · {ADAPTER_LABEL[latest.adapter] ?? latest.adapter}
-          {latest.has_screenshot ? " · 스크린샷 있음" : ""}
-        </div>
-        {latest.changed_fields.length ? (
-          <div className="mt-1 text-warn">
-            이전 버전과 달라진 항목: {latest.changed_fields.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}
+      <ErrorText error={q.error} />
+      {rows.map((v) => (
+        <button
+          key={v.id}
+          onClick={() => onOpen(v.id)}
+          className="block w-full rounded-md border border-line bg-surface px-2.5 py-2 text-left hover:bg-subtle"
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-medium">v{v.version_no}</span>
+            {v.id === p.confirmed_version_id ? (
+              <Badge tone="ok">확정 기준</Badge>
+            ) : v.id === p.latest?.id ? (
+              <Badge tone="warn">최신 · 미확정</Badge>
+            ) : null}
+            <span className="text-muted">{formatDateTime(v.created_at)}</span>
           </div>
-        ) : null}
-      </button>
-      <p className="text-muted">이전 버전은 위 가져오기 기록에서 열 수 있습니다.</p>
+          <div className="mt-1 text-muted">
+            {METHOD_LABEL[v.method] ?? v.method} · {ADAPTER_LABEL[v.adapter] ?? v.adapter}
+            {v.has_screenshot ? " · 스크린샷 있음" : ""}
+          </div>
+          {v.changed_fields.length ? (
+            <div className="mt-1 text-warn">
+              이전 버전과 달라진 항목: {v.changed_fields.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}
+            </div>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 저장한 공고에서 지원·학습으로 넘어가는 길. */
+function NextSteps({ p }: { p: Posting }) {
+  const apps = useQuery({ queryKey: ["applications"], queryFn: api.applications });
+  const create = useCreateApplication();
+  const app = apps.data?.find((a) => a.posting_id === p.id);
+  return (
+    <div className="space-y-2 text-[13px]">
+      {app ? (
+        <Link
+          to="/applications/$applicationId"
+          params={{ applicationId: app.id }}
+          className="block rounded-md border border-line bg-surface px-2.5 py-2 hover:bg-subtle"
+        >
+          <span className="font-medium">지원서 열기</span>
+          <span className="text-xs text-muted">
+            {" "}
+            · 문항 {app.questions}
+            {app.unwritten ? ` · 안 쓴 문항 ${app.unwritten}` : ""}
+          </span>
+        </Link>
+      ) : (
+        <Button size="sm" variant="primary" onClick={() => create.mutate(p.id)} disabled={create.isPending || apps.isLoading}>
+          <Plus size={14} /> 지원 만들기
+        </Button>
+      )}
+      <ErrorText error={create.error} />
+      <Link to="/study" search={{ tab: "coverage", posting: p.id }} className="block text-accent hover:underline">
+        요건별 준비 상태 보기
+      </Link>
     </div>
   );
 }

@@ -64,6 +64,8 @@ class ApplicationSummaryOut(BaseModel):
     documents: int
     submitted_at: datetime | None
     created_at: datetime
+    questions: int
+    unwritten: int
 
 
 class DocumentSummaryOut(BaseModel):
@@ -214,6 +216,11 @@ class ApplyIn(BaseModel):
     base_revision: int = Field(ge=0)
 
 
+class CountIn(BaseModel):
+    # 편집 중인 문단 글. 저장하지 않고 서버 코드로 센다.
+    blocks: list[str] = Field(default_factory=list, max_length=200)
+
+
 class ValidateIn(BaseModel):
     revision: int | None = Field(default=None, ge=0)
     extra_cliches: list[str] = Field(default_factory=list, max_length=100)
@@ -361,6 +368,17 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
         except DocumentRuleError as exc:
             raise _error(exc) from exc
         return RevisionOut(id=res.id, revision_no=res.revision_no, created=res.created)
+
+    @router.post(doc_path + "/count")
+    async def count(actor: reader, application_id: UUID, document_id: UUID, body: CountIn) -> dict:
+        if sum(len(b) for b in body.blocks) > 60_000:
+            raise HTTPException(status_code=422, detail="document_too_long")
+        try:
+            return await uc.count_draft(db, actor, application_id, document_id, body.blocks)
+        except NotFound as exc:
+            raise _not_found() from exc
+        except DocumentRuleError as exc:
+            raise _error(exc) from exc
 
     @router.post(doc_path + "/validate")
     async def validate(

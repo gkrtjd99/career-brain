@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, ValidationError
@@ -319,3 +320,70 @@ async def answer_question(
         if can_confirm(actor) and claim.contribution != Contribution.UNKNOWN:
             _mark_confirmed(claim, actor, has_span=False)
         return AnswerResult(ans.id, claim.id, claim.status)
+
+
+@dataclass(frozen=True, slots=True)
+class InterviewSummary:
+    id: UUID
+    experience_id: UUID | None
+    experience_title: str | None
+    status: str
+    questions: int
+    answered: int
+    created_at: datetime
+    last_answer_at: datetime | None
+
+
+async def list_interviews(
+    db: Database, actor: ActorContext, *, experience_id: UUID | None = None, limit: int = 50
+) -> list[InterviewSummary]:
+    """인터뷰 세션 목록 (최근 것부터). `experience_id`를 주면 그 경험의 세션만."""
+    limit = max(1, min(limit, 200))
+    async with db.workspace_session(actor.workspace_id) as s:
+        stmt = (
+            select(InterviewSession, Experience.title)
+            .outerjoin(Experience, Experience.id == InterviewSession.experience_id)
+            .order_by(InterviewSession.created_at.desc(), InterviewSession.id)
+            .limit(limit)
+        )
+        if experience_id is not None:
+            stmt = stmt.where(InterviewSession.experience_id == experience_id)
+        sessions = (await s.execute(stmt)).all()
+        ids = [se.id for se, _ in sessions]
+        q_counts: dict[UUID, int] = {}
+        a_counts: dict[UUID, tuple[int, datetime | None]] = {}
+        if ids:
+            for sid, n in (
+                await s.execute(
+                    select(InterviewQuestion.session_id, func.count())
+                    .where(InterviewQuestion.session_id.in_(ids))
+                    .group_by(InterviewQuestion.session_id)
+                )
+            ).all():
+                q_counts[sid] = n
+            for sid, n, last in (
+                await s.execute(
+                    select(
+                        InterviewQuestion.session_id,
+                        func.count(func.distinct(InterviewAnswer.question_id)),
+                        func.max(InterviewAnswer.created_at),
+                    )
+                    .join(InterviewAnswer, InterviewAnswer.question_id == InterviewQuestion.id)
+                    .where(InterviewQuestion.session_id.in_(ids))
+                    .group_by(InterviewQuestion.session_id)
+                )
+            ).all():
+                a_counts[sid] = (n, last)
+    return [
+        InterviewSummary(
+            se.id,
+            se.experience_id,
+            title,
+            se.status,
+            q_counts.get(se.id, 0),
+            a_counts.get(se.id, (0, None))[0],
+            se.created_at,
+            a_counts.get(se.id, (0, None))[1],
+        )
+        for se, title in sessions
+    ]

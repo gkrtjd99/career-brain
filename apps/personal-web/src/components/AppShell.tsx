@@ -28,8 +28,8 @@ const MAIN: NavItem[] = [
   { to: "/brain", label: "브레인", icon: Brain },
   { to: "/postings", label: "공고", icon: Briefcase },
   { to: "/search", label: "검색", icon: Search },
-  { to: "/applications", label: "지원 현황", icon: KanbanSquare, coming: true },
-  { to: "/study", label: "학습", icon: GraduationCap, coming: true },
+  { to: "/applications", label: "지원 현황", icon: KanbanSquare },
+  { to: "/study", label: "학습", icon: GraduationCap },
 ];
 const SYSTEM: NavItem[] = [
   { to: "/usage", label: "사용량", icon: Gauge },
