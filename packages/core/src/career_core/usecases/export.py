@@ -1182,6 +1182,7 @@ def _schema_c0021(arc: _Archive) -> None:
 
 
 no_data_change("c0022", "판정 응답 캐시 judge_cache (내보내지 않음)")
+no_data_change("c0023", "jobs.lease_token (작업 큐는 내보내지 않음)")
 no_data_change("c0024", "웹 복원 작업 표 restore_jobs (내보내지 않음)")
 
 

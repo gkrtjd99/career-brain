@@ -330,9 +330,23 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 같은 migration 번호에 검색 쪽 표 변경은 없다: 별칭 검색어 넓히기는 c0021 `workspace_settings.tech_aliases`를 읽기만 하고, 2글자 bigram 색인은 보류했다 (`search.md`).
 - 상세: `docs/architecture/models.md` "응답 캐시".
 
+## 작업 lease 토큰 (c0023)
+
+`c0023_documents_runs_web` (`down_revision = c0022`). 웹에서 시작하는 일괄 실행·DOCX 원본·PDF 숨김 글 검사 보강과 같이 들어갔지만 표 변경은 lease 하나다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `jobs.lease_token` | uuid, NULL 허용. `claim_job`이 집을 때마다 `gen_random_uuid()`로 새로 쓴다 | 기존 권한 그대로 |
+| `core.claim_job(...)` | 다시 만든다(DROP + CREATE, 돌려주는 열이 바뀌어서). 돌려주는 행에 `lease_token`을 더한다. 나머지(집는 조건·잠금·SECURITY DEFINER)는 같다 | EXECUTE (다시 GRANT) |
+
+- 용도: 실행 단계 저장·heartbeat·끝 기록이 "같은 `attempts` + 같은 `lease_token` + `locked_until > now()`"일 때만 쓰게 한다 (`runs.md` "재시작 후 재개와 멱등"). `attempts`는 대기 때 0으로 돌아가므로 혼자서는 주인을 가리지 못한다.
+- `jobs`는 이전처럼 `allow_unforced`(공간 RLS는 켜져 있고 FORCE는 아님, 집기는 함수로만). 새 열은 공간 데이터가 아니라 내보내기 대상 규칙도 그대로다 (`test_export.py` 통과).
+- downgrade: 옛 `claim_job`을 되살리고 열을 지운다.
+- 원본 MIME에 DOCX를 더한 것(`uploads.ALLOWED_MIME_TYPES`)과 인터뷰 질문의 `run_id`(이미 있던 `interview_question_requests.run_id`를 outer join)는 migration이 필요 없다.
+
 ## 웹 복원 작업 상태·옛 head 묶음 변환 (c0024)
 
-`down_revision = c0022` (c0022·c0023·c0025와 병렬로 만들어 합칠 때 번호 순서로 다시 이었다). 웹 복원 작업 상태를 프로세스 메모리에서 DB로 옮긴다.
+`down_revision = c0023` (c0022·c0023·c0025와 병렬로 만들어 합칠 때 번호 순서로 다시 이었다). 웹 복원 작업 상태를 프로세스 메모리에서 DB로 옮긴다.
 
 | 변경 | 내용 | 앱 role |
 |---|---|---|

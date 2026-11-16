@@ -6,7 +6,9 @@ worker가 죽은 것으로 보고 다시 집는다.
 
 처리하는 동안에는 heartbeat가 lease를 주기적으로 늘린다 (lease보다 오래 걸리는 단계·실행이
 도중에 다른 worker에게 넘어가 두 번 돌지 않게). heartbeat가 멈추는 것은 worker가 죽었을 때뿐이다.
-lease를 잃은 뒤(다른 worker가 다시 집음) 끝난 처리는 결과를 덮어쓰지 않는다 (``attempts``로 구분).
+lease를 잃은 뒤(다른 worker가 다시 집음) 끝난 처리는 결과를 덮어쓰지 않는다 (``attempts``와
+c0023 ``lease_token``으로 구분). 처리하는 동안 lease는 문맥 변수(``career_core.jobs.lease``)에 있어
+핸들러가 자기 트랜잭션 안에서 같은 확인을 할 수 있다 (실행 단계의 위치·결과 저장).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from sqlalchemy import func, text, update
 from career_core.db.base import utcnow
 from career_core.db.models import Job
 from career_core.db.session import Database
+from career_core.jobs.lease import Lease, LeaseLost, reset_lease, set_lease
 from career_core.usecases.parsing import StepOutcome
 
 log = logging.getLogger(__name__)
@@ -59,10 +62,18 @@ async def run_once(
         return False
     handler = handlers[row.kind]
     every = lease_seconds / 3 if heartbeat_seconds is None else heartbeat_seconds
+    lease = set_lease(
+        Lease(row.job_id, row.target_id, row.attempts, getattr(row, "lease_token", None))
+    )
     try:
         outcome = await _with_heartbeat(
             db, row, lease_seconds, every, handler.run(row.workspace_id, row.target_id)
         )
+    except LeaseLost:
+        # 핸들러가 저장하려다 lease를 잃은 것을 알았다: 그 트랜잭션은 되돌려졌다. 작업 행도 건드리지 않는다
+        # (새 주인이 있으면 그쪽이, lease가 지났을 뿐이면 다음 worker가 저장된 위치부터 다시 한다).
+        log.warning("job %s (%s): lease lost, step result discarded", row.job_id, row.kind)
+        return True
     except Exception as exc:  # noqa: BLE001 - worker 경계: 어떤 실패든 기록하고 다음 작업으로 간다
         log.warning("job %s (%s) failed: %s", row.job_id, row.kind, type(exc).__name__)
         give_up = row.attempts >= MAX_ATTEMPTS
@@ -80,6 +91,8 @@ async def run_once(
         if give_up and handler.give_up is not None:
             await handler.give_up(row.workspace_id, row.target_id)
         return True
+    finally:
+        reset_lease(lease)
 
     async with db.workspace_session(row.workspace_id) as s:
         job = await _owned(s, row, finished_by_handler=outcome.done)
@@ -104,13 +117,13 @@ async def _owned(s, row, *, finished_by_handler: bool = False) -> Job | None:
     lease를 잃은 것이 아니므로 경고 없이 None.
     """
     job = await s.get(Job, row.job_id, with_for_update=True)
-    if job is None or job.status != "running" or job.attempts != row.attempts:
-        if not (
-            finished_by_handler
-            and job is not None
-            and job.status == "done"
-            and job.attempts == row.attempts
-        ):
+    token = getattr(row, "lease_token", None)
+    same = job is not None and job.attempts == row.attempts
+    if same and token is not None:
+        # attempts만으로는 부족하다: 대기(retry_after)가 attempts를 0으로 되돌린다 (c0023)
+        same = job.lease_token == token
+    if not same or job.status != "running":
+        if not (finished_by_handler and same and job.status == "done"):
             log.warning("job %s (%s): lease lost, result not recorded", row.job_id, row.kind)
         return None
     return job
@@ -140,6 +153,11 @@ async def _heartbeat(db: Database, row, lease_seconds: int, every: float) -> Non
                         Job.id == row.job_id,
                         Job.status == "running",
                         Job.attempts == row.attempts,
+                        *(
+                            [Job.lease_token == row.lease_token]
+                            if getattr(row, "lease_token", None) is not None
+                            else []
+                        ),
                     )
                     .values(locked_until=func.now() + timedelta(seconds=lease_seconds))
                 )

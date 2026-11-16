@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from career_core.domain.runs import ApprovalError, RunRuleError
 from career_core.ports import ActorContext
 from career_core.usecases import approvals as approval_uc
+from career_core.usecases import run_estimates as estimate_uc
 from career_core.usecases import runs as run_uc
 from career_core.usecases.brain import NotFound
 
@@ -98,6 +99,18 @@ class WorkflowOut(BaseModel):
     action: str
     steps: int
     description: str
+
+
+class RunEstimateOut(BaseModel):
+    workflow: str
+    units: int
+    calls: int
+    per_call_usd: str | None
+    estimate_usd: str | None
+    based_on_runs: int
+    based_on_calls: int
+    cost_unknown: bool
+    basis: str
 
 
 class ApprovalIn(BaseModel):
@@ -186,6 +199,16 @@ def add_run_routes(router: APIRouter, deps, authorize) -> None:
             WorkflowOut(name=w.name, action=w.action, steps=len(w.steps), description=w.description)
             for w in run_deps.registry().values()
         ]
+
+    @router.get("/runs/workflows/{workflow}/estimate", response_model=RunEstimateOut)
+    async def estimate(
+        actor: reader, workflow: str, units: Annotated[int, Query(ge=1, le=1000)] = 1
+    ) -> RunEstimateOut:
+        """c0023 시작 전 참고 비용: 이 공간의 같은 workflow 지난 실행의 호출 1회 평균 × 계획한 호출 수."""
+        if workflow not in run_deps.registry():
+            raise run_error(RunRuleError("unknown_workflow"))
+        est = await call(estimate_uc.estimate_run, db, actor, workflow, units)
+        return RunEstimateOut.model_validate(est, from_attributes=True)
 
     @router.post("/runs", response_model=RunOut, status_code=202)
     async def start(actor: starter, body: RunIn) -> RunOut:

@@ -1,6 +1,7 @@
 import type { ClaimKind, Contribution, InterviewQuestion } from "@career-brain/client";
 import { Badge, Button, EmptyState, Label, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
@@ -16,6 +17,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
     queryFn: () => api.interviews({ experienceId }),
   });
   const [chosen, setChosen] = useState<string | null>(null);
+  const [byRun, setByRun] = useState(false);
   const sessionId = chosen ?? sessions.data?.[0]?.id ?? null;
   const start = useMutation({
     mutationFn: () => api.startInterview(experienceId),
@@ -67,6 +69,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
                   }
                 >
                   {formatDate(se.created_at)} · {se.answered}/{se.questions}
+                  {se.run_ids?.length ? " · 일괄" : ""}
                   {i === 0 ? " (최근)" : ""}
                 </button>
               ))}
@@ -87,20 +90,72 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
           </div>
           <p className="-mt-2 text-xs text-muted">AI 보충 질문은 이 경험의 내용을 모델에 보내며 비용이 듭니다.</p>
           <ErrorText error={ai.error} />
-          <ol className="space-y-3">
-            {iv.questions.map((question) => (
-              <QuestionCard
-                key={question.id}
-                question={question}
-                experienceId={experienceId}
-                sessionId={iv.id}
-                closed={iv.status !== "open"}
-              />
-            ))}
-          </ol>
+          {iv.questions.some((x) => x.run_id) ? (
+            <label className="flex items-center gap-2 text-[13px]">
+              <input type="checkbox" checked={byRun} onChange={(e) => setByRun(e.target.checked)} />
+              실행별로 묶기
+            </label>
+          ) : null}
+          {(byRun ? groupByRun(iv.questions) : [{ key: "all", title: null, runId: null, items: iv.questions }]).map(
+            (g) => (
+              <section key={g.key} className="space-y-2">
+                {g.title ? (
+                  <h3 className="flex flex-wrap items-center gap-2 text-[13px] font-medium">
+                    {g.title} <span className="font-normal text-muted">{g.items.length}개</span>
+                    {g.runId ? <RunLink runId={g.runId} /> : null}
+                  </h3>
+                ) : null}
+                <ol className="space-y-3">
+                  {g.items.map((question) => (
+                    <QuestionCard
+                      key={question.id}
+                      question={question}
+                      experienceId={experienceId}
+                      sessionId={iv.id}
+                      closed={iv.status !== "open"}
+                      showRun={!byRun}
+                    />
+                  ))}
+                </ol>
+              </section>
+            ),
+          )}
         </div>
       )}
     </Loaded>
+  );
+}
+
+type QuestionGroup = { key: string; title: string | null; runId: string | null; items: InterviewQuestion[] };
+
+/** c0023: 정해진 질문 / 직접 요청한 AI 질문 / 일괄 실행별 (실행은 처음 나온 순서) */
+function groupByRun(questions: InterviewQuestion[]): QuestionGroup[] {
+  const fixed: QuestionGroup = { key: "template", title: "정해진 질문", runId: null, items: [] };
+  const direct: QuestionGroup = { key: "direct", title: "직접 요청한 AI 질문", runId: null, items: [] };
+  const runs = new Map<string, QuestionGroup>();
+  for (const q of questions) {
+    if (q.run_id) {
+      let g = runs.get(q.run_id);
+      if (!g) {
+        g = { key: q.run_id, title: `일괄 실행 ${q.run_id.slice(0, 8)}`, runId: q.run_id, items: [] };
+        runs.set(q.run_id, g);
+      }
+      g.items.push(q);
+    } else (q.origin === "ai" ? direct : fixed).items.push(q);
+  }
+  return [fixed, direct, ...runs.values()].filter((g) => g.items.length);
+}
+
+function RunLink({ runId }: { runId: string }) {
+  return (
+    <Link
+      to="/system"
+      search={{ run: runId }}
+      className="text-xs font-normal text-accent hover:underline"
+      title="시스템 화면에서 이 실행 보기"
+    >
+      실행 보기
+    </Link>
   );
 }
 
@@ -109,11 +164,13 @@ function QuestionCard({
   experienceId,
   sessionId,
   closed,
+  showRun,
 }: {
   question: InterviewQuestion;
   experienceId: string;
   sessionId: string;
   closed: boolean;
+  showRun: boolean;
 }) {
   const qc = useQueryClient();
   const [answer, setAnswer] = useState("");
@@ -149,6 +206,11 @@ function QuestionCard({
       <div className="mb-1 flex flex-wrap items-center gap-1.5">
         <Badge tone="neutral">{FOCUS_LABEL[question.focus] ?? question.focus}</Badge>
         {question.origin === "ai" ? <Badge tone="accent">AI 질문</Badge> : null}
+        {question.run_id && showRun ? (
+          <Link to="/system" search={{ run: question.run_id }} className="hover:underline" title="이 질문을 만든 일괄 실행">
+            <Badge tone="neutral">일괄 {question.run_id.slice(0, 8)}</Badge>
+          </Link>
+        ) : null}
         {question.answers.length ? <Badge tone="ok">답함</Badge> : null}
       </div>
       <p className="text-sm leading-6 font-medium">{question.prompt}</p>

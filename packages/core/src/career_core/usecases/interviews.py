@@ -93,6 +93,8 @@ class QuestionView:
     prompt: str
     origin: str
     answers: list[tuple[UUID, str]] = field(default_factory=list)
+    # c0023: 이 질문을 만든 일괄 실행 (``interview_question_requests.run_id``). 직접 요청·템플릿이면 None
+    run_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,17 +171,19 @@ async def get_interview(db: Database, actor: ActorContext, session_id: UUID) -> 
         session = await s.get(InterviewSession, session_id)
         if session is None:
             raise NotFound("interview")
-        questions = (
-            (
-                await s.execute(
-                    select(InterviewQuestion)
-                    .where(InterviewQuestion.session_id == session_id)
-                    .order_by(InterviewQuestion.ordinal)
+        rows = (
+            await s.execute(
+                select(InterviewQuestion, InterviewQuestionRequest.run_id)
+                .outerjoin(
+                    InterviewQuestionRequest,
+                    InterviewQuestionRequest.id == InterviewQuestion.request_id,
                 )
+                .where(InterviewQuestion.session_id == session_id)
+                .order_by(InterviewQuestion.ordinal)
             )
-            .scalars()
-            .all()
-        )
+        ).all()
+        questions = [q for q, _ in rows]
+        run_of = {q.id: run_id for q, run_id in rows}
         answers = (
             await s.execute(
                 select(InterviewAnswer.question_id, InterviewAnswer.id, InterviewAnswer.answer)
@@ -195,7 +199,9 @@ async def get_interview(db: Database, actor: ActorContext, session_id: UUID) -> 
         session.experience_id,
         session.status,
         [
-            QuestionView(q.id, q.ordinal, q.focus, q.prompt, q.origin, by_q.get(q.id, []))
+            QuestionView(
+                q.id, q.ordinal, q.focus, q.prompt, q.origin, by_q.get(q.id, []), run_of.get(q.id)
+            )
             for q in questions
         ],
     )
@@ -460,12 +466,20 @@ class InterviewSummary:
     answered: int
     created_at: datetime
     last_answer_at: datetime | None
+    # c0023: 이 세션에 질문을 만든 일괄 실행들 (오래된 것부터). 직접 시작·직접 요청뿐이면 빈 목록
+    run_ids: list[UUID] = field(default_factory=list)
 
 
 async def list_interviews(
-    db: Database, actor: ActorContext, *, experience_id: UUID | None = None, limit: int = 50
+    db: Database,
+    actor: ActorContext,
+    *,
+    experience_id: UUID | None = None,
+    run_id: UUID | None = None,
+    limit: int = 50,
 ) -> list[InterviewSummary]:
-    """인터뷰 세션 목록 (최근 것부터). `experience_id`를 주면 그 경험의 세션만."""
+    """인터뷰 세션 목록 (최근 것부터). `experience_id`를 주면 그 경험의 세션만, `run_id`를 주면 그 일괄
+    실행이 질문을 만든 세션만 (실행별 묶어 보기, c0023)."""
     limit = max(1, min(limit, 200))
     async with db.workspace_session(actor.workspace_id) as s:
         stmt = (
@@ -476,8 +490,30 @@ async def list_interviews(
         )
         if experience_id is not None:
             stmt = stmt.where(InterviewSession.experience_id == experience_id)
+        if run_id is not None:
+            stmt = stmt.where(
+                InterviewSession.id.in_(
+                    select(InterviewQuestionRequest.session_id).where(
+                        InterviewQuestionRequest.run_id == run_id
+                    )
+                )
+            )
         sessions = (await s.execute(stmt)).all()
         ids = [se.id for se, _ in sessions]
+        runs_of: dict[UUID, list[UUID]] = {}
+        if ids:
+            for sid, rid in (
+                await s.execute(
+                    select(InterviewQuestionRequest.session_id, InterviewQuestionRequest.run_id)
+                    .where(
+                        InterviewQuestionRequest.session_id.in_(ids),
+                        InterviewQuestionRequest.run_id.isnot(None),
+                    )
+                    .order_by(InterviewQuestionRequest.created_at)
+                )
+            ).all():
+                if rid not in runs_of.setdefault(sid, []):
+                    runs_of[sid].append(rid)
         q_counts: dict[UUID, int] = {}
         a_counts: dict[UUID, tuple[int, datetime | None]] = {}
         if ids:
@@ -512,6 +548,7 @@ async def list_interviews(
             a_counts.get(se.id, (0, None))[0],
             se.created_at,
             a_counts.get(se.id, (0, None))[1],
+            runs_of.get(se.id, []),
         )
         for se, title in sessions
     ]

@@ -323,6 +323,10 @@ export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
   hidden_text_white: { label: "흰 글씨", group: "manipulation" },
   hidden_text_tiny: { label: "1pt 미만 글자", group: "manipulation" },
   hidden_text_outside_page: { label: "쪽 밖 글", group: "manipulation" },
+  // c0023 PDF 배경 색·주석·양식 칸
+  hidden_text_same_color: { label: "배경과 같은 색 글", group: "manipulation" },
+  hidden_text_annotation: { label: "숨긴 주석·양식 칸 글", group: "manipulation" },
+  annotation_text: { label: "인쇄되지 않는 주석 글", group: "info" },
   pages_unreadable: { label: "읽지 못한 쪽", group: "info" },
   pages_not_checked: { label: "검사하지 않은 쪽", group: "info" },
 };

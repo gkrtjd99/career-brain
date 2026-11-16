@@ -36,6 +36,27 @@ export interface Run {
   updated_at: IsoDateTime;
 }
 
+export interface Workflow {
+  name: string;
+  action: string;
+  steps: number;
+  description: string;
+}
+
+/** c0023 시작 전 참고 비용: 같은 workflow 지난 실행의 호출 1회 평균 × 계획한 호출 수. 지난 실행이 없으면 null */
+export interface RunEstimate {
+  workflow: string;
+  units: number;
+  calls: number;
+  per_call_usd: string | null;
+  estimate_usd: string | null;
+  based_on_runs: number;
+  based_on_calls: number;
+  /** 지난 실행에 단가 미상 호출이 있었다 (예상은 아는 비용만으로, 하한) */
+  cost_unknown: boolean;
+  basis: "past_runs" | string;
+}
+
 export interface RunEvent {
   seq: number;
   kind: "status" | "step" | "wait" | "resumed" | "error" | string;
@@ -256,6 +277,12 @@ export function systemEndpoints({ request, get, post }: SystemDeps) {
 
   return {
     // 실행
+    workflows: () => get<Workflow[]>("/core/runs/workflows"),
+    /** 일괄 실행 시작 (c0023 웹). 같은 멱등 키면 처음 만든 실행을 돌려준다 */
+    startRun: (workflow: string, input: Record<string, unknown>, idempotencyKey?: string) =>
+      post<Run>("/core/runs", { workflow, input, idempotency_key: idempotencyKey ?? null }),
+    runEstimate: (workflow: string, units: number) =>
+      get<RunEstimate>(`/core/runs/workflows/${id(workflow)}/estimate`, { units }),
     runs: (opts: { status?: RunStatus; limit?: number } = {}) =>
       get<Run[]>("/core/runs", { status: opts.status, limit: opts.limit }),
     run: (runId: string) => get<Run>(`/core/runs/${id(runId)}`),

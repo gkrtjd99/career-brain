@@ -216,6 +216,8 @@ export interface InterviewQuestion {
   prompt: string;
   origin: string;
   answers: string[];
+  /** c0023: 이 질문을 만든 일괄 실행 (interview_question_batch). 직접 요청·정해진 질문이면 null */
+  run_id?: Uuid | null;
 }
 
 export interface InterviewSummary {
@@ -227,6 +229,8 @@ export interface InterviewSummary {
   answered: number;
   created_at: IsoDateTime;
   last_answer_at: IsoDateTime | null;
+  /** c0023: 이 세션에 질문을 만든 일괄 실행들 (오래된 것부터) */
+  run_ids?: Uuid[];
 }
 
 export interface Interview {
@@ -1281,7 +1285,11 @@ export type HiddenTextCode =
   | "hidden_text_invisible"
   | "hidden_text_white"
   | "hidden_text_tiny"
-  | "hidden_text_outside_page";
+  | "hidden_text_outside_page"
+  // c0023 PDF: 배경과 같은 색, 숨긴 주석·양식 칸, 인쇄되지 않는 주석 글(참고)
+  | "hidden_text_same_color"
+  | "hidden_text_annotation"
+  | "annotation_text";
 
 /** 올린 DOCX·PDF 숨김 글 검사 결과. 경고만 한다 (파일을 고치거나 저장하지 않는다) */
 export interface FileCheck {

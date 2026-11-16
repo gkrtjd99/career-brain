@@ -157,6 +157,8 @@ class QuestionOut(BaseModel):
     prompt: str
     origin: str
     answers: list[str]
+    # c0023: 이 질문을 만든 일괄 실행 (없으면 직접 요청·템플릿)
+    run_id: UUID | None = None
 
 
 class InterviewOut(BaseModel):
@@ -185,6 +187,8 @@ class InterviewSummaryOut(BaseModel):
     answered: int
     created_at: datetime
     last_answer_at: datetime | None
+    # c0023: 이 세션에 질문을 만든 일괄 실행들
+    run_ids: list[UUID] = []
 
 
 class AiQuestionsIn(BaseModel):
@@ -236,6 +240,7 @@ def _interview_out(view: interviews.InterviewView) -> InterviewOut:
                 prompt=q.prompt,
                 origin=q.origin,
                 answers=[a for _, a in q.answers],
+                run_id=q.run_id,
             )
             for q in view.questions
         ],
@@ -408,9 +413,12 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
     async def list_interviews(
         actor: reader,
         experience_id: UUID | None = None,
+        run_id: UUID | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ) -> list[InterviewSummaryOut]:
-        rows = await interviews.list_interviews(db, actor, experience_id=experience_id, limit=limit)
+        rows = await interviews.list_interviews(
+            db, actor, experience_id=experience_id, run_id=run_id, limit=limit
+        )
         return [InterviewSummaryOut.model_validate(r, from_attributes=True) for r in rows]
 
     @router.get("/interviews/{session_id}", response_model=InterviewOut)

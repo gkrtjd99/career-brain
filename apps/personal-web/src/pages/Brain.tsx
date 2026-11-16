@@ -5,6 +5,7 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Upload } from "lucide-react";
 import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
+import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
@@ -31,6 +32,7 @@ export function BrainPage() {
         subtitle="확인·보강할 경험 목록. 확인한 주장만 문서와 검색 근거로 쓰입니다."
         actions={
           <>
+            <InterviewBatchButton experiences={q.data ?? []} />
             <Button onClick={() => setUploading(true)}>
               <Upload size={15} /> 자료 올리기
             </Button>

@@ -24,6 +24,8 @@ export const APPROVAL_STATUS: Record<ApprovalStatus, { label: string; tone: Badg
 export const WORKFLOW_LABEL: Record<string, string> = {
   save_job_urls: "공고 주소 저장",
   submit_application: "지원서 제출",
+  suggest_document_batch: "문단별 AI 수정안",
+  interview_question_batch: "AI 인터뷰 질문 묶음",
 };
 
 export const ACTION_LABEL: Record<string, string> = {
@@ -57,6 +59,15 @@ export const RUN_CODE: Record<string, string> = {
   quota_exceeded: "제공자 사용 한도 초과",
   budget_exceeded: "월 예산 초과",
   price_unknown: "단가를 몰라 호출하지 않음",
+  // 일괄 실행(c0023 웹에서 시작) 실패 사유
+  egress_denied: "자료 등급 때문에 모델로 보내지 않음",
+  no_model_gateway: "모델 설정이 없음",
+  revision_conflict: "시작한 뒤 문서가 바뀜 (다시 시작)",
+  application_locked: "제출본을 고정한 지원",
+  target_not_found: "대상이 없어짐",
+  nothing_to_suggest: "수정안을 받을 문단이 없음",
+  unknown_block: "없는 문단",
+  forbidden: "권한 없음",
 };
 
 export const INVALID_REASON: Record<string, string> = {
