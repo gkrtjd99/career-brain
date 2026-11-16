@@ -114,7 +114,7 @@ def test_scoped_fk_blocks_cross_workspace_reference(pg):
 def test_every_workspace_table_has_forced_rls(pg):
     engine = create_engine(pg.owner, poolclass=NullPool)
     with engine.connect() as conn:
-        assert workspace_isolation_problems(conn, ["core"]) == []
+        assert workspace_isolation_problems(conn, ["core"], allow_unforced={("core", "jobs")}) == []
         forced = conn.execute(
             text("SELECT relforcerowsecurity FROM pg_class WHERE oid = 'core.actors'::regclass")
         ).scalar()

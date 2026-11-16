@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from career_core.adapters.blobstore import LocalBlobStore
 from career_core.db import Database
 from career_core.interfaces.http import CoreDeps, build_router
 from fastapi import FastAPI
@@ -23,9 +24,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await db.dispose()
 
     app = FastAPI(title="career-brain (personal)", lifespan=lifespan)
-    app.include_router(
-        build_router(CoreDeps(identity=PersonalTokenResolver(db), db=db)), prefix="/api"
+    deps = CoreDeps(
+        identity=PersonalTokenResolver(db),
+        db=db,
+        blobs=LocalBlobStore(settings.blob_dir),
+        max_upload_bytes=settings.max_upload_bytes,
     )
+    app.include_router(build_router(deps), prefix="/api")
     return app
 
 

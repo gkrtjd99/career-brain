@@ -12,6 +12,8 @@ _DEV_MIGRATION_URL = "postgresql+psycopg://career:career-dev-only@127.0.0.1:5432
 class Settings:
     database_url: str = _DEV_APP_URL
     migration_database_url: str = _DEV_MIGRATION_URL
+    blob_dir: str = "data/blobs"
+    max_upload_bytes: int = 20 * 1024 * 1024
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -20,4 +22,6 @@ class Settings:
             migration_database_url=os.environ.get(
                 "CAREER_MIGRATION_DATABASE_URL", _DEV_MIGRATION_URL
             ),
+            blob_dir=os.environ.get("CAREER_BLOB_DIR", "data/blobs"),
+            max_upload_bytes=int(os.environ.get("CAREER_MAX_UPLOAD_MB", "20")) * 1024 * 1024,
         )

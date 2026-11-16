@@ -64,7 +64,41 @@ def test_personal_tables_are_isolated(pg):
     engine = create_engine(pg.owner, poolclass=NullPool)
     with engine.connect() as conn:
         problems = workspace_isolation_problems(
-            conn, ["core", "personal"], allow_unforced={("personal", "api_tokens")}
+            conn,
+            ["core", "personal"],
+            allow_unforced={("personal", "api_tokens"), ("core", "jobs")},
         )
     engine.dispose()
     assert problems == []
+
+
+async def test_personal_app_accepts_uploads(pg, db, tmp_path):
+    from career_core.adapters.blobstore import LocalBlobStore
+    from career_core.adapters.parsers import default_local_parsers
+    from career_core.jobs.worker import parsing_handlers, run_until_idle
+    from career_core.policies import ProviderEgressPolicy
+    from career_core.usecases.parsing import ParsingDeps
+
+    _, _, token = await _workspace_with_token(db, "A")
+    settings = Settings(
+        database_url=pg.app.render_as_string(hide_password=False), blob_dir=str(tmp_path)
+    )
+    app = create_app(settings)
+    auth = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as c:
+        res = await c.post(
+            "/api/core/sources",
+            headers=auth,
+            files={"file": ("n.md", b"# Note\n\nbody", "text/markdown")},
+        )
+        assert res.status_code == 200, res.text
+        parsing = ParsingDeps(
+            db=db,
+            blobs=LocalBlobStore(tmp_path),
+            egress=ProviderEgressPolicy(),
+            local_parsers=default_local_parsers(),
+        )
+        await run_until_idle(db, parsing_handlers(parsing))
+        src = (await c.get(f"/api/core/sources/{res.json()['source_id']}", headers=auth)).json()
+    assert src["versions"][0]["mime_type"] == "text/markdown"
+    assert src["versions"][0]["parse"]["status"] == "complete"

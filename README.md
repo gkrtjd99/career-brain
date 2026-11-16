@@ -33,7 +33,9 @@ uv run pytest                                           # DB 테스트는 임시
 uv run personal-api migrate                             # core → personal migration
 uv run personal-api bootstrap                           # 공간 + owner + API 토큰 (한 번만 출력)
 uv run uvicorn personal_api.main:app --reload           # http://127.0.0.1:8000
+uv run personal-api worker                              # 파싱 등 백그라운드 작업
 curl -H "Authorization: Bearer <token>" localhost:8000/api/core/me
+curl -H "Authorization: Bearer <token>" -F file=@resume.pdf localhost:8000/api/core/sources
 npm run dev                                             # http://localhost:5173
 ```
 
