@@ -168,12 +168,15 @@ async def test_synthetic_eval_and_isolation(db, blobs, people):
 # --- 색인 ---------------------------------------------------------------------
 
 
-async def test_index_is_incremental_and_fresh(db, blobs, people):
+async def test_index_is_incremental_and_fresh(db, blobs, people, caplog):
     owner = people["owner"]
     await seed(db, blobs, owner, load_fixture())
     fake = FakeEmbedder()
     gw = gateway(db, LOCAL, fake)
-    assert await index(db, gw) >= 2  # 8개씩 나눠서 여러 번 돈다
+    with caplog.at_level("WARNING", logger="career_core.jobs.worker"):
+        assert await index(db, gw) >= 2  # 8개씩 나눠서 여러 번 돈다
+    # 색인 작업은 스스로 done으로 끝낸다 → lease를 잃은 것이 아니다 (경고 없음)
+    assert "lease lost" not in caplog.text
     vectors = await rows(db, owner, Embedding)
     # 블록 13 + 주장 5(인터뷰 답에서 만든 것 포함) + 인터뷰 답 1
     assert len(vectors) == 19

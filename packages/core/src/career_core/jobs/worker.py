@@ -82,7 +82,7 @@ async def run_once(
         return True
 
     async with db.workspace_session(row.workspace_id) as s:
-        job = await _owned(s, row)
+        job = await _owned(s, row, finished_by_handler=outcome.done)
         if job is None:
             return True
         job.locked_until = None
@@ -96,11 +96,22 @@ async def run_once(
     return True
 
 
-async def _owned(s, row) -> Job | None:
-    """아직 이 worker가 집은 그 작업이면 잠근 행, lease를 잃었으면 None."""
+async def _owned(s, row, *, finished_by_handler: bool = False) -> Job | None:
+    """아직 이 worker가 집은 그 작업이면 잠근 행, lease를 잃었으면 None.
+
+    ``finished_by_handler``: 핸들러가 끝났다고 답했고 행이 이미 ``done``이면(색인 작업은
+    "남은 대상 없음" 확인과 같은 트랜잭션에서 스스로 끝낸다, ``index_queue.finish_running``)
+    lease를 잃은 것이 아니므로 경고 없이 None.
+    """
     job = await s.get(Job, row.job_id, with_for_update=True)
     if job is None or job.status != "running" or job.attempts != row.attempts:
-        log.warning("job %s (%s): lease lost, result not recorded", row.job_id, row.kind)
+        if not (
+            finished_by_handler
+            and job is not None
+            and job.status == "done"
+            and job.attempts == row.attempts
+        ):
+            log.warning("job %s (%s): lease lost, result not recorded", row.job_id, row.kind)
         return None
     return job
 
