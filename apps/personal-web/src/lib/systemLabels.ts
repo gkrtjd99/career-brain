@@ -68,6 +68,17 @@ export const RUN_CODE: Record<string, string> = {
   nothing_to_suggest: "수정안을 받을 문단이 없음",
   unknown_block: "없는 문단",
   forbidden: "권한 없음",
+  // 모델 호출 전·중 실패 (ModelDenied·ModelCallError 코드)
+  no_route: "이 작업에 연결된 모델이 없음 (models.toml 라우트)",
+  api_key_missing: "모델 API 키가 없음",
+  models_not_configured: "모델 설정이 없음 (models.toml)",
+  invalid_model_output: "모델 출력 형식이 맞지 않음",
+  auth_failed: "모델 API 키가 거부됨",
+  permission_denied: "이 키로는 쓸 수 없는 모델",
+  model_not_found: "없는 모델 이름",
+  bad_request: "모델 요청이 거부됨",
+  sdk_not_installed: "제공자 SDK가 설치되지 않음",
+  worker_error: "worker 처리 오류",
 };
 
 export const INVALID_REASON: Record<string, string> = {
