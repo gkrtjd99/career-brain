@@ -62,6 +62,8 @@ ACTION_SCOPES: dict[str, str] = {
     # c0014 감사 기록(MCP 도구 호출)·외부 OAuth 신원 연결. 소유자만.
     "audit.read": "workspace-admin",
     "oauth.link": "workspace-admin",
+    # c0018 묶음을 기존 공간에 합치기 (웹 복원 포함). 공간 전체 자료를 쓰므로 소유자만.
+    "workspace.restore": "workspace-admin",
 }
 
 

@@ -19,6 +19,9 @@
   읽어 ``_BATCH``줄씩 넣는다. 메모리에 올리는 것은 manifest와 (드문) 행 순환 묶음뿐이다.
 - 선택: age 암호화(``recipients``), 새 ID로 다른 빈 공간에 가져오기(``new_ids``), 대기 작업 다시 넣기,
   나중에 받은 삭제 기록 다시 적용(``deletion_logs``). docs/operations/backup.md 참고.
+- 기존 공간에 합치기(``merge_workspace``): 모든 ID를 새로 만들고, 겹치는 행(같은 ID·DB 유일 키·내용 키)은
+  정책(``skip``/``fail``)대로 처리한다. 기존 행은 고치지 않는다 (INSERT만, 앞뒤 논리 해시로 확인).
+- 옛 형식 묶음: ``UPGRADES``(형식 버전 → 다음 버전 단계)를 차례로 적용한 뒤 같은 검사를 한다.
 """
 
 from __future__ import annotations
@@ -33,7 +36,7 @@ import re
 import tarfile
 import tempfile
 import zlib
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -42,7 +45,7 @@ from typing import IO, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import insert, select, text
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from career_core import __version__
@@ -54,7 +57,8 @@ from career_core.domain.workspace import ScopePermissionPolicy
 from career_core.ports import ActorContext, BlobStore, PermissionPolicy
 
 FORMAT = "career-brain-workspace-export"
-FORMAT_VERSION = 1
+# 2 (c0018): manifest에 ``tombstone_tables``. 1 → 2 단계는 표 내용을 바꾸지 않는다 (``UPGRADES``).
+FORMAT_VERSION = 2
 SCHEMAS = ("core",)
 MANIFEST = "manifest.json"
 
@@ -70,9 +74,26 @@ REQUEUE_KINDS: dict[str, str] = {
     "extract": "core.extraction_runs",
     "job_fetch": "core.job_fetch_runs",
 }
-# 삭제 기록(core.deletions, c0014 trigger)을 남기는 표
-TOMBSTONE_TABLES = frozenset(
+# 삭제 기록(core.deletions, record_deletion trigger)을 남기는 표. c0014: 앞의 4개, c0018: 나머지.
+# migration의 trigger·CHECK와 같아야 한다 (test_export.py가 DB와 비교한다).
+_V1_TOMBSTONE_TABLES = frozenset(
     {"core.sources", "core.job_postings", "core.applications", "core.study_items"}
+)
+TOMBSTONE_TABLES = _V1_TOMBSTONE_TABLES | frozenset(
+    {
+        "core.experiences",
+        "core.claims",
+        "core.claim_evidence",
+        "core.interview_sessions",
+        "core.interview_questions",
+        "core.application_documents",
+        "core.application_stages",
+        "core.study_requirements",
+        "core.study_requirement_claims",
+        "core.study_assessments",
+        "core.study_sessions",
+        "core.study_mistakes",
+    }
 )
 # SCHEMAS 밖(personal.api_tokens의 토큰 해시, 서비스 platform의 계정·결제)은 처음부터 읽지 않는다.
 OUT_OF_SCOPE = {
@@ -94,6 +115,14 @@ _TABLE_FILE = re.compile(r"tables/([a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*)\.jsonl")
 _BLOB_FILE = re.compile(r"blobs/([0-9a-f]{64})")
 _BATCH = 500
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+# 진행 알림: (단계, 한 것, 전체). 단계는 read·decrypt·match·insert·verify·deletions·blobs·commit.
+# 묶음 읽기는 스레드에서 부르므로 받는 쪽은 값만 바꾸는 가벼운 함수여야 한다.
+Progress = Callable[[str, int, int], None]
+
+
+def _no_progress(phase: str, done: int, total: int) -> None:
+    return None
 
 
 class ExportError(Exception):
@@ -139,6 +168,8 @@ class Table:
     primary_key: tuple[str, ...]
     foreign_keys: tuple[ForeignKey, ...]
     scope: str | None  # workspace | root | members | None(공간 범위 없음)
+    # UNIQUE 제약 (이름, 칸). 합치기의 겹침 찾기에 쓴다.
+    unique_keys: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     @property
     def sql(self) -> str:
@@ -197,7 +228,7 @@ FROM pg_constraint con
 JOIN pg_class c ON c.oid = con.conrelid JOIN pg_namespace n ON n.oid = c.relnamespace
 LEFT JOIN pg_class rc ON rc.oid = con.confrelid
 LEFT JOIN pg_namespace rn ON rn.oid = rc.relnamespace
-WHERE con.contype IN ('p', 'f') AND n.nspname = ANY(:schemas)
+WHERE con.contype IN ('p', 'f', 'u') AND n.nspname = ANY(:schemas)
 ORDER BY con.conname
 """
 
@@ -211,10 +242,13 @@ async def read_catalog(conn: AsyncConnection, schemas: Sequence[str] = SCHEMAS) 
         columns.setdefault(r.oid, []).append(Column(r.name, r.type, r.not_null))
     pks: dict[int, tuple[str, ...]] = {}
     fks: dict[int, list[ForeignKey]] = {}
+    uniques: dict[int, list[tuple[str, tuple[str, ...]]]] = {}
     names = {t.oid: t.name for t in tables}
     for r in (await conn.execute(text(_CATALOG_CONSTRAINTS), params)).all():
         if r.kind == "p":
             pks[r.oid] = tuple(r.cols)
+        elif r.kind == "u":
+            uniques.setdefault(r.oid, []).append((r.name, tuple(r.cols)))
         else:
             fks.setdefault(r.oid, []).append(
                 ForeignKey(
@@ -239,6 +273,7 @@ async def read_catalog(conn: AsyncConnection, schemas: Sequence[str] = SCHEMAS) 
                 primary_key=pks.get(t.oid, ()),
                 foreign_keys=tuple(fks.get(t.oid, ())),
                 scope=scope,
+                unique_keys=tuple(uniques.get(t.oid, ())),
             )
         )
     return sorted(out, key=lambda t: t.name)
@@ -463,6 +498,8 @@ async def export_workspace(
             "pending_work": dump.pending_work,
             "excluded": {**dump.plan.excluded, **OUT_OF_SCOPE},
             "skipped": dump.plan.skipped,
+            # 이 묶음의 core.deletions가 다루는 표 (v2). 삭제 기록을 다시 적용할 때 범위 안내.
+            "tombstone_tables": sorted(TOMBSTONE_TABLES),
         }
         partial = out.with_name(f".{out.name}.{uuid4().hex}.part")
         sealed = out.with_name(f".{out.name}.{uuid4().hex}.age")
@@ -756,6 +793,8 @@ class _Archive:
     blob_keys: list[str]
     sha256: str
     bytes: int
+    # 옛 형식에서 바꿔 읽었으면 원래 형식 버전
+    upgraded_from: int | None = None
 
     def path(self, name: str) -> Path:
         return self.table_dir / f"{name}.jsonl"
@@ -767,6 +806,37 @@ class _Archive:
 
     def read_lines(self, name: str) -> list[str]:
         return list(self.iter_lines(name))
+
+    def rewrite(self, name: str, change: Callable[[dict], dict | None]) -> None:
+        """형식 변환 단계용: 표 파일의 행을 하나씩 바꿔 다시 쓴다 (``None``이면 그 행을 뺀다).
+
+        해시·행 수는 모든 단계가 끝난 뒤 ``upgrade_archive``가 다시 계산한다.
+        """
+        src = self.path(name)
+        tmp = src.with_name(f".{src.name}.{uuid4().hex}")
+        with open(src, encoding="utf-8") as f, open(tmp, "w", encoding="utf-8") as out:
+            for line in f:
+                row = change(json.loads(line, parse_float=Decimal))
+                if row is not None:
+                    out.write(_json_text(row) + "\n")
+        os.replace(tmp, src)
+
+
+def _json_text(value: Any) -> str:
+    """JSON 직렬화. 소수는 ``Decimal`` 그대로 (numeric 칸의 자릿수를 잃지 않게)."""
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(
+                f"{json.dumps(k, ensure_ascii=False)}: {_json_text(v)}" for k, v in value.items()
+            )
+            + "}"
+        )
+    if isinstance(value, list):
+        return "[" + ", ".join(_json_text(v) for v in value) + "]"
+    if isinstance(value, Decimal):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _copy_member(src: IO[bytes] | None, dst: Path) -> tuple[str, int, int]:
@@ -783,11 +853,25 @@ def _copy_member(src: IO[bytes] | None, dst: Path) -> tuple[str, int, int]:
     return h.hexdigest(), size, lines
 
 
-def read_archive(path: str | os.PathLike[str], staging: Path) -> _Archive:
+def _file_lines_digest(path: Path) -> tuple[str, int]:
+    h = hashlib.sha256()
+    lines = 0
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
+            lines += chunk.count(b"\n")
+    return h.hexdigest(), lines
+
+
+def read_archive(
+    path: str | os.PathLike[str], staging: Path, progress: Progress | None = None
+) -> _Archive:
     """묶음을 한 번 훑으며 형식·해시를 확인한다. 표·원본은 ``staging``에 조각씩 꺼낸다.
 
     정해진 이름의 일반 파일만 받는다 (링크·장치·경로 탈출·중복 이름 거부). manifest만 메모리에 둔다.
+    옛 형식 묶음도 여기서는 그대로 꺼낸다 (해시는 받은 파일 기준). 변환은 ``upgrade_archive``.
     """
+    tick = progress or _no_progress
     path = Path(path)
     digest, size = _file_digest(path)
     blob_dir = staging / "blobs"
@@ -797,8 +881,9 @@ def read_archive(path: str | os.PathLike[str], staging: Path) -> _Archive:
     manifest: dict | None = None
     tables: dict[str, tuple[str, int]] = {}  # 이름 → (sha256, 줄 수)
     seen: set[str] = set()
+    tick("read", 0, size)
     try:
-        with tarfile.open(path, "r|gz") as tar:
+        with open(path, "rb") as raw, tarfile.open(fileobj=raw, mode="r|gz") as tar:
             for member in tar:
                 name = member.name
                 if name in seen or not member.isreg():
@@ -822,6 +907,7 @@ def read_archive(path: str | os.PathLike[str], staging: Path) -> _Archive:
                         raise ArchiveError("hash_mismatch", name)
                 else:
                     raise ArchiveError("unexpected_member", name)
+                tick("read", min(raw.tell(), size), size)
     except (tarfile.TarError, EOFError, OSError, zlib.error) as exc:
         raise ArchiveError("not_an_archive", type(exc).__name__) from exc
     if manifest is None:
@@ -845,6 +931,7 @@ def read_archive(path: str | os.PathLike[str], staging: Path) -> _Archive:
         raise ArchiveError("missing_member", f"{len(missing)} blob(s)")
     if extra := present - set(keys):
         raise ArchiveError("unexpected_member", f"{len(extra)} unlisted blob(s)")
+    tick("read", size, size)
     return _Archive(manifest, table_dir, blob_dir, keys, digest, size)
 
 
@@ -852,36 +939,180 @@ MAX_MANIFEST_BYTES = 64 << 20
 
 
 def _parse_manifest(data: bytes) -> dict:
+    """묶음 틀(모든 형식 버전에 공통)만 본다: 형식 이름, 읽을 수 있는 버전, 표 이름·행 수·해시, 원본 키.
+
+    나머지 칸은 형식 변환 뒤 ``_check_manifest``가 본다.
+    """
     try:
         m = json.loads(data)
     except ValueError as exc:
         raise ArchiveError("invalid_manifest") from exc
     if not isinstance(m, dict) or m.get("format") != FORMAT:
         raise ArchiveError("format_unsupported", "not a career-brain workspace export")
-    if m.get("format_version") != FORMAT_VERSION:
+    version = m.get("format_version")
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version not in readable_versions()
+    ):
         raise ArchiveError(
-            "version_mismatch", f"format {m.get('format_version')}, expected {FORMAT_VERSION}"
+            "version_mismatch",
+            f"format {version}, this install reads {', '.join(map(str, readable_versions()))}",
         )
     try:
-        UUID(m["workspace"]["id"])
-        ok = isinstance(m["migration_heads"], list) and isinstance(m["workspace"]["name"], str)
+        ok = isinstance(m["tables"], list) and isinstance(m["blobs"], list)
         for t in m["tables"]:
             ok = ok and (
                 bool(_TABLE_FILE.fullmatch(_table_file(t["name"])))
                 and isinstance(t["rows"], int)
                 and bool(_BLOB_KEY.fullmatch(t["sha256"]))
-                and isinstance(t["columns"], list)
             )
         for b in m["blobs"]:
             ok = ok and bool(_BLOB_KEY.fullmatch(b["key"]))
-        for w in m.get("pending_work", []):
-            ok = ok and isinstance(w.get("kind"), str)
-            UUID(w["target_id"])
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
         raise ArchiveError("invalid_manifest", type(exc).__name__) from exc
     if not ok:
         raise ArchiveError("invalid_manifest")
     return m
+
+
+def _check_manifest(m: dict) -> None:
+    """현재 형식(``FORMAT_VERSION``)의 나머지 칸."""
+    try:
+        UUID(m["workspace"]["id"])
+        ok = isinstance(m["migration_heads"], list) and isinstance(m["workspace"]["name"], str)
+        for t in m["tables"]:
+            ok = ok and isinstance(t["columns"], list)
+        for w in m.get("pending_work", []):
+            ok = ok and isinstance(w.get("kind"), str)
+            UUID(w["target_id"])
+        ok = ok and isinstance(m.get("tombstone_tables", []), list)
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise ArchiveError("invalid_manifest", type(exc).__name__) from exc
+    if not ok:
+        raise ArchiveError("invalid_manifest")
+
+
+# ---------------------------------------------------------------- 옛 형식 변환
+
+# 한 단계: (manifest, 꺼낸 묶음)을 받아 바로 다음 버전으로 바꾼다. manifest는 dict 그대로 고치고,
+# 표 내용은 ``_Archive.rewrite``로 바꾼다. 묶음 틀(맨 앞 manifest, tables/*·blobs/* 이름, 표마다
+# rows·sha256, 원본 key)은 모든 버전에 같다. 해시·행 수는 단계가 끝난 뒤 다시 계산한다.
+FormatStep = Callable[[dict, _Archive], None]
+
+
+@dataclass(frozen=True, slots=True)
+class FormatUpgrade:
+    from_version: int
+    summary: str
+    apply: FormatStep
+
+
+# from_version → 그 버전을 다음 버전으로 바꾸는 단계
+UPGRADES: dict[int, FormatUpgrade] = {}
+
+
+def format_upgrade(from_version: int, summary: str) -> Callable[[FormatStep], FormatStep]:
+    def register(fn: FormatStep) -> FormatStep:
+        if from_version in UPGRADES or from_version >= FORMAT_VERSION:
+            raise ValueError(f"bad format step {from_version}")
+        UPGRADES[from_version] = FormatUpgrade(from_version, summary, fn)
+        return fn
+
+    return register
+
+
+def readable_versions() -> list[int]:
+    """이 코드가 읽을 수 있는 형식 버전: 현재 버전과, 현재 버전까지 단계가 끊김 없이 이어지는 옛 버전."""
+    out = [FORMAT_VERSION]
+    v = FORMAT_VERSION - 1
+    while v in UPGRADES:
+        out.append(v)
+        v -= 1
+    return sorted(out)
+
+
+@format_upgrade(1, "v1 → v2: 표 내용 그대로, manifest에 tombstone_tables(c0014의 4개 표)")
+def _upgrade_v1(manifest: dict, arc: _Archive) -> None:
+    manifest.setdefault("tombstone_tables", sorted(_V1_TOMBSTONE_TABLES))
+
+
+def upgrade_archive(arc: _Archive) -> int | None:
+    """옛 형식이면 단계를 차례로 적용하고 표 해시·행 수를 다시 계산한다. 원래 버전(바꾸지 않았으면 None)."""
+    m = arc.manifest
+    start = m["format_version"]
+    if start == FORMAT_VERSION:
+        return None
+    for v in range(start, FORMAT_VERSION):
+        UPGRADES[v].apply(m, arc)
+        m["format_version"] = v + 1
+    listed = set()
+    for entry in m["tables"]:
+        name = entry["name"]
+        if not _TABLE_FILE.fullmatch(_table_file(name)) or not arc.path(name).is_file():
+            raise ArchiveError("upgrade_failed", f"table file missing after upgrade: {name}")
+        entry["sha256"], entry["rows"] = _file_lines_digest(arc.path(name))
+        listed.add(name)
+    if extra := {p.name.removesuffix(".jsonl") for p in arc.table_dir.iterdir()} - listed:
+        raise ArchiveError("upgrade_failed", f"unlisted table files: {', '.join(sorted(extra))}")
+    m["upgraded_from"] = start
+    arc.upgraded_from = start
+    return start
+
+
+async def _open_archive(
+    source: Path,
+    staging: Path,
+    identities: Sequence[str | os.PathLike[str]] | None,
+    tick: Progress,
+) -> tuple[_Archive, bool]:
+    """(암호문이면 풀기) → 묶음 확인 → 옛 형식 변환 → 현재 형식 검사. 해시·크기는 받은 파일 기준."""
+    digest, size = await asyncio.to_thread(_file_digest, source)
+    encrypted = await asyncio.to_thread(_is_encrypted, source)
+    if encrypted:
+        if not identities:
+            raise ArchiveError("encrypted_archive", "pass the age identity file")
+        from career_core.adapters.age_crypt import AgeError, decrypt_file
+
+        plain = staging / "archive.tar.gz"
+        tick("decrypt", 0, size)
+        try:
+            await asyncio.to_thread(decrypt_file, source, plain, list(identities))
+        except AgeError as exc:
+            raise ArchiveError(exc.code, exc.detail) from exc
+        tick("decrypt", size, size)
+        (staging / "x").mkdir()
+        try:
+            arc = await asyncio.to_thread(read_archive, plain, staging / "x", tick)
+        finally:
+            plain.unlink(missing_ok=True)
+    else:
+        arc = await asyncio.to_thread(read_archive, source, staging, tick)
+    arc.sha256, arc.bytes = digest, size
+    await asyncio.to_thread(upgrade_archive, arc)
+    _check_manifest(arc.manifest)
+    return arc, encrypted
+
+
+def _check_heads(manifest: dict, expected_heads: Sequence[str] | None) -> None:
+    heads = sorted(expected_heads) if expected_heads is not None else core_migration_heads()
+    if sorted(manifest["migration_heads"]) != heads:
+        raise ArchiveError(
+            "version_mismatch",
+            f"archive migrations {manifest['migration_heads']}, this install {heads}",
+        )
+
+
+async def _read_tombstones(
+    deletion_logs: Sequence[str | os.PathLike[str]], source_ws: UUID
+) -> list[Tombstone]:
+    out: list[Tombstone] = []
+    for log_path in deletion_logs:
+        log_ws, rows = await asyncio.to_thread(read_deletions, log_path)
+        if log_ws != source_ws:
+            raise ArchiveError("deletions_workspace_mismatch", str(log_ws))
+        out.extend(rows)
+    return out
 
 
 # ---------------------------------------------------------------- ID 재매핑
@@ -900,9 +1131,12 @@ class IdMap:
 
     def add(self, old: str) -> None:
         if old not in self.forward:
-            new = str(uuid4())
-            self.forward[old] = new
-            self.backward[new] = old
+            self.set(old, str(uuid4()))
+
+    def set(self, old: str, new: str) -> None:
+        """합치기: 옛 ID를 정한 값(새 UUID 또는 겹친 기존 행의 ID)으로."""
+        self.forward[old] = new
+        self.backward.setdefault(new, old)
 
     def apply(self, line: str) -> str:
         return _UUID.sub(lambda m: self.forward.get(m.group(0), m.group(0)), line)
@@ -938,6 +1172,21 @@ def _row_digest(line: str) -> int:
 
 
 @dataclass(frozen=True, slots=True)
+class SkippedDeletion:
+    """다시 적용하지 못한 삭제 기록 한 건과 이유.
+
+    reason: ``still_referenced``(RESTRICT FK가 아직 가리킴, detail = 그 표·제약), ``not_permitted``
+    (앱 계정이 지울 수 없는 표), ``rejected``(trigger·CHECK가 거부), ``kept_existing``(합치기: 이 공간에
+    원래 있던 행이라 지우지 않음), ``error``(그 밖의 DB 오류, detail = SQLSTATE).
+    """
+
+    target_table: str
+    target_id: str
+    reason: str
+    detail: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class RestoreReport:
     workspace_id: UUID
     workspace_name: str
@@ -951,12 +1200,17 @@ class RestoreReport:
     source_workspace_id: UUID | None = None
     requeued: dict[str, int] = field(default_factory=dict)
     deletions_applied: int = 0
-    deletions_skipped: int = 0
+    skipped_deletions: list[SkippedDeletion] = field(default_factory=list)
     encrypted: bool = False
+    format_upgraded_from: int | None = None
 
     @property
     def rows_total(self) -> int:
         return sum(t.rows for t in self.tables)
+
+    @property
+    def deletions_skipped(self) -> int:
+        return len(self.skipped_deletions)
 
 
 async def restore_workspace(
@@ -970,10 +1224,11 @@ async def restore_workspace(
     new_ids: bool = False,
     identities: Sequence[str | os.PathLike[str]] | None = None,
     deletion_logs: Sequence[str | os.PathLike[str]] = (),
+    progress: Progress | None = None,
 ) -> RestoreReport:
     """빈 대상에 묶음을 되살린다.
 
-    순서: (암호문이면 풀기) → 묶음 해시 확인 → 버전·칸 구성 비교 → 대상이 비었는지 확인 →
+    순서: (암호문이면 풀기) → 묶음 해시 확인 → (옛 형식이면 변환) → 버전·칸 구성 비교 → 대상이 비었는지 확인 →
     한 트랜잭션에서 행 넣기 → 다시 읽어 행 수·해시 비교 → 삭제 기록 다시 적용 → 대기 작업 다시 넣기 →
     원본 저장(sha256 확인, 아직 참조되는 것만) → commit. ``dry_run``이면 마지막에 rollback하고 원본도 쓰지 않는다.
 
@@ -981,42 +1236,16 @@ async def restore_workspace(
       FK와 FK 없는 참조를 같이 바꾸고, 해시는 새 ID를 옛 ID로 되돌린 논리 내용으로 비교한다.
     - ``identities``: 암호화한 묶음을 풀 age 신원 파일.
     - ``deletion_logs``: 묶음보다 나중에 받은 삭제 기록(``export_deletions``). 그 사이 지운 자료를 다시 지운다.
+    - 이미 자료가 있는 공간에는 ``merge_workspace``로 합친다.
     """
+    tick = progress or _no_progress
     with tempfile.TemporaryDirectory(prefix="career-restore-") as tmp:
         staging = Path(tmp)
-        source = Path(archive)
-        digest, size = await asyncio.to_thread(_file_digest, source)
-        encrypted = await asyncio.to_thread(_is_encrypted, source)
-        if encrypted:
-            if not identities:
-                raise ArchiveError("encrypted_archive", "pass the age identity file")
-            from career_core.adapters.age_crypt import AgeError, decrypt_file
-
-            plain = staging / "archive.tar.gz"
-            try:
-                await asyncio.to_thread(decrypt_file, source, plain, list(identities))
-            except AgeError as exc:
-                raise ArchiveError(exc.code, exc.detail) from exc
-            (staging / "x").mkdir()
-            arc = await asyncio.to_thread(read_archive, plain, staging / "x")
-            plain.unlink()
-        else:
-            arc = await asyncio.to_thread(read_archive, source, staging)
-        arc.sha256, arc.bytes = digest, size  # 기록은 받은 파일(암호문) 기준
+        arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
         m = arc.manifest
-        heads = sorted(expected_heads) if expected_heads is not None else core_migration_heads()
-        if sorted(m["migration_heads"]) != heads:
-            raise ArchiveError(
-                "version_mismatch",
-                f"archive migrations {m['migration_heads']}, this install {heads}",
-            )
+        _check_heads(m, expected_heads)
         source_ws = UUID(m["workspace"]["id"])
-        tombstones: list[Tombstone] = []
-        for log_path in deletion_logs:
-            log_ws, rows = await asyncio.to_thread(read_deletions, log_path)
-            if log_ws != source_ws:
-                raise ArchiveError("deletions_workspace_mismatch", str(log_ws))
-            tombstones.extend(rows)
+        tombstones = await _read_tombstones(deletion_logs, source_ws)
         async with db.engine.connect() as conn:
             trans = await conn.begin()
             try:
@@ -1033,15 +1262,27 @@ async def restore_workspace(
                 await conn.execute(text("SET CONSTRAINTS ALL DEFERRED"))
                 # 행을 넣는 동안 승인 무효화 trigger를 멈춘다 (묶음의 상태 그대로, c0014)
                 await conn.execute(text("SELECT set_config('career.restoring', 'on', true)"))
-                await _insert_all(conn, plan, arc, ids)
+                total = sum(t["rows"] for t in m["tables"])
+
+                def lines_of(name: str) -> Iterable[str]:
+                    lines = arc.iter_lines(name)
+                    return lines if ids is None else (ids.apply(x) for x in lines)
+
+                await _insert_all(conn, plan, lines_of, lambda n: tick("insert", n, total))
                 await conn.execute(text("SELECT set_config('career.restoring', 'off', true)"))
                 # 미뤄 둔 FK를 지금 검사한다 (commit 전에 실패를 알 수 있게).
                 await conn.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
-                if ids is None:
+                tick("verify", 0, len(plan.tables))
+                if ids is None and arc.upgraded_from is None:
                     reports = await _verify(conn, plan, m, ws)
                 else:
-                    reports = await _verify_logical(conn, plan, arc, ids, ws)
-                applied, skipped = await _apply_deletions(conn, tombstones, ids)
+                    # 새 ID, 또는 옛 형식에서 바꿔 쓴 표(줄 모양이 DB 출력과 다를 수 있다): 논리 해시로
+                    reports = await _verify_logical(conn, plan, arc, ids or IdMap(), ws)
+                tick("verify", len(plan.tables), len(plan.tables))
+                tick("deletions", 0, len(tombstones))
+                applied, skipped = await _apply_deletions(
+                    conn, tombstones, lambda t, i: ("apply", ids.get(i) if ids else i)
+                )
                 requeued = await _requeue(conn, m.get("pending_work", []), ids, ws)
                 referenced = await _referenced_blobs(conn, plan, ws)
                 if not dry_run:
@@ -1060,14 +1301,10 @@ async def restore_workspace(
                             created_at=datetime.now(UTC),
                         )
                     )
-                    for key in arc.blob_keys:
-                        if key not in referenced:
-                            continue  # 다시 적용한 삭제로 더는 쓰지 않는 원본은 되살리지 않는다
-                        data = await asyncio.to_thread((arc.blob_dir / key).read_bytes)
-                        await blobs.put(ws, key, data, "application/octet-stream")
-                        del data
-                        if hashlib.sha256(await blobs.get(ws, key)).hexdigest() != key:
-                            raise ArchiveError("blob_write_failed", key)
+                    await _store_blobs(
+                        blobs, ws, arc, [k for k in arc.blob_keys if k in referenced], tick
+                    )
+                    tick("commit", 0, 1)
                     await trans.commit()
                 else:
                     await trans.rollback()
@@ -1076,11 +1313,9 @@ async def restore_workspace(
                     await trans.rollback()
                 raise
         owners = _owners(arc.iter_lines("core.memberships"))
-    notes = []
-    if m.get("missing_blobs"):
-        notes.append(f"{len(m['missing_blobs'])} blob(s) were missing at export time")
+    notes = _archive_notes(arc)
     if skipped:
-        notes.append(f"{skipped} deletion(s) could not be re-applied (target still referenced)")
+        notes.append(f"{len(skipped)} deletion(s) could not be re-applied (see skipped_deletions)")
     return RestoreReport(
         workspace_id=ws,
         workspace_name=m["workspace"]["name"],
@@ -1093,9 +1328,34 @@ async def restore_workspace(
         source_workspace_id=source_ws if ids is not None else None,
         requeued=requeued,
         deletions_applied=applied,
-        deletions_skipped=skipped,
+        skipped_deletions=skipped,
         encrypted=encrypted,
+        format_upgraded_from=arc.upgraded_from,
     )
+
+
+def _archive_notes(arc: _Archive) -> list[str]:
+    m = arc.manifest
+    notes = []
+    if arc.upgraded_from is not None:
+        notes.append(f"archive format {arc.upgraded_from} was upgraded to {FORMAT_VERSION}")
+    if m.get("missing_blobs"):
+        notes.append(f"{len(m['missing_blobs'])} blob(s) were missing at export time")
+    return notes
+
+
+async def _store_blobs(
+    blobs: BlobStore, ws: UUID, arc: _Archive, keys: Sequence[str], tick: Progress
+) -> None:
+    """원본을 하나씩 저장하고 다시 읽어 sha256을 확인한다."""
+    tick("blobs", 0, len(keys))
+    for i, key in enumerate(keys, 1):
+        data = await asyncio.to_thread((arc.blob_dir / key).read_bytes)
+        await blobs.put(ws, key, data, "application/octet-stream")
+        del data
+        if hashlib.sha256(await blobs.get(ws, key)).hexdigest() != key:
+            raise ArchiveError("blob_write_failed", key)
+        tick("blobs", i, len(keys))
 
 
 def _is_encrypted(path: Path) -> bool:
@@ -1125,7 +1385,10 @@ async def _check_empty(conn: AsyncConnection, plan: ExportPlan, ws: UUID) -> Non
             {"ws": str(ws)},
         )
         if found:
-            raise ArchiveError("target_not_empty", f"{t.name} already has rows for {ws}")
+            raise ArchiveError(
+                "target_not_empty",
+                f"{t.name} already has rows for {ws} (merge into an existing workspace instead)",
+            )
 
 
 def _insert_sql(table: Table) -> str:
@@ -1146,39 +1409,45 @@ def _insert_sql(table: Table) -> str:
     )
 
 
-def _batches(lines: Iterable[str]) -> Iterator[str]:
+def _batches(lines: Iterable[str]) -> Iterator[tuple[str, int]]:
     batch: list[str] = []
     for line in lines:
         batch.append(line)
         if len(batch) >= _BATCH:
-            yield "[" + ",".join(batch) + "]"
+            yield "[" + ",".join(batch) + "]", len(batch)
             batch = []
     if batch:
-        yield "[" + ",".join(batch) + "]"
+        yield "[" + ",".join(batch) + "]", len(batch)
 
 
 async def _insert_all(
-    conn: AsyncConnection, plan: ExportPlan, arc: _Archive, ids: IdMap | None
+    conn: AsyncConnection,
+    plan: ExportPlan,
+    lines_of: Callable[[str], Iterable[str]],
+    inserted: Callable[[int], None] | None = None,
 ) -> None:
-    """표 파일을 줄 단위로 읽어 ``_BATCH``줄씩 넣는다. 순환 묶음(드묾)만 그 표들을 메모리에 올린다."""
+    """표마다 ``lines_of(표)``의 줄을 ``_BATCH``줄씩 넣는다. 순환 묶음(드묾)만 그 표들을 메모리에 올린다.
 
-    def mapped(lines: Iterable[str]) -> Iterable[str]:
-        return lines if ids is None else (ids.apply(x) for x in lines)
-
+    ``inserted``는 지금까지 넣은 행 수를 받는다 (진행 표시).
+    """
     done: set[str] = set()
+    count = 0
     for t in plan.tables:
         if t.name in done:
             continue
         group = plan.group_of(t.name)
         if group is None:
-            steps: Iterable[tuple[str, Iterable[str]]] = [(t.name, mapped(arc.iter_lines(t.name)))]
+            steps: Iterable[tuple[str, Iterable[str]]] = [(t.name, lines_of(t.name))]
         else:
-            lines = {n: list(mapped(arc.iter_lines(n))) for n in group}
+            lines = {n: list(lines_of(n)) for n in group}
             steps = _row_order(plan, group, lines)
         for name, chunk in steps:
             sql = text(_insert_sql(plan.table(name)))
-            for batch in _batches(chunk):
+            for batch, n in _batches(chunk):
                 await conn.execute(sql, {"rows": batch})
+                count += n
+                if inserted is not None:
+                    inserted(count)
         done.update(group or {t.name})
 
 
@@ -1285,18 +1554,49 @@ async def _verify_logical(
     return reports
 
 
+# 삭제 기록 한 건을 어떻게 할지: ("apply", 대상 ID) | ("ignore", "") | ("skip", 이유)
+DeletionDecision = Callable[[str, str], tuple[str, str]]
+
+
+def _skip_reason(exc: DBAPIError) -> tuple[str, str]:
+    orig = exc.orig
+    state = getattr(orig, "sqlstate", None) or ""
+    diag = getattr(orig, "diag", None)
+    table = getattr(diag, "table_name", None)
+    schema = getattr(diag, "schema_name", None)
+    constraint = getattr(diag, "constraint_name", None)
+    where = f"{schema}.{table}" if schema and table else (table or "")
+    if state == "23503":  # foreign_key_violation: 지우려는 행을 아직 다른 행이 가리킨다
+        return "still_referenced", f"{where} ({constraint})" if constraint else where
+    if state == "42501":  # insufficient_privilege
+        return "not_permitted", where
+    if state.startswith("23") or state == "P0001":  # 다른 제약 위반, trigger RAISE
+        return "rejected", constraint or state
+    return "error", state
+
+
 async def _apply_deletions(
-    conn: AsyncConnection, tombstones: Sequence[Tombstone], ids: IdMap | None
-) -> tuple[int, int]:
-    """나중 삭제 기록을 다시 적용한다. 지울 수 없는 대상(아직 다른 자료가 참조)은 건너뛰고 센다."""
-    applied = skipped = 0
+    conn: AsyncConnection, tombstones: Sequence[Tombstone], decide: DeletionDecision
+) -> tuple[int, list[SkippedDeletion]]:
+    """나중 삭제 기록을 다시 적용한다. 지울 수 없는 대상은 건너뛰고 이유를 남긴다.
+
+    묶음에 없던 대상(그 전에 이미 지워짐)은 조용히 넘어간다 (기록도 남기지 않는다).
+    """
+    applied = 0
+    skipped: list[SkippedDeletion] = []
     seen: set[tuple[str, str]] = set()
     for d in tombstones:
         if (d.target_table, d.target_id) in seen:
             continue
         seen.add((d.target_table, d.target_id))
+        action, value = decide(d.target_table, d.target_id)
+        if action == "ignore":
+            continue
+        if action == "skip":
+            skipped.append(SkippedDeletion(d.target_table, d.target_id, value))
+            continue
         schema, table = d.target_table.split(".", 1)
-        target = ids.get(d.target_id) if ids is not None else d.target_id
+        target = value
         savepoint = await conn.begin_nested()
         try:
             # trigger가 지금 시각으로 남기기 전에 원래 삭제 시각으로 먼저 기록한다 (trigger는 같은 키면 그대로)
@@ -1318,14 +1618,19 @@ async def _apply_deletions(
                 continue
             await savepoint.commit()
             applied += 1
-        except DBAPIError:
+        except DBAPIError as exc:
             await savepoint.rollback()
-            skipped += 1
+            reason, detail = _skip_reason(exc)
+            skipped.append(SkippedDeletion(d.target_table, d.target_id, reason, detail))
     return applied, skipped
 
 
 async def _requeue(
-    conn: AsyncConnection, work: Sequence[dict], ids: IdMap | None, ws: UUID
+    conn: AsyncConnection,
+    work: Sequence[dict],
+    ids: IdMap | None,
+    ws: UUID,
+    allowed: Callable[[str, str], bool] | None = None,
 ) -> dict[str, int]:
     """내보낼 때 대기·실행 중이던 작업을 다시 큐에 넣는다 (대상이 남아 있는 것만, 같은 대상은 한 번)."""
     out: dict[str, int] = {}
@@ -1335,6 +1640,8 @@ async def _requeue(
             continue
         schema, name = table.split(".", 1)
         target = ids.get(w["target_id"]) if ids is not None else w["target_id"]
+        if allowed is not None and not allowed(table, target):
+            continue
         exists = await conn.scalar(
             text(f'SELECT EXISTS (SELECT 1 FROM "{schema}"."{name}" WHERE id = CAST(:id AS uuid))'),
             {"id": target},
@@ -1379,28 +1686,526 @@ def _owners(membership_lines: Iterable[str]) -> list[UUID]:
     return out
 
 
+# ---------------------------------------------------------------- 기존 공간에 합치기
+
+DUPLICATE_POLICIES = ("skip", "fail")
+# 합칠 때 넣지 않는 표 (행은 묶음에 있어도). 이유는 보고에 같이 나간다.
+MERGE_SKIPPED_TABLES: dict[str, str] = {
+    "core.workspaces": "대상 공간 그대로 (이름·설정을 바꾸지 않는다)",
+    "core.actors": "묶음의 사람은 대상 공간 구성원(같은 ID) 또는 합치는 사람으로 바꾼다",
+    "core.memberships": "대상 공간의 구성원 그대로",
+    "core.export_runs": "묶음 공간의 백업 기록. 합치기는 이 공간에 kind=merge로 남는다",
+    "core.deletions": "묶음 공간의 삭제 기록 (그 공간의 ID라 이 공간에 다시 적용할 일이 없다)",
+}
+# 겹침을 찾을 때 먼저 보는 칸 (내용 주소·정규화한 주소·멱등 키). 나머지 UNIQUE는 그다음.
+_STRONG_KEY_COLUMNS = ("sha256", "content_hash", "canonical_url", "idempotency_key")
+# DB UNIQUE가 없지만 같은 것으로 보는 내용 키 (표 → 칸 목록)
+EXTRA_MERGE_KEYS: dict[str, tuple[tuple[str, ...], ...]] = {
+    # 같은 파싱 실행의 같은 순번 블록 = 같은 블록 (파싱 결과는 다시 만들 수 있는 파생 자료)
+    "core.document_blocks": (("parse_run_id", "ordinal"),),
+}
+# 자식 행의 키로 부모를 찾는 경우: 원본은 버전의 sha256(같은 파일)으로 겹친다 (업로드 중복 방지와 같은 규칙)
+CHILD_MERGE_KEYS: dict[str, tuple[str, str, str]] = {
+    "core.sources": ("core.source_versions", "source_id", "sha256"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class MergeTableReport:
+    name: str
+    archive_rows: int
+    added: int
+    # 겹쳐서 넣지 않은 행: 찾은 키 이름 → 수 ("id" = 같은 ID, 그 밖은 UNIQUE 제약·내용 키 이름)
+    skipped_by: dict[str, int]
+    # 넣은 행의 논리 해시 (순서 무관 합). 넣기 전후 공간 전체 해시의 차이와 같음을 확인했다.
+    sha256: str
+
+    @property
+    def skipped(self) -> int:
+        return self.archive_rows - self.added
+
+
+@dataclass(frozen=True, slots=True)
+class MergeReport:
+    workspace_id: UUID
+    workspace_name: str
+    source_workspace_id: UUID
+    source_workspace_name: str
+    on_duplicate: str
+    dry_run: bool
+    archive_sha256: str
+    tables: list[MergeTableReport]
+    blobs: int  # 저장한(또는 dry-run이면 저장할) 원본 수
+    actors_mapped: int  # 합치는 사람으로 바꾼 묶음의 actor 수
+    not_merged: dict[str, str]
+    requeued: dict[str, int] = field(default_factory=dict)
+    deletions_applied: int = 0
+    skipped_deletions: list[SkippedDeletion] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    encrypted: bool = False
+    format_upgraded_from: int | None = None
+
+    @property
+    def rows_added(self) -> int:
+        return sum(t.added for t in self.tables)
+
+    @property
+    def rows_skipped(self) -> int:
+        return sum(t.skipped for t in self.tables if t.name not in self.not_merged)
+
+    @property
+    def deletions_skipped(self) -> int:
+        return len(self.skipped_deletions)
+
+
+@dataclass(slots=True)
+class _MergeState:
+    ids: IdMap
+    keep: dict[str, bytearray]  # 표 → 줄마다 1(넣음)/0(넣지 않음)
+    skipped_by: dict[str, dict[str, int]]
+    inserted: dict[str, set[str]]  # 표 → 새로 넣는 행의 (새) ID
+    matched: dict[str, set[str]]  # 표 → 겹친 기존 행의 ID
+    actors_mapped: int
+
+
+def _key_order(name_cols: tuple[str, tuple[str, ...]]) -> tuple[int, str]:
+    _, cols = name_cols
+    strong = any(c.endswith(_STRONG_KEY_COLUMNS) for c in cols)
+    return (0 if strong else 1, name_cols[0])
+
+
+def _key(row: dict, cols: Sequence[str]) -> tuple[str, ...] | None:
+    vals = [row.get(c) for c in cols]
+    if any(v is None for v in vals):
+        return None  # NULL은 UNIQUE에서 서로 다르다
+    return tuple(canonical_json(v) for v in vals)
+
+
+async def _target_rows(
+    conn: AsyncConnection, table: Table, cols: Sequence[str], ws: UUID
+) -> list[dict]:
+    pairs = ", ".join(f"'{c}', t.\"{c}\"" for c in cols)
+    result = await conn.stream(
+        text(
+            f"SELECT jsonb_build_object({pairs})::text AS j FROM {table.sql} AS t "
+            f"WHERE {scope_sql(table)}"
+        ),
+        {"ws": str(ws)},
+    )
+    return [json.loads(r.j) async for r in result]
+
+
+async def _match_all(
+    conn: AsyncConnection,
+    plan: ExportPlan,
+    arc: _Archive,
+    ws: UUID,
+    me: UUID,
+    tick: Progress,
+) -> _MergeState:
+    """표마다 (FK 순서로) 묶음의 행이 대상 공간에 이미 있는지 정하고, 모든 ID의 새 값을 정한다.
+
+    찾는 순서: 같은 ID(그리고 이미 정한 FK 칸이 같음) → DB UNIQUE 제약(내용 주소·주소·멱등 키 먼저) →
+    내용 키(``EXTRA_MERGE_KEYS``·``CHILD_MERGE_KEYS``) → 같은 내용(기본 키 밖 모든 칸, ``content``).
+    찾으면 그 기존 행의 ID로, 못 찾으면 새 UUID로.
+    키 칸은 부모 표의 결정이 끝난 뒤 바꾼 값으로 비교한다. 아직 정하지 않은 표(뒤 표·같은 표)를 가리키는
+    FK 칸이 든 키는 쓰지 않는다. 이번에 넣기로 한 행의 키도 색인에 넣어 묶음 안의 겹침도 잡는다.
+    """
+    ids = IdMap()
+    m = arc.manifest
+    source_ws = m["workspace"]["id"]
+    ids.set(source_ws, str(ws))
+    members = set(
+        await conn.scalars(
+            text(
+                'SELECT actor_id::text FROM "core"."memberships" '
+                "WHERE workspace_id = CAST(:ws AS uuid)"
+            ),
+            {"ws": str(ws)},
+        )
+    )
+    mapped = 0
+    for line in arc.iter_lines("core.actors"):
+        old = json.loads(line)["id"]
+        if old in members:
+            ids.set(old, old)
+        else:
+            ids.set(old, str(me))
+            mapped += 1
+
+    state = _MergeState(ids, {}, {}, {}, {}, mapped)
+    decided = {"core.workspaces", "core.actors"}
+    for n, t in enumerate(plan.tables):
+        tick("match", n, len(plan.tables))
+        rows = next(e["rows"] for e in m["tables"] if e["name"] == t.name)
+        state.keep[t.name] = bytearray(rows)  # 모두 0 = 넣지 않음
+        state.skipped_by[t.name] = {}
+        if t.name in MERGE_SKIPPED_TABLES or t.scope != _WORKSPACE:
+            decided.add(t.name)
+            continue
+        await _match_table(conn, plan, arc, t, ws, state, decided)
+        decided.add(t.name)
+    tick("match", len(plan.tables), len(plan.tables))
+    return state
+
+
+async def _match_table(
+    conn: AsyncConnection,
+    plan: ExportPlan,
+    arc: _Archive,
+    t: Table,
+    ws: UUID,
+    state: _MergeState,
+    decided: set[str],
+) -> None:
+    ids = state.ids
+    pk_cols = t.primary_key
+    pk = pk_cols[0] if len(pk_cols) == 1 and _col_type(t, pk_cols[0]) == "uuid" else None
+    unsettled: set[str] = set()
+    settled_fk: set[str] = set()
+    for fk in t.foreign_keys:
+        target = fk.ref_table
+        for c in fk.columns:
+            if c == "workspace_id":
+                continue
+            if target in decided and target != t.name:
+                settled_fk.add(c)
+            else:
+                unsettled.add(c)
+    settled_fk -= unsettled
+    keys: list[tuple[str, tuple[str, ...]]] = []
+    if pk is None:
+        keys.append(("primary_key", pk_cols))
+    candidates = sorted(t.unique_keys, key=_key_order) + [
+        ("+".join(cols), cols) for cols in EXTRA_MERGE_KEYS.get(t.name, ())
+    ]
+    for name, cols in candidates:
+        if (pk is not None and pk in cols) or unsettled & set(cols):
+            continue
+        keys.append((name, cols))
+    needed = set(pk_cols) | settled_fk
+    # 마지막 키: 기본 키·아직 정하지 않은 FK 칸을 뺀 모든 칸이 같은 행 (UNIQUE가 없는 표에서도,
+    # 앞서 합쳐 새 ID로 들어간 행을 같은 묶음으로 다시 합칠 때 또 넣지 않게)
+    content_skip = set(pk_cols) | unsettled
+    by_id: dict[str, dict] = {}
+    index: dict[str, dict[tuple[str, ...], str]] = {name: {} for name, _ in keys}
+    content: dict[str, str] = {}
+    result = await conn.stream(text(_rows_sql(t)), {"ws": str(ws)})
+    async for r in result:
+        row = json.loads(r.j, parse_float=Decimal)
+        ref = row[pk] if pk else ""
+        if pk:
+            by_id[ref] = {c: row.get(c) for c in needed}
+        for name, cols in keys:
+            k = _key(row, cols)
+            if k is not None:
+                index[name].setdefault(k, ref)
+        content.setdefault(_content_key(row, content_skip), ref)
+    child = CHILD_MERGE_KEYS.get(t.name)
+    child_hits: dict[str, str] = {}
+    if child is not None and pk is not None:
+        child_table, fk_col, key_col = child
+        target_child = {
+            r[key_col]: r[fk_col]
+            for r in await _target_rows(conn, plan.table(child_table), [fk_col, key_col], ws)
+        }
+        for line in arc.iter_lines(child_table):
+            r = json.loads(line)
+            hit = target_child.get(r.get(key_col))
+            if hit is not None:
+                child_hits.setdefault(r[fk_col], hit)
+
+    keep = state.keep[t.name]
+    skipped_by = state.skipped_by[t.name]
+    inserted = state.inserted.setdefault(t.name, set())
+    matched = state.matched.setdefault(t.name, set())
+    for i, line in enumerate(arc.iter_lines(t.name)):
+        row = json.loads(ids.apply(line), parse_float=Decimal)
+        hit: str | None = None
+        by = ""
+        old = json.loads(line)[pk] if pk else None
+        if pk is not None and old in by_id:
+            ex = by_id[old]
+            if all(ex.get(c) == row.get(c) for c in settled_fk):
+                hit, by = old, "id"
+        if hit is None:
+            for name, cols in keys:
+                k = _key(row, cols)
+                if k is not None and k in index[name]:
+                    hit, by = index[name][k], name
+                    break
+        if hit is None and old is not None and old in child_hits:
+            hit, by = child_hits[old], f"{child[0]}.{child[2]}"
+        digest = _content_key(row, content_skip)
+        if hit is None and digest in content:
+            hit, by = content[digest], "content"
+        if hit is not None:
+            skipped_by[by] = skipped_by.get(by, 0) + 1
+            if pk is not None:
+                ids.set(old, hit)
+                matched.add(hit)
+            continue
+        keep[i] = 1
+        new = str(uuid4()) if pk is not None else ""
+        if pk is not None:
+            ids.set(old, new)
+            inserted.add(new)
+        for name, cols in keys:
+            k = _key(row, cols)
+            if k is not None:
+                index[name].setdefault(k, new)
+        content.setdefault(digest, new)
+
+
+def _content_key(row: dict, skip: set[str]) -> str:
+    body = {k: v for k, v in row.items() if k not in skip}
+    return hashlib.sha256(canonical_json(body).encode()).hexdigest()
+
+
+def _col_type(t: Table, name: str) -> str:
+    return next(c.type for c in t.columns if c.name == name)
+
+
+async def _scope_digest(conn: AsyncConnection, t: Table, ws: UUID) -> tuple[int, int]:
+    """공간 안 그 표의 (행 수, 순서 무관 논리 해시)."""
+    total = n = 0
+    result = await conn.stream(text(_rows_sql(t)), {"ws": str(ws)})
+    async for row in result:
+        total = (total + _row_digest(row.j)) % _MOD
+        n += 1
+    return n, total
+
+
+async def merge_workspace(
+    db: Database,
+    blobs: BlobStore,
+    actor: ActorContext,
+    archive: str | os.PathLike[str],
+    *,
+    on_duplicate: str = "skip",
+    dry_run: bool = False,
+    via: str = "cli",
+    expected_heads: Sequence[str] | None = None,
+    identities: Sequence[str | os.PathLike[str]] | None = None,
+    deletion_logs: Sequence[str | os.PathLike[str]] = (),
+    permissions: PermissionPolicy | None = None,
+    progress: Progress | None = None,
+) -> MergeReport:
+    """묶음을 actor의 (자료가 있는) 공간에 합친다. 소유자(workspace-admin)만.
+
+    - 모든 ID를 새로 만든다. 겹치는 행(``_match_all``)은 ``on_duplicate``대로: ``skip``이면 넣지 않고 그
+      행을 가리키던 자식은 기존 행을 가리키게 한다, ``fail``이면 아무것도 쓰지 않고 ``duplicates_found``.
+    - 공간·구성원·백업 기록·삭제 기록은 넣지 않는다 (``MERGE_SKIPPED_TABLES``). 묶음의 actor는 대상 공간의
+      구성원(같은 ID)이면 그대로, 아니면 합치는 사람으로 바꾼다.
+    - 기존 행은 고치거나 지우지 않는다: INSERT만 하고, 표마다 넣기 전후 공간 전체의 논리 해시 차이가
+      넣은 행의 해시 합과 같은지 본다 (추가만 되는 표도 그대로). 다르면 rollback.
+    - 한 트랜잭션(REPEATABLE READ)이다. 확인이 끝난 뒤에만 원본을 저장하고 commit. 하나라도 틀리면 아무것도 남지 않는다.
+    - ``deletion_logs``(묶음 공간의 나중 삭제 기록)는 이번에 넣은 행에만 적용한다 (기존 행은 ``kept_existing``).
+    """
+    if on_duplicate not in DUPLICATE_POLICIES:
+        raise ExportError("invalid_policy", on_duplicate[:20])
+    if not (permissions or ScopePermissionPolicy()).allows(actor, "workspace.restore"):
+        raise ExportError("forbidden")
+    tick = progress or _no_progress
+    ws = actor.workspace_id
+    with tempfile.TemporaryDirectory(prefix="career-merge-") as tmp:
+        staging = Path(tmp)
+        arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
+        m = arc.manifest
+        _check_heads(m, expected_heads)
+        source_ws = UUID(m["workspace"]["id"])
+        tombstones = await _read_tombstones(deletion_logs, source_ws)
+        async with db.engine.connect() as conn:
+            # 다른 요청이 같은 공간에 쓰더라도 전후 해시는 이 트랜잭션의 스냅샷 기준이다
+            conn = await conn.execution_options(isolation_level="REPEATABLE READ")
+            trans = await conn.begin()
+            try:
+                await _enter_workspace(conn, ws)
+                plan = build_plan(await read_catalog(conn))
+                _check_schema(plan, m)
+                name = await conn.scalar(
+                    text('SELECT name FROM "core"."workspaces" WHERE id = CAST(:ws AS uuid)'),
+                    {"ws": str(ws)},
+                )
+                if name is None:
+                    raise ExportError("workspace_not_found")
+                state = await _match_all(conn, plan, arc, ws, actor.subject_id, tick)
+                counted = [
+                    t.name
+                    for t in plan.tables
+                    if t.name not in MERGE_SKIPPED_TABLES and t.scope == _WORKSPACE
+                ]
+                dupes = {n: sum(state.skipped_by[n].values()) for n in counted}
+                if on_duplicate == "fail" and any(dupes.values()):
+                    summary = ", ".join(f"{n} {c}" for n, c in dupes.items() if c)
+                    raise ArchiveError("duplicates_found", summary[:500])
+
+                tick("verify", 0, len(plan.tables))
+                before = {t.name: await _scope_digest(conn, t, ws) for t in plan.tables}
+                added: dict[str, list[int]] = {t.name: [0, 0] for t in plan.tables}
+                blob_refs: set[str] = set()
+                blob_cols = {t.name: t.blob_columns for t in plan.tables}
+
+                def lines_of(table: str) -> Iterator[str]:
+                    keep = state.keep[table]
+                    acc = added[table]
+                    for i, line in enumerate(arc.iter_lines(table)):
+                        if not keep[i]:
+                            continue
+                        out = state.ids.apply(line)
+                        acc[0] += 1
+                        acc[1] = (acc[1] + _row_digest(out)) % _MOD
+                        if blob_cols[table]:
+                            row = json.loads(out)
+                            blob_refs.update(row[c] for c in blob_cols[table] if row.get(c))
+                        yield out
+
+                total = sum(sum(k) for k in state.keep.values())
+                await conn.execute(text("SET CONSTRAINTS ALL DEFERRED"))
+                await conn.execute(text("SELECT set_config('career.restoring', 'on', true)"))
+                try:
+                    await _insert_all(conn, plan, lines_of, lambda n: tick("insert", n, total))
+                    await conn.execute(text("SELECT set_config('career.restoring', 'off', true)"))
+                    await conn.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+                except IntegrityError as exc:
+                    reason, detail = _skip_reason(exc)
+                    raise ArchiveError("merge_conflict", detail or reason) from exc
+
+                reports = []
+                for n, t in enumerate(plan.tables):
+                    tick("verify", n, len(plan.tables))
+                    rows_after, digest_after = await _scope_digest(conn, t, ws)
+                    rows_before, digest_before = before[t.name]
+                    got = (rows_after - rows_before, (digest_after - digest_before) % _MOD)
+                    if got != tuple(added[t.name]):
+                        raise ArchiveError(
+                            "verify_failed",
+                            f"{t.name}: {got[0]} new rows, expected {added[t.name][0]}",
+                        )
+                    archive_rows = len(state.keep[t.name])
+                    reports.append(
+                        MergeTableReport(
+                            t.name,
+                            archive_rows,
+                            added[t.name][0],
+                            dict(state.skipped_by[t.name]),
+                            f"{added[t.name][1]:064x}",
+                        )
+                    )
+                tick("verify", len(plan.tables), len(plan.tables))
+
+                def decide(table: str, target: str) -> tuple[str, str]:
+                    new = state.ids.get(target)
+                    if new in state.inserted.get(table, ()):
+                        return "apply", new
+                    if new in state.matched.get(table, ()):
+                        return "skip", "kept_existing"
+                    return "ignore", ""
+
+                tick("deletions", 0, len(tombstones))
+                applied, skipped = await _apply_deletions(conn, tombstones, decide)
+                requeued = await _requeue(
+                    conn,
+                    m.get("pending_work", []),
+                    state.ids,
+                    ws,
+                    allowed=lambda table, target: target in state.inserted.get(table, ()),
+                )
+                still = await _referenced_blobs(conn, plan, ws)
+                in_archive = set(arc.blob_keys)
+                to_store = sorted(k for k in blob_refs if k in still and k in in_archive)
+                missing = sorted(k for k in blob_refs if k in still and k not in in_archive)
+                if not dry_run:
+                    await conn.execute(
+                        insert(ExportRun).values(
+                            id=uuid4(),
+                            workspace_id=ws,
+                            kind="merge",
+                            via=via,
+                            created_by=actor.subject_id,
+                            format_version=FORMAT_VERSION,
+                            archive_sha256=arc.sha256,
+                            archive_bytes=arc.bytes,
+                            rows_total=sum(r.added for r in reports),
+                            blobs_total=len(to_store),
+                            created_at=datetime.now(UTC),
+                        )
+                    )
+                    await _store_blobs(blobs, ws, arc, to_store, tick)
+                    tick("commit", 0, 1)
+                    await trans.commit()
+                else:
+                    await trans.rollback()
+            except BaseException:
+                if trans.is_active:
+                    await trans.rollback()
+                raise
+    notes = _archive_notes(arc)
+    if missing:
+        notes.append(f"{len(missing)} referenced blob(s) are not in the archive")
+    if skipped:
+        notes.append(f"{len(skipped)} deletion(s) were not re-applied (see skipped_deletions)")
+    not_merged = {
+        t: reason
+        for t, reason in MERGE_SKIPPED_TABLES.items()
+        if any(r.name == t and r.archive_rows for r in reports)
+    }
+    return MergeReport(
+        workspace_id=ws,
+        workspace_name=name,
+        source_workspace_id=source_ws,
+        source_workspace_name=m["workspace"]["name"],
+        on_duplicate=on_duplicate,
+        dry_run=dry_run,
+        archive_sha256=arc.sha256,
+        tables=reports,
+        blobs=len(to_store),
+        actors_mapped=state.actors_mapped,
+        not_merged=not_merged,
+        requeued=requeued,
+        deletions_applied=applied,
+        skipped_deletions=skipped,
+        notes=notes,
+        encrypted=encrypted,
+        format_upgraded_from=arc.upgraded_from,
+    )
+
+
 __all__ = [
     "BLOB_COLUMNS",
     "DELETIONS_FORMAT",
+    "DUPLICATE_POLICIES",
     "EXCLUDED_TABLES",
     "FORMAT",
     "FORMAT_VERSION",
+    "MERGE_SKIPPED_TABLES",
     "REQUEUE_KINDS",
+    "TOMBSTONE_TABLES",
+    "UPGRADES",
     "ArchiveError",
     "ExportError",
     "ExportPlan",
     "ExportReport",
+    "FormatUpgrade",
     "IdMap",
+    "MergeReport",
+    "MergeTableReport",
     "PlanError",
+    "Progress",
     "RestoreReport",
+    "SkippedDeletion",
     "TableReport",
     "Tombstone",
     "build_plan",
     "core_migration_heads",
     "export_deletions",
     "export_workspace",
+    "format_upgrade",
+    "merge_workspace",
     "read_archive",
     "read_catalog",
     "read_deletions",
+    "readable_versions",
     "restore_workspace",
+    "upgrade_archive",
 ]

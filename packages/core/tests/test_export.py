@@ -7,6 +7,7 @@
 import hashlib
 import io
 import json
+import re
 import tarfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -32,6 +33,8 @@ from career_core.usecases import postings as postings_uc
 from career_core.usecases import study as study_uc
 from career_core.usecases.export import (
     EXCLUDED_TABLES,
+    FORMAT_VERSION,
+    TOMBSTONE_TABLES,
     ArchiveError,
     Column,
     ExportError,
@@ -387,7 +390,8 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
     files = members(out)
     manifest = json.loads(files["manifest.json"])
     assert manifest["workspace"]["id"] == str(owner.workspace_id)
-    assert manifest["migration_heads"] and manifest["format_version"] == 1
+    assert manifest["migration_heads"] and manifest["format_version"] == FORMAT_VERSION == 2
+    assert set(manifest["tombstone_tables"]) == TOMBSTONE_TABLES
     assert "core.embeddings" in manifest["excluded"] and "personal.*" in manifest["excluded"]
     rows = {t["name"]: t["rows"] for t in manifest["tables"]}
     for name in (
@@ -830,3 +834,648 @@ async def test_pending_work_is_requeued_and_later_deletions_are_replayed(db, tmp
     await export_deletions(db, owner_of(other_ws, other), wrong)
     with pytest.raises(ArchiveError, match="deletions_workspace_mismatch"):
         await restore_workspace(db, blobs, out, new_ids=True, deletion_logs=[wrong])
+
+
+# ---------------------------------------------------------------- 기존 공간에 합치기 (c0018)
+
+
+async def table_counts(db, ws):
+    async with db.workspace_session(ws) as s:
+        tables = await read_catalog(await s.connection())
+        plan = build_plan(tables)
+        out = {}
+        for t in plan.tables:
+            if t.scope == "workspace":
+                out[t.name] = await s.scalar(
+                    text(f"SELECT count(*) FROM {t.sql} WHERE workspace_id = :ws"), {"ws": ws}
+                )
+    return out
+
+
+def added(report):
+    return {t.name: t.added for t in report.tables if t.added}
+
+
+async def _scalar(db, ws, sql, **params):
+    async with db.workspace_session(ws) as s:
+        return await s.scalar(text(sql), params)
+
+
+async def test_merge_old_backup_into_the_same_workspace(db, env, tmp_path):
+    """지난 묶음을 같은 공간에 합치면 그 뒤 지운 행만 돌아온다 (나머지는 같은 ID로 겹친다)."""
+    from career_core.usecases.export import export_deletions, merge_workspace
+
+    owner, a, blobs = env["owner"], env["a"], env["blobs"]
+    ws = owner.workspace_id
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    # 내보낸 뒤: 전형 단계를 지우고, 요건↔주장 연결을 끊고, 새 경험을 더한다
+    [stage] = await stages_uc.list_stages(db, owner, a["application"])
+    await stages_uc.delete_stage(db, owner, a["application"], stage.id)
+    req = await _scalar(db, ws, "SELECT requirement_id FROM core.study_requirement_claims")
+    await study_uc.unlink_claim(db, owner, req, a["claim"])
+    later = await brain.create_experience(db, owner, title="내보낸 뒤 경험 (합성)")
+    before = await table_counts(db, ws)
+
+    dry = await merge_workspace(db, blobs, owner, out, dry_run=True)
+    assert dry.dry_run and dry.workspace_id == dry.source_workspace_id == ws
+    assert added(dry) == {"core.application_stages": 1, "core.study_requirement_claims": 1}
+    claims = next(t for t in dry.tables if t.name == "core.claims")
+    assert claims.added == 0 and claims.skipped_by == {"id": claims.archive_rows}
+    assert dry.actors_mapped == 0  # 같은 사람(같은 ID, 이 공간 구성원)
+    assert {"core.workspaces", "core.actors", "core.memberships"} <= set(dry.not_merged)
+    assert await table_counts(db, ws) == before  # dry-run은 아무것도 쓰지 않는다
+
+    merged = await merge_workspace(db, blobs, owner, out)
+    assert added(merged) == added(dry) and merged.rows_added == 2
+    [back] = await stages_uc.list_stages(db, owner, a["application"])
+    assert back.id != stage.id and (back.kind, back.outcome) == (stage.kind, stage.outcome)
+    assert back.submission_id == stage.submission_id  # 기존 제출본을 가리킨다
+    item = await study_uc.get_item(db, owner, a["item"])
+    assert item.requirement is not None
+    assert later in {e.id for e in await brain.list_experiences(db, owner)}
+    info = await maintenance_info(db, ws, blobs)
+    assert info.last_restore.kind == "merge" and info.last_restore.rows_total == 2
+
+    # 다시 합쳐도 늘지 않는다: 연결은 UNIQUE(요건, 주장)로, UNIQUE가 없는 단계는 같은 내용으로 겹친다
+    again = await merge_workspace(db, blobs, owner, out, dry_run=True)
+    assert again.rows_added == 0
+    stages = next(t for t in again.tables if t.name == "core.application_stages")
+    assert stages.skipped_by == {"content": 1}
+
+    # 삭제 기록을 같이 주면 합친 행에만 다시 적용된다 (그 사이 지운 단계·연결은 다시 지워진다)
+    await stages_uc.delete_stage(db, owner, a["application"], back.id)
+    await study_uc.unlink_claim(db, owner, req, a["claim"])
+    log = tmp_path / "deletions.jsonl"
+    await export_deletions(db, owner, log)
+    replay = await merge_workspace(db, blobs, owner, out, deletion_logs=[log])
+    assert replay.rows_added == 2 and replay.deletions_applied == 2
+    assert await stages_uc.list_stages(db, owner, a["application"]) == []
+    assert replay.skipped_deletions == []
+
+
+async def test_merge_into_another_workspace_with_duplicates(db, env, tmp_path):
+    """다른 공간에 합친다: 같은 파일(sha256)·같은 공고 주소는 기존 행으로, 나머지는 새 ID로. FK가 이어진다."""
+    from career_core.usecases.export import merge_workspace
+
+    owner, other, a, blobs = env["owner"], env["other"], env["a"], env["blobs"]
+    ws_b = other.workspace_id
+    # B에도 A와 같은 원본 파일과 같은 공고 주소가 있다
+    dup = await upload_source(
+        db,
+        blobs,
+        other,
+        filename="same-file.txt",
+        data=f"{RESUME}\n\ntag-alpha".encode(),
+        declared_mime="text/plain",
+        max_bytes=1 << 20,
+    )
+    deps = ParsingDeps(
+        db=db, blobs=blobs, egress=ProviderEgressPolicy(), local_parsers=default_local_parsers()
+    )
+    await run_until_idle(db, parsing_handlers(deps))
+    url = "https://jobs.example.test/tag-alpha/1"
+    async with db.workspace_session(ws_b) as s:
+        s.add(
+            JobPosting(
+                workspace_id=ws_b,
+                canonical_url=url,
+                source_url=url,
+                status="draft",
+                created_by=other.subject_id,
+            )
+        )
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    a_claims = await _rows(db, owner.workspace_id, "core.claims")
+    b_before = await table_counts(db, ws_b)
+    b_exps = {e.id: e.title for e in await brain.list_experiences(db, other)}
+
+    report = await merge_workspace(db, blobs, other, out)
+    t = {x.name: x for x in report.tables}
+    assert report.workspace_id == ws_b and report.source_workspace_id == owner.workspace_id
+    assert t["core.sources"].skipped_by == {"core.source_versions.sha256": 1}
+    assert t["core.source_versions"].added == 0 and t["core.parse_runs"].added == 0
+    assert t["core.document_blocks"].skipped_by == {
+        "parse_run_id+ordinal": t["core.document_blocks"].archive_rows
+    }
+    assert t["core.source_spans"].added == 1  # B의 같은 블록 위에 새 범위
+    [(key, n)] = t["core.job_postings"].skipped_by.items()
+    assert "canonical_url" in key and n == 1 and t["core.job_postings"].added == 0
+    assert t["core.job_posting_versions"].added == 1
+    assert t["core.document_settings"].added == 0  # 공간당 1행: B의 설정 그대로
+    for name in ("core.experiences", "core.applications", "core.application_submissions"):
+        assert t[name].added == t[name].archive_rows > 0, name
+    assert report.actors_mapped == 1 and report.blobs == 1  # 스크린샷만 (원본 파일은 B에 있다)
+    after = await table_counts(db, ws_b)
+    for name, n in after.items():
+        # export_runs: 합치기 기록 1행 (묶음의 백업 기록은 넣지 않는다)
+        assert n == b_before[name] + t[name].added + (name == "core.export_runs"), name
+
+    # 기존 행은 그대로, 합친 행은 B의 기존 원본·공고를 가리킨다
+    exps = {e.id: e.title for e in await brain.list_experiences(db, other)}
+    assert b_exps.items() <= exps.items() and len(exps) == len(b_exps) + 1
+    [merged_exp] = [i for i in exps if i not in b_exps]
+    assert exps[merged_exp] == "주문 서비스 개선 tag-alpha"
+    view = await brain.get_experience(db, other, merged_exp)
+    claim = next(c for c in view.claims if c.statement.startswith("주문 API p95"))
+    span_id = await _scalar(
+        db, ws_b, "SELECT source_span_id FROM core.claim_evidence WHERE claim_id = :c", c=claim.id
+    )
+    span = await brain.get_span(db, other, span_id)
+    assert span.source_id == dup.source_id
+    async with db.workspace_session(ws_b) as s:
+        posting = await s.scalar(select(JobPosting).where(JobPosting.canonical_url == url))
+        assert posting.status == "draft" and posting.confirmed_version_id is None  # 고치지 않았다
+        app_posting = await s.scalar(
+            text(
+                "SELECT a.posting_id FROM core.applications a JOIN core.job_posting_versions v "
+                "ON v.id = a.posting_version_id AND v.posting_id = a.posting_id "
+                "WHERE a.posting_id = :p"
+            ),
+            {"p": posting.id},
+        )
+        assert app_posting == posting.id
+        shot = await s.scalar(
+            select(JobPostingVersion.screenshot_key).where(
+                JobPostingVersion.posting_id == posting.id
+            )
+        )
+    assert await blobs.get(ws_b, shot) == SCREENSHOT
+    assert await _rows(db, owner.workspace_id, "core.claims") == a_claims  # A는 그대로
+
+    # 합친 B를 내보내면 A의 ID·사람이 하나도 없고, 빈 DB에 그대로 복원된다 (FK·해시가 맞다)
+    out_b = tmp_path / "b.tar.gz"
+    exported = await export_workspace(db, blobs, other, out_b)
+    data = b"".join(v for k, v in members(out_b).items() if k.startswith("tables/"))
+    for old in (owner.workspace_id, owner.subject_id, a["experience"], a["claim"], a["posting"]):
+        assert str(old).encode() not in data
+    with migrated_database() as target_urls:
+        target = Database(target_urls.app, poolclass=NullPool)
+        try:
+            checked = await restore_workspace(
+                target, LocalBlobStore(tmp_path / "t"), out_b, dry_run=True
+            )
+            assert checked.rows_total == exported.rows_total
+        finally:
+            await target.dispose()
+
+
+async def _rows(db, ws, table):
+    async with db.workspace_session(ws) as s:
+        return sorted((await s.execute(text(f"SELECT to_jsonb(t)::text FROM {table} t"))).scalars())
+
+
+async def test_merge_policies_permissions_and_rollback(db, env, tmp_path, monkeypatch):
+    from career_core.usecases import export as export_mod
+    from career_core.usecases.export import merge_workspace
+
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    ws_b = other.workspace_id
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    before = await table_counts(db, ws_b)
+    editor = ActorContext(other.subject_id, ws_b, scopes_for_role(Role.EDITOR))
+    with pytest.raises(ExportError, match="forbidden"):
+        await merge_workspace(db, blobs, editor, out)
+    with pytest.raises(ExportError, match="invalid_policy"):
+        await merge_workspace(db, blobs, other, out, on_duplicate="overwrite")
+    # fail: 겹치는 행이 있으면 아무것도 쓰지 않는다 (같은 공간에 합치면 모두 겹친다)
+    with pytest.raises(ArchiveError, match="duplicates_found"):
+        await merge_workspace(db, blobs, owner, out, on_duplicate="fail")
+    # B와 A가 겹치는 행은 document_settings(공간당 1행)뿐이다
+    with pytest.raises(ArchiveError, match="duplicates_found: core.document_settings 1$"):
+        await merge_workspace(db, blobs, other, out, on_duplicate="fail")
+
+    # 한 행이 CHECK를 어기면 (해시까지 맞춘 묶음) 전체가 되돌려진다
+    def bad_claim(files):
+        m = json.loads(files["manifest.json"])
+        name = "tables/core.claims.jsonl"
+        lines = files[name].decode().splitlines()
+        row = json.loads(lines[-1])
+        row["kind"] = "bogus"
+        lines[-1] = json.dumps(row, ensure_ascii=False)
+        files[name] = ("\n".join(lines) + "\n").encode()
+        for e in m["tables"]:
+            if e["name"] == "core.claims":
+                e["sha256"] = hashlib.sha256(files[name]).hexdigest()
+        files["manifest.json"] = json.dumps(m).encode()
+
+    bad = rewrite(out, tmp_path / "bad.tar.gz", bad_claim)
+    with pytest.raises(ArchiveError, match="merge_conflict.*ck_claims_kind"):
+        await merge_workspace(db, blobs, other, bad)
+    assert await table_counts(db, ws_b) == before
+
+    # 넣는 동안 기존 행이 바뀌면(추가만 해야 하는데) 전후 해시가 맞지 않아 되돌린다
+    real = export_mod._insert_all
+
+    async def sneaky(conn, plan, lines_of, inserted=None):
+        await real(conn, plan, lines_of, inserted)
+        await conn.execute(text("UPDATE core.experiences SET title = title || ' (고침)'"))
+
+    monkeypatch.setattr(export_mod, "_insert_all", sneaky)
+    with pytest.raises(ArchiveError, match="verify_failed: core.experiences"):
+        await merge_workspace(db, blobs, other, out)
+    monkeypatch.undo()
+    assert await table_counts(db, ws_b) == before
+    assert not any("(고침)" in e.title for e in await brain.list_experiences(db, other))
+    blob_dir = tmp_path / "blobs"
+    files_before = sorted(str(p) for p in blob_dir.rglob("*") if p.is_file())
+
+    # dry-run은 원본도 쓰지 않는다
+    dry = await merge_workspace(db, blobs, other, out, dry_run=True)
+    assert dry.rows_added > 0 and dry.blobs == 2  # 원본 파일 + 스크린샷
+    assert sorted(str(p) for p in blob_dir.rglob("*") if p.is_file()) == files_before
+    assert await table_counts(db, ws_b) == before
+
+
+# ---------------------------------------------------------------- 옛 형식 묶음
+
+
+async def test_older_format_archives_are_upgraded(db, env, tmp_path, monkeypatch):
+    from career_core.usecases.export import (
+        UPGRADES,
+        FormatUpgrade,
+        merge_workspace,
+        readable_versions,
+    )
+
+    owner, blobs = env["owner"], env["blobs"]
+    out = tmp_path / "a.tar.gz"
+    report = await export_workspace(db, blobs, owner, out)
+    assert readable_versions() == [1, 2] and set(UPGRADES) == {1}
+
+    # v1 (c0018 전 형식): tombstone_tables가 없다. 표 내용은 같다 → 1 → 2 단계는 표를 바꾸지 않는다
+    def as_v1(files):
+        m = json.loads(files["manifest.json"])
+        m["format_version"] = 1
+        del m["tombstone_tables"]
+        files["manifest.json"] = json.dumps(m).encode()
+
+    v1 = rewrite(out, tmp_path / "v1.tar.gz", as_v1)
+    restored = await restore_workspace(db, blobs, v1, new_ids=True, dry_run=True)
+    assert restored.format_upgraded_from == 1 and restored.rows_total == report.rows_total
+    assert "archive format 1 was upgraded to 2" in restored.notes
+
+    # 합성 v0: 공간 정보가 맨 위 칸이고 주장 칸 이름이 달랐다고 가정한 형식. 단계를 등록해야 읽는다.
+    def as_v0(files):
+        m = json.loads(files["manifest.json"])
+        ws = m.pop("workspace")
+        m.update(format_version=0, workspace_id=ws["id"], workspace_name=ws["name"])
+        del m["tombstone_tables"]
+        name = "tables/core.claims.jsonl"
+        lines = []
+        for line in files[name].decode().splitlines():
+            row = json.loads(line)
+            row["text"] = row.pop("statement")
+            lines.append(json.dumps(row, ensure_ascii=False))
+        files[name] = ("\n".join(lines) + "\n").encode()
+        for e in m["tables"]:
+            if e["name"] == "core.claims":
+                e["sha256"] = hashlib.sha256(files[name]).hexdigest()
+        files["manifest.json"] = json.dumps(m).encode()
+
+    v0 = rewrite(out, tmp_path / "v0.tar.gz", as_v0)
+    with pytest.raises(ArchiveError, match="version_mismatch: format 0, this install reads 1, 2"):
+        await restore_workspace(db, blobs, v0, new_ids=True, dry_run=True)
+
+    def upgrade_v0(manifest, arc):
+        manifest["workspace"] = {
+            "id": manifest.pop("workspace_id"),
+            "name": manifest.pop("workspace_name"),
+        }
+
+        def rename(row):
+            row["statement"] = row.pop("text")
+            return row
+
+        arc.rewrite("core.claims", rename)
+
+    monkeypatch.setitem(UPGRADES, 0, FormatUpgrade(0, "합성 v0 → v1", upgrade_v0))
+    assert readable_versions() == [0, 1, 2]
+    restored = await restore_workspace(db, blobs, v0, new_ids=True, dry_run=True)
+    assert restored.format_upgraded_from == 0 and restored.rows_total == report.rows_total
+    # 합치기도 같은 변환을 거친다 (같은 공간에 합치면 모두 겹친다 = 내용이 그대로 읽혔다)
+    merged = await merge_workspace(db, blobs, owner, v0, dry_run=True)
+    assert merged.format_upgraded_from == 0 and merged.rows_added == 0
+    # 단계가 표 파일을 잃으면 거부
+    monkeypatch.setitem(
+        UPGRADES, 0, FormatUpgrade(0, "깨진 단계", lambda m, arc: arc.path("core.claims").unlink())
+    )
+    with pytest.raises(ArchiveError, match="upgrade_failed"):
+        await restore_workspace(db, blobs, v0, new_ids=True, dry_run=True)
+
+
+# ---------------------------------------------------------------- 삭제 기록 (c0018)
+
+
+async def test_deletion_log_covers_user_deleted_tables(db, owner_engine):
+    """c0018: 사용자가 직접 지우는 표의 삭제를 남기고, FK CASCADE로 같이 지워진 행은 남기지 않는다."""
+    from career_core.db.models import Deletion
+
+    with owner_engine.connect() as conn:
+        triggered = set(
+            conn.execute(
+                text(
+                    "SELECT tgrelid::regclass::text FROM pg_trigger "
+                    "WHERE tgname = 'record_deletion' AND NOT tgisinternal"
+                )
+            ).scalars()
+        )
+        check = conn.scalar(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'ck_deletions_target_table'"
+            )
+        )
+        defs = dict(
+            conn.execute(
+                text(
+                    "SELECT tgrelid::regclass::text, pg_get_triggerdef(oid) FROM pg_trigger "
+                    "WHERE tgname = 'record_deletion' AND NOT tgisinternal"
+                )
+            ).all()
+        )
+        cascades = conn.execute(
+            text(
+                "SELECT conrelid::regclass::text, confrelid::regclass::text, "
+                "ARRAY(SELECT a.attname FROM unnest(conkey) k JOIN pg_attribute a "
+                "ON a.attrelid = conrelid AND a.attnum = k) FROM pg_constraint "
+                "WHERE contype = 'f' AND confdeltype = 'c' AND confrelid <> 'core.workspaces'::regclass"
+            )
+        ).all()
+    assert triggered == set(TOMBSTONE_TABLES)
+    assert all(f"'{t}'" in check for t in TOMBSTONE_TABLES)
+    # trigger 인자(칸, CASCADE 부모)가 DB의 ON DELETE CASCADE FK와 같다 (새 FK가 생기면 c0018 표도 고친다)
+    for table, definition in defs.items():
+        args = re.findall(r"'([^']*)'", definition.split("record_deletion(", 1)[1])
+        want = {
+            (next(c for c in cols if c != "workspace_id"), parent)
+            for child, parent, cols in cascades
+            if child == table
+        }
+        assert set(zip(args[::2], args[1::2], strict=True)) == want, table
+
+    ws, me = await create_workspace(db, name="삭제 기록 (합성)", owner_display_name="erin")
+    owner = owner_of(ws, me)
+    exp = await brain.create_experience(db, owner, title="지울 경험 (합성)")
+    kept = await brain.add_claim(
+        db, owner, exp, statement="같이 지워질 주장 (합성)", kind="action", contribution="personal"
+    )
+    first = await brain.add_claim(
+        db, owner, exp, statement="먼저 지울 주장 (합성)", kind="skill", contribution="personal"
+    )
+    async with db.workspace_session(ws) as s:
+        await s.execute(text("DELETE FROM core.claims WHERE id = :c"), {"c": first})
+    async with db.workspace_session(ws) as s:
+        await s.execute(text("DELETE FROM core.experiences WHERE id = :e"), {"e": exp})
+        assert await s.scalar(select(func.count()).select_from(text("core.claims"))) == 0
+    async with db.workspace_session(ws) as s:
+        rows = (await s.execute(select(Deletion.target_table, Deletion.target_id))).all()
+    # 직접 지운 주장·경험만. 경험과 같이(CASCADE) 지워진 주장은 남지 않는다.
+    assert sorted(rows) == sorted([("core.claims", first), ("core.experiences", exp)])
+    assert kept not in {r.target_id for r in rows}
+
+
+async def test_skipped_deletions_report_reasons(db, env, tmp_path):
+    """지울 수 없는 대상(RESTRICT FK가 가리킴)은 건너뛰고, 그 이유와 가리키는 표를 보고한다."""
+    from career_core.usecases.export import merge_workspace
+
+    owner, a, blobs = env["owner"], env["a"], env["blobs"]
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    log = tmp_path / "synthetic-deletions.jsonl"
+    at = datetime.now(UTC).isoformat()
+    lines = [
+        {
+            "format": "career-brain-deletions",
+            "format_version": 1,
+            "workspace_id": str(owner.workspace_id),
+            "created_at": at,
+        },
+        # 문서 revision이 주장을 가리킨다 (document_claims → claims, NO ACTION)
+        {"target_table": "core.claims", "target_id": str(a["claim"]), "deleted_at": at},
+        # 묶음에 없는 대상은 조용히 넘어간다
+        {"target_table": "core.experiences", "target_id": str(uuid4()), "deleted_at": at},
+    ]
+    log.write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    report = await restore_workspace(
+        db, blobs, out, new_ids=True, dry_run=True, deletion_logs=[log]
+    )
+    assert report.deletions_applied == 0 and report.deletions_skipped == 1
+    [skip] = report.skipped_deletions
+    assert (skip.target_table, skip.target_id, skip.reason) == (
+        "core.claims",
+        str(a["claim"]),
+        "still_referenced",
+    )
+    assert skip.detail.startswith("core.document_claims (")
+
+    # 합치기: 원래 있던 행에 대한 삭제 기록은 적용하지 않고 kept_existing으로 알린다
+    merged = await merge_workspace(db, blobs, owner, out, dry_run=True, deletion_logs=[log])
+    assert [(d.target_id, d.reason) for d in merged.skipped_deletions] == [
+        (str(a["claim"]), "kept_existing")
+    ]
+
+
+# ---------------------------------------------------------------- 웹 복원 (c0018)
+
+
+async def wait_job(client, job_id, headers):
+    import asyncio
+
+    for _ in range(400):
+        r = await client.get(f"/core/maintenance/restore/{job_id}", headers=headers)
+        assert r.status_code == 200, r.text
+        if r.json()["status"] not in ("verifying", "applying"):
+            return r.json()
+        await asyncio.sleep(0.02)
+    raise AssertionError("restore job did not finish")
+
+
+async def test_web_restore_upload_verify_apply(db, env, tmp_path, monkeypatch):
+    """올리기 → 확인(dry-run, 배경) → 합치기. 소유자만, 임시 폴더만 쓰고 지운다, 상한은 이 경로만."""
+    import tempfile
+
+    from career_core.interfaces.http import restore as restore_mod
+
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    uploads = tmp_path / "tmp"
+    uploads.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(uploads))
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    data = out.read_bytes()
+    editor = ActorContext(other.subject_id, other.workspace_id, scopes_for_role(Role.EDITOR))
+    app = FastAPI()
+    deps = CoreDeps(
+        identity=Tokens({"b": other, "editor": editor, "a": owner}),
+        db=db,
+        blobs=blobs,
+        max_restore_bytes=1 << 26,
+    )
+    app.include_router(build_router(deps))
+    raw = {"Authorization": "Bearer b", "Content-Type": "application/octet-stream"}
+    h = {"Authorization": "Bearer b"}
+    before = await table_counts(db, other.workspace_id)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as client:
+        path = "/core/maintenance/restore"
+        bad = {**raw, "Authorization": "Bearer editor"}
+        assert (await client.post(path, content=data, headers=bad)).status_code == 403
+        assert (await client.post(path, content=data)).status_code == 401
+        r = await client.post(path, content=data, headers={**h, "Content-Type": "text/plain"})
+        assert r.status_code == 415
+        info = (await client.get("/core/maintenance", headers=h)).json()
+        assert info["restore_available"] and info["max_restore_bytes"] == 1 << 26
+
+        r = await client.post(path, content=data, headers={**raw, "X-Filename": "a.tar.gz"})
+        assert r.status_code == 201, r.text
+        job = r.json()
+        assert job["status"] == "uploaded" and job["bytes"] == len(data) and not job["encrypted"]
+        assert job["sha256"] == hashlib.sha256(data).hexdigest() and job["filename"] == "a.tar.gz"
+        [job_dir] = list(uploads.iterdir())
+        assert job_dir.name.startswith("career-restore-upload-")
+        jid = job["id"]
+        apply_body = {"on_duplicate": "skip", "archive_sha256": job["sha256"]}
+        r = await client.post(f"{path}/{jid}/apply", json=apply_body, headers=h)
+        assert r.status_code == 409 and r.json()["detail"] == "not_verified"
+
+        r = await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
+        assert r.status_code == 202 and r.json()["status"] == "verifying"
+        job = await wait_job(client, jid, h)
+        assert job["status"] == "verified", job
+        rep = job["report"]
+        assert rep["dry_run"] and rep["rows_added"] > 0 and rep["actors_mapped"] == 1
+        assert rep["workspace_id"] == str(other.workspace_id)
+        assert rep["source_workspace_id"] == str(owner.workspace_id)
+        settings = next(t for t in rep["tables"] if t["name"] == "core.document_settings")
+        assert settings["skipped"] == 1 and settings["added"] == 0
+        assert await table_counts(db, other.workspace_id) == before  # 확인은 쓰지 않는다
+
+        wrong = {**apply_body, "archive_sha256": "0" * 64}
+        r = await client.post(f"{path}/{jid}/apply", json=wrong, headers=h)
+        assert r.json()["detail"] == "archive_changed"
+        r = await client.post(
+            f"{path}/{jid}/apply", json={**apply_body, "on_duplicate": "fail"}, headers=h
+        )
+        assert r.json()["detail"] == "policy_changed"
+        r = await client.post(f"{path}/{jid}/apply", json=apply_body, headers=h)
+        assert r.status_code == 202
+        job = await wait_job(client, jid, h)
+        assert job["status"] == "done" and not job["report"]["dry_run"]
+        assert job["report"]["rows_added"] == rep["rows_added"]
+        assert list(uploads.iterdir()) == []  # 합친 뒤 올린 파일은 지운다
+        titles = {e.title for e in await brain.list_experiences(db, other)}
+        assert "주문 서비스 개선 tag-alpha" in titles
+        info = (await client.get("/core/maintenance", headers=h)).json()
+        assert info["last_restore"]["kind"] == "merge" and info["last_restore"]["via"] == "http"
+
+        # 편집자는 볼 수 없고, 다른 공간의 소유자에게는 없는 작업이다
+        assert (
+            await client.get(f"{path}/{jid}", headers={"Authorization": "Bearer editor"})
+        ).status_code == 403
+        assert (
+            await client.get(f"{path}/{jid}", headers={"Authorization": "Bearer a"})
+        ).status_code == 404
+
+        # 삭제 기록 올리기: 형식이 틀리면 400, 맞으면 줄 수. 같은 공간의 새 업로드는 옛 작업을 바꾼다.
+        r = await client.post(path, content=data, headers=raw)
+        jid2 = r.json()["id"]
+        assert (await client.get(f"{path}/{jid}", headers=h)).status_code == 404
+        r = await client.post(f"{path}/{jid2}/deletions", content=b"junk\n", headers=raw)
+        assert r.status_code == 400 and r.json()["detail"] == "invalid_deletions"
+        from career_core.usecases.export import export_deletions
+
+        log = tmp_path / "deletions.jsonl"
+        await export_deletions(db, owner, log)
+        r = await client.post(f"{path}/{jid2}/deletions", content=log.read_bytes(), headers=raw)
+        assert r.status_code == 200 and r.json()["deletions"] == 0
+        # 잘못된 age 신원은 작업을 시작하기 전에 거부
+        r = await client.post(f"{path}/{jid2}/verify", json={"identity": "not a key"}, headers=h)
+        assert r.status_code == 400 and r.json()["detail"] == "invalid_identity"
+        assert (await client.get(f"{path}/{jid2}", headers=h)).json()["status"] == "uploaded"
+        r = await client.delete(f"{path}/{jid2}", headers=h)
+        assert r.status_code == 204 and list(uploads.iterdir()) == []
+
+        # 처리 함수도 상한을 센다 (미들웨어가 없을 때)
+        small = FastAPI()
+        small.include_router(
+            build_router(
+                CoreDeps(identity=Tokens({"b": other}), db=db, blobs=blobs, max_restore_bytes=1000)
+            )
+        )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(small), base_url="http://t"
+    ) as client:
+        r = await client.post("/core/maintenance/restore", content=data, headers=raw)
+        assert r.status_code == 413
+
+        async def chunks():
+            for i in range(0, len(data), 512):
+                yield data[i : i + 512]
+
+        r = await client.post("/core/maintenance/restore", content=chunks(), headers=raw)
+        assert r.status_code == 413
+    assert list(uploads.iterdir()) == []
+    assert restore_mod.RESTORE_UPLOAD_PATH == "/core/maintenance/restore"
+
+
+async def test_web_restore_encrypted_archive(db, env, tmp_path, monkeypatch):
+    pyrage = pytest.importorskip("pyrage")
+    monkeypatch.setenv("CAREER_AGE_BACKEND", "pyrage")
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    key = pyrage.x25519.Identity.generate()
+    out = tmp_path / "a.tar.gz.age"
+    await export_workspace(db, blobs, owner, out, recipients=[str(key.to_public())])
+    app = FastAPI()
+    app.include_router(build_router(CoreDeps(identity=Tokens({"b": other}), db=db, blobs=blobs)))
+    h = {"Authorization": "Bearer b"}
+    path = "/core/maintenance/restore"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as client:
+        r = await client.post(
+            path,
+            content=out.read_bytes(),
+            headers={**h, "Content-Type": "application/octet-stream"},
+        )
+        job = r.json()
+        assert job["encrypted"]
+        r = await client.post(f"{path}/{job['id']}/verify", json={}, headers=h)
+        assert r.status_code == 400 and r.json()["detail"] == "encrypted_archive"
+        identity = f"# synthetic test key\n{key}\n"
+        r = await client.post(f"{path}/{job['id']}/verify", json={"identity": identity}, headers=h)
+        assert r.status_code == 202
+        done = await wait_job(client, job["id"], h)
+        assert done["status"] == "verified" and done["report"]["encrypted"]
+        # 신원 파일은 남지 않는다
+        assert not [p for p in tmp_path.rglob("identity-*")]
+        body = {"archive_sha256": job["sha256"], "identity": identity}
+        r = await client.post(f"{path}/{job['id']}/apply", json=body, headers=h)
+        done = await wait_job(client, job["id"], h)
+        assert done["status"] == "done" and done["report"]["rows_added"] > 0
+
+
+async def test_body_size_limit_override_only_for_the_restore_path():
+    from career_core.interfaces.http.limits import BodySizeLimit
+    from fastapi import Request
+
+    app = FastAPI()
+
+    @app.post("/api/core/maintenance/restore")
+    @app.post("/api/core/sources")
+    async def up(request: Request):
+        return {"n": len(await request.body())}
+
+    limited = BodySizeLimit(
+        app, max_bytes=1000, overrides={("POST", "/api/core/maintenance/restore"): 5000}
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(limited), base_url="http://t") as c:
+        assert (
+            await c.post("/api/core/maintenance/restore", content=b"x" * 4000)
+        ).status_code == 200
+        assert (
+            await c.post("/api/core/maintenance/restore", content=b"x" * 6000)
+        ).status_code == 413
+        assert (await c.post("/api/core/sources", content=b"x" * 4000)).status_code == 413
+        # 다른 경로(접두어만 같은 경로 포함)는 넓히지 않는다
+        r = await c.post("/api/core/maintenance/restore/x/deletions", content=b"x" * 4000)
+        assert r.status_code == 413

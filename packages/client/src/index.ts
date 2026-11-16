@@ -40,7 +40,15 @@ export function createClient({
   async function request(
     method: string,
     path: string,
-    opts: { query?: Query; json?: unknown; form?: FormData; signal?: AbortSignal } = {},
+    opts: {
+      query?: Query;
+      json?: unknown;
+      form?: FormData;
+      /** 파일을 본문 그대로 (application/octet-stream). 예: 웹 복원 묶음 */
+      blob?: Blob;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<Response> {
     let url = `${baseUrl}${path}`;
     if (opts.query) {
@@ -54,8 +62,13 @@ export function createClient({
     const headers: Record<string, string> = { Accept: "application/json" };
     const token = getToken?.();
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (opts.headers) Object.assign(headers, opts.headers);
     let body: BodyInit | undefined;
     if (opts.form) body = opts.form;
+    else if (opts.blob) {
+      headers["Content-Type"] = "application/octet-stream";
+      body = opts.blob;
+    }
     else if (opts.json !== undefined) {
       headers["Content-Type"] = "application/json";
       body = JSON.stringify(opts.json);

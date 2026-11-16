@@ -189,7 +189,7 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 
 ## 내보내기·복원 (c0011)
 
-- `core.export_runs` — 내보내기·복원 1회 = 1행 (`kind` export/restore, `via` cli/http, 묶음 sha256·크기·행 수·원본 수). 마지막 백업 시각 표시용. RLS FORCE, 앱 role은 **SELECT, INSERT**.
+- `core.export_runs` — 내보내기·복원 1회 = 1행 (`kind` export/restore, c0018부터 merge, `via` cli/http, 묶음 sha256·크기·행 수·원본 수). 마지막 백업 시각 표시용. RLS FORCE, 앱 role은 **SELECT, INSERT**.
 - 순환 FK 2개를 `DEFERRABLE INITIALLY IMMEDIATE`로: `fk_job_postings_confirmed_version`(공고 → 확정 버전), `fk_document_revisions_suggestion`(revision → 수정안). 평소엔 지금처럼 즉시 검사하고, 복원만 `SET CONSTRAINTS ALL DEFERRED`로 ID 그대로 넣은 뒤 commit 전에 검사한다. 추가만 되는 표를 UPDATE하지 않아도 되고, `ck_document_suggestions_applied` 같은 CHECK도 그대로 지킨다.
 - 내보내기·복원은 앱 계정이 그 공간 문맥(`app.workspace_id`) 안에서만 한다. 소유자 계정·BYPASSRLS가 필요 없다. 표는 카탈로그에서 찾고(`workspace_id` 칸), 빼는 표는 `EXCLUDED_TABLES`(`jobs`, `embeddings`)에 이유와 함께 둔다. 새 표가 미룰 수 없는 순환 FK나 내보내지 않는 표로의 FK를 만들면 계획 단계에서 오류가 난다.
 - 상세·형식·운영 절차: `docs/operations/backup.md`.
@@ -226,3 +226,20 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - trigger `approvals_wake_run` (AFTER UPDATE OF status ON approvals): 열린 승인이 `invalidated`·`expired`로 바뀌고 그 승인을 기다리던 실행(`waiting_approval`, 같은 `approval_id`)이 있으면 `queued`로 바꾸고 사건(`approval_invalidated`/`approval_expired`)과 `run` job을 넣는다. 다음 단계가 실패 처리한다.
 - 내보내기: `audit_events`·`deletions`는 묶음에 들어가고, `oauth_identities`는 `EXCLUDED_TABLES`(설치마다 다시 연결).
 - 상세: `docs/architecture/runs.md`(무효화를 trigger로 둔 이유), `docs/architecture/mcp.md`(감사·OAuth), `docs/operations/backup.md`(삭제 기록 재적용).
+
+## 삭제 기록 넓히기·합치기 기록 (c0018)
+
+`down_revision = c0015`. 새 표는 없다.
+
+| 변경 | 내용 |
+|---|---|
+| `record_deletion()` | 인자 = (칸, CASCADE 부모 표) 쌍. 부모가 이미 없으면(같은 문장의 FK CASCADE로 지워진 행) 남기지 않는다. 인자가 없으면 c0014와 같다. 공간 문맥 규칙(`current_workspace_id() = OLD.workspace_id`, 공간이 있음)은 그대로 |
+| trigger `record_deletion` | 12개 표에 더함: `experiences`, `claims`(← experiences), `claim_evidence`(← claims), `interview_sessions`(← experiences), `interview_questions`(← interview_sessions), `application_documents`·`application_stages`(← applications), `study_requirements`(← job_postings), `study_requirement_claims`(← study_requirements, claims), `study_assessments`, `study_sessions`(← study_items), `study_mistakes`(← study_items, study_attempts) |
+| `ck_deletions_target_table` | c0014의 4개 + 위 12개 |
+| `ck_export_runs_kind` | `export`, `restore`, `merge`(기존 공간에 묶음 합치기) |
+
+- CASCADE를 `pg_trigger_depth()`로 가리지 않는 이유: RI CASCADE가 부른 자식 삭제의 AFTER trigger는 바깥 문장 끝에 깊이 1로 돌아, 직접 지운 행과 구별되지 않는다. 그래서 부모 행이 아직 있는지 본다 (부모 표는 `to_jsonb(OLD) ->> 칸`으로 읽은 ID로 찾는다).
+- 인터뷰 답(`interview_answers`)은 넣지 않았다: 앱 계정에 DELETE 권한이 없고 질문·세션의 CASCADE로만 지워진다.
+- 대상 표 목록은 migration의 `NEW_TABLES`와 `usecases/export.py`의 `TOMBSTONE_TABLES`(묶음 manifest `tombstone_tables`, 형식 2)가 같아야 한다. `test_deletion_log_covers_user_deleted_tables`가 trigger 인자를 DB의 CASCADE FK와 비교한다.
+- downgrade: `merge` 기록은 `restore`로, 새 표의 삭제 기록 행은 지우고, trigger·CHECK·함수를 c0014로 되돌린다.
+- 상세: `docs/operations/backup.md` (합치기·웹 복원·삭제 기록 재적용).

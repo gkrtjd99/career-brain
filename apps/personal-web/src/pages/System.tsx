@@ -2,22 +2,21 @@ import type { Approval, ApprovalChange, ApprovalStatus, RunStatus } from "@caree
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Download } from "lucide-react";
+import { AlertTriangle, ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ErrorText, errorText, List, Loaded, PageHeader, Tabs } from "../components/common";
+import { MaintenanceTab } from "../components/system/MaintenanceTab";
 import { api } from "../lib/api";
 import { formatDateTime, int, usd } from "../lib/format";
 import {
   ACTION_LABEL,
   APPROVAL_STATUS,
-  bytes,
   changeField,
   changeValue,
   INVALID_REASON,
   RUN_CODE,
   RUN_EVENT_KIND,
   RUN_STATUS,
-  saveBlob,
   systemErrorText,
   WORKFLOW_LABEL,
 } from "../lib/systemLabels";
@@ -474,132 +473,6 @@ function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | nu
         </div>
       ) : null}
     </Sheet>
-  );
-}
-
-// ---------------------------------------------------------------- 백업·유지보수
-
-function MaintenanceTab() {
-  const qc = useQueryClient();
-  const q = useQuery({ queryKey: ["maintenance"], queryFn: api.maintenance });
-  const [recipient, setRecipient] = useState("");
-  const [saved, setSaved] = useState<string | null>(null);
-  const [confirmPurge, setConfirmPurge] = useState(false);
-  const exportArchive = useMutation({
-    mutationFn: () => api.downloadExport(recipient.trim() || undefined),
-    onSuccess: (f) => {
-      saveBlob(f.blob, f.filename);
-      setSaved(`${f.filename} (${bytes(f.blob.size)})${f.sha256 ? ` · sha256 ${f.sha256.slice(0, 12)}…` : ""}`);
-      void qc.invalidateQueries({ queryKey: ["maintenance"] });
-    },
-  });
-  const deletions = useMutation({
-    mutationFn: api.downloadDeletions,
-    onSuccess: (f) => saveBlob(f.blob, f.filename),
-  });
-  const purge = useMutation({
-    mutationFn: api.purgeDrafts,
-    onSuccess: () => {
-      setConfirmPurge(false);
-      void qc.invalidateQueries({ queryKey: ["maintenance"] });
-      void qc.invalidateQueries({ queryKey: ["postings"] });
-    },
-  });
-  return (
-    <Loaded query={q}>
-      {(m) => (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Section title="저장된 자료">
-            <Card className="px-3 py-2">
-              <Field label="행">{int(m.rows_total)}개</Field>
-              <Field label="원본 파일">
-                {int(m.blobs.referenced)}개 참조 · 저장소 {m.blobs.files === null ? "—" : `${int(m.blobs.files)}개`} ·{" "}
-                {bytes(m.blobs.bytes)}
-              </Field>
-              <Field label="마지막 내보내기">
-                {m.last_export ? `${formatDateTime(m.last_export.created_at)} · ${bytes(m.last_export.archive_bytes)}` : "없음"}
-              </Field>
-              {m.last_restore ? <Field label="마지막 복원">{formatDateTime(m.last_restore.created_at)}</Field> : null}
-            </Card>
-            <details className="text-[13px]">
-              <summary className="cursor-pointer text-muted">표별 행 수</summary>
-              <ul className="mt-2 divide-y divide-line rounded-md border border-line">
-                {Object.entries(m.tables)
-                  .filter(([, n]) => n > 0)
-                  .sort((x, y) => y[1] - x[1])
-                  .map(([name, n]) => (
-                    <li key={name} className="flex justify-between gap-2 px-3 py-1 tabular-nums">
-                      <span className="min-w-0 truncate">{name.replace(/^core\./, "")}</span>
-                      <span>{int(n)}</span>
-                    </li>
-                  ))}
-              </ul>
-              <p className="mt-2 text-xs text-muted">
-                묶음에 넣지 않는 것: {Object.keys(m.excluded).map((n) => n.replace(/^core\./, "")).join(", ")} (복원 뒤 다시 만듦)
-              </p>
-            </details>
-          </Section>
-
-          <Section title="내보내기">
-            {m.export_available ? (
-              <div className="space-y-2">
-                <Label htmlFor="age-recipient">age 공개 키 (선택, 넣으면 암호화)</Label>
-                <Input
-                  id="age-recipient"
-                  value={recipient}
-                  onChange={(e) => setRecipient(e.target.value)}
-                  placeholder="age1…"
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="font-mono text-xs"
-                />
-                <div className="flex flex-wrap gap-2">
-                  <Button variant="primary" disabled={exportArchive.isPending} onClick={() => exportArchive.mutate()}>
-                    {exportArchive.isPending ? <Spinner /> : <Download size={15} />}
-                    {recipient.trim() ? "암호화해 내려받기" : "내려받기"}
-                  </Button>
-                  <Button disabled={deletions.isPending} onClick={() => deletions.mutate()}>
-                    삭제 기록 내려받기
-                  </Button>
-                </div>
-                {saved ? <p className="text-xs text-ok break-all">{saved}</p> : null}
-                <Problem error={exportArchive.error ?? deletions.error} />
-                <p className="text-xs text-muted">
-                  묶음에는 개인 자료가 들어 있습니다. 암호화하지 않았다면 안전한 곳에 보관하세요. 삭제 기록은 작으니 자주 받아 두면 오래된
-                  묶음을 복원한 뒤 그 사이 지운 자료를 다시 지웁니다 (personal-api restore --deletions).
-                </p>
-              </div>
-            ) : (
-              <EmptyState>원본 저장소가 없어 이 설치에서는 내려받을 수 없습니다. CLI(personal-api export)를 쓰세요.</EmptyState>
-            )}
-          </Section>
-
-          <Section title="초안 정리">
-            <Card className="space-y-2 px-3 py-2.5">
-              <p className="text-[13px]">
-                확정하지 않은 공고 초안 중 {m.draft_retention_days}일 지난 것: <span className="font-medium">{int(m.drafts_purgeable)}개</span>
-              </p>
-              <Button size="sm" variant="danger" disabled={!m.drafts_purgeable || purge.isPending} onClick={() => setConfirmPurge(true)}>
-                지금 정리
-              </Button>
-              {purge.data ? <p className="text-xs text-ok">{purge.data.deleted}개를 지웠습니다.</p> : null}
-              <Problem error={purge.error} />
-            </Card>
-          </Section>
-          <ConfirmDialog
-            open={confirmPurge}
-            onOpenChange={setConfirmPurge}
-            title="공고 초안을 지울까요?"
-            description={`${m.draft_retention_days}일 넘게 확정하지 않은 초안 ${m.drafts_purgeable}개를 지웁니다. 되돌릴 수 없습니다 (삭제 기록에는 남습니다).`}
-            confirmLabel="지우기"
-            cancelLabel="닫기"
-            tone="danger"
-            busy={purge.isPending}
-            onConfirm={() => purge.mutate()}
-          />
-        </div>
-      )}
-    </Loaded>
   );
 }
 

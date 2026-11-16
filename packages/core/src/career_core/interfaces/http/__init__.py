@@ -65,6 +65,8 @@ class CoreDeps:
     audit: AuditSink | None = None
     # 원격 MCP의 외부 OAuth 토큰 검증 (interfaces.mcp.oauth.McpOAuth). 없으면 API 토큰만.
     mcp_oauth: Any = None
+    # 웹 복원(묶음 올리기) 상한. 앱의 BodySizeLimit도 그 경로만 이 값으로 (interfaces.http.restore).
+    max_restore_bytes: int = 2 * 1024 * 1024 * 1024
 
 
 class WorkspaceOut(BaseModel):

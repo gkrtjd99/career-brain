@@ -11,6 +11,7 @@ personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 �
 personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구는 docs/architecture/mcp.md)
 personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.gz)로 (소유자만)
 personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
+personal-api restore FILE --merge  # CAREER_API_TOKEN 공간에 합치기 (--on-duplicate skip|fail)
 personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
 personal-api token list|issue|revoke ID  # CAREER_API_TOKEN 공간의 API 토큰 (소유자만, 새 토큰은 한 번만 출력)
 personal-api maintenance         # 모든 공간 주기 유지보수(초안 정리)를 지금 한 번 (serve·worker는 자동)
@@ -383,11 +384,7 @@ async def _restore(
         )
         if report.source_workspace_id:
             print(f"imported with new ids (source workspace {report.source_workspace_id})")
-        if report.deletions_applied or report.deletions_skipped:
-            print(
-                f"re-applied {report.deletions_applied} deletion(s), "
-                f"skipped {report.deletions_skipped}"
-            )
+        _print_deletions(report)
         for kind, n in sorted(report.requeued.items()):
             print(f"re-queued {n} {kind} job(s)")
         for note in report.notes:
@@ -402,6 +399,77 @@ async def _restore(
             )
             print("new API token for the restored owner (shown once, store it safely):")
             print(token)
+        print("search index job queued; run the worker (or serve) to rebuild it")
+    finally:
+        await db.dispose()
+    return 0
+
+
+def _print_deletions(report) -> None:
+    """다시 적용한 삭제 기록 수와, 건너뛴 기록마다 이유 (restore·merge 공통)."""
+    if not (report.deletions_applied or report.deletions_skipped):
+        return
+    print(f"re-applied {report.deletions_applied} deletion(s), skipped {report.deletions_skipped}")
+    for d in report.skipped_deletions:
+        detail = f": {d.detail}" if d.detail else ""
+        print(f"  skipped {d.target_table} {d.target_id} — {d.reason}{detail}")
+
+
+async def _merge(
+    settings: Settings,
+    path: str,
+    *,
+    dry_run: bool,
+    on_duplicate: str,
+    identities: list[str] | None = None,
+    deletions: list[str] | None = None,
+) -> int:
+    """CAREER_API_TOKEN 공간(자료가 있어도 됨)에 묶음을 합친다. 소유자만."""
+    from career_core.usecases.export import ExportError, merge_workspace
+    from career_core.usecases.index_queue import enqueue_index
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        try:
+            report = await merge_workspace(
+                db,
+                LocalBlobStore(settings.blob_dir),
+                actor,
+                path,
+                on_duplicate=on_duplicate,
+                dry_run=dry_run,
+                identities=identities or None,
+                deletion_logs=deletions or (),
+            )
+        except ExportError as exc:
+            print(f"merge failed: {exc}")
+            return 1
+        print(
+            f"{'checked' if dry_run else 'merged'} archive of {report.source_workspace_id} "
+            f"({report.source_workspace_name}) into {report.workspace_id} "
+            f"({report.workspace_name}): {report.rows_added} row(s) added, "
+            f"{report.rows_skipped} duplicate(s) skipped, {report.blobs} blob(s); "
+            "existing rows unchanged, added rows hash-checked"
+        )
+        for t in report.tables:
+            if t.name in report.not_merged or not t.archive_rows:
+                continue
+            by = ", ".join(f"{k} {n}" for k, n in sorted(t.skipped_by.items()))
+            print(f"  {t.name:<36} +{t.added:<6} skipped {t.skipped}{f' ({by})' if by else ''}")
+        for name, reason in sorted(report.not_merged.items()):
+            print(f"  {name:<36} not merged: {reason}")
+        if report.actors_mapped:
+            print(f"{report.actors_mapped} archive actor(s) mapped to you")
+        _print_deletions(report)
+        for kind, n in sorted(report.requeued.items()):
+            print(f"re-queued {n} {kind} job(s)")
+        for note in report.notes:
+            print(f"note: {note}")
+        if dry_run:
+            print("dry run: nothing was written")
+            return 0
+        await enqueue_index(db, report.workspace_id)
         print("search index job queued; run the worker (or serve) to rebuild it")
     finally:
         await db.dispose()
@@ -566,6 +634,17 @@ def main(argv: list[str] | None = None) -> None:
     rs.add_argument(
         "--deletions", action="append", help="deletion log(s) written after the archive"
     )
+    rs.add_argument(
+        "--merge",
+        action="store_true",
+        help=f"merge into the {TOKEN_ENV} workspace (may already have data; owner only)",
+    )
+    rs.add_argument(
+        "--on-duplicate",
+        choices=["skip", "fail"],
+        default="skip",
+        help="with --merge: keep the existing row (skip) or abort (fail) on duplicates",
+    )
     ol = sub.add_parser("oauth-link", help="link an external OAuth subject to the token's owner")
     ol.add_argument("--subject", help="the 'sub' claim from your authorization server")
     ol.add_argument("--issuer", help="defaults to CAREER_OAUTH_ISSUER")
@@ -617,6 +696,19 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(asyncio.run(_export(settings, args.out, args.recipient)))
     elif args.cmd == "export-deletions":
         sys.exit(asyncio.run(_export_deletions(settings, args.out)))
+    elif args.cmd == "restore" and args.merge:
+        sys.exit(
+            asyncio.run(
+                _merge(
+                    settings,
+                    args.file,
+                    dry_run=args.dry_run,
+                    on_duplicate=args.on_duplicate,
+                    identities=args.identity,
+                    deletions=args.deletions,
+                )
+            )
+        )
     elif args.cmd == "restore":
         sys.exit(
             asyncio.run(
