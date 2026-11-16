@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import zlib
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -99,7 +100,58 @@ class HttpFetcher:
         self._max_bytes = max_bytes
         self._timeout = timeout
 
-    async def fetch(self, url: str) -> FetchedPage | FetchFailure:
+    async def _read_capped(self, resp: httpx.Response) -> bytes | FetchFailure | None:
+        """압축을 직접 풀며 읽는다. 풀린 크기가 상한을 넘으면 None (압축 폭탄 방지).
+
+        httpx의 자동 해제는 받은 조각 하나를 상한 없이 풀어 버린다.
+        """
+        if resp.is_stream_consumed:  # 이미 메모리에 풀려 있는 응답 (테스트용 등)
+            data = resp.content
+            return None if len(data) > self._max_bytes else data
+        encoding = resp.headers.get("content-encoding", "").strip().lower()
+        if encoding in ("", "identity"):
+            decoder = None
+        elif encoding in ("gzip", "x-gzip"):
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        elif encoding == "deflate":
+            decoder = zlib.decompressobj(zlib.MAX_WBITS)
+        else:
+            return FetchFailure(FetchError.UNSUPPORTED_CONTENT, resp.status_code, encoding)
+        out: list[bytes] = []
+        size = wire = 0
+        try:
+            async for chunk in resp.aiter_raw():
+                wire += len(chunk)
+                if wire > self._max_bytes:
+                    return None
+                if decoder is None:
+                    size += len(chunk)
+                    if size > self._max_bytes:
+                        return None
+                    out.append(chunk)
+                    continue
+                data = chunk
+                while data:
+                    piece = decoder.decompress(data, self._max_bytes - size + 1)
+                    size += len(piece)
+                    if size > self._max_bytes:
+                        return None
+                    out.append(piece)
+                    data = decoder.unconsumed_tail
+            if decoder is not None:
+                tail = decoder.flush()
+                size += len(tail)
+                if size > self._max_bytes:
+                    return None
+                out.append(tail)
+        except zlib.error:
+            return FetchFailure(FetchError.SOURCE_UNAVAILABLE, resp.status_code, "bad_encoding")
+        return b"".join(out)
+
+    async def fetch_raw(
+        self, url: str, *, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"
+    ) -> RawResponse | FetchFailure:
+        """검사한 공개 IP로만 GET. 리다이렉트도 매번 다시 검사하며 직접 따라간다."""
         current = url
         async with httpx.AsyncClient(
             transport=self._transport,
@@ -132,8 +184,10 @@ class HttpFetcher:
                         headers={
                             "Host": host_header,
                             "User-Agent": USER_AGENT,
-                            "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+                            "Accept": accept,
                             "Accept-Language": "ko,en;q=0.8",
+                            # 직접 풀 수 있는 것만 받는다 (압축 해제 크기를 조각마다 제한하려고).
+                            "Accept-Encoding": "gzip, deflate",
                         },
                         extensions={"sni_hostname": parts.hostname},
                     ) as resp:
@@ -143,29 +197,20 @@ class HttpFetcher:
                                 return FetchFailure(FetchError.SOURCE_UNAVAILABLE, resp.status_code)
                             current = urljoin(current, location)
                             continue
-                        ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
                         declared = resp.headers.get("content-length")
                         if declared and declared.isdigit() and int(declared) > self._max_bytes:
                             return FetchFailure(FetchError.TOO_LARGE, resp.status_code)
-                        chunks: list[bytes] = []
-                        size = 0
-                        async for chunk in resp.aiter_bytes():
-                            size += len(chunk)
-                            if size > self._max_bytes:
-                                return FetchFailure(FetchError.TOO_LARGE, resp.status_code)
-                            chunks.append(chunk)
-                        raw = b"".join(chunks)
-                        encoding = resp.charset_encoding or "utf-8"
-                        text = raw.decode(encoding, errors="replace")
-                        failure = _status_failure(resp.status_code, text)
-                        if failure:
-                            return failure
-                        if ctype and not ctype.startswith(TEXT_TYPES):
-                            return FetchFailure(
-                                FetchError.UNSUPPORTED_CONTENT, resp.status_code, ctype
-                            )
-                        return FetchedPage(
-                            url, current, resp.status_code, ctype or "text/html", text
+                        body = await self._read_capped(resp)
+                        if body is None:
+                            return FetchFailure(FetchError.TOO_LARGE, resp.status_code)
+                        if isinstance(body, FetchFailure):
+                            return body
+                        return RawResponse(
+                            final_url=current,
+                            status=resp.status_code,
+                            content_type=resp.headers.get("content-type", ""),
+                            charset=resp.charset_encoding,
+                            body=body,
                         )
                 except httpx.TimeoutException:
                     return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail="timeout")
@@ -173,40 +218,86 @@ class HttpFetcher:
                     return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail=type(exc).__name__)
         return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail="too_many_redirects")
 
+    async def fetch(self, url: str) -> FetchedPage | FetchFailure:
+        raw = await self.fetch_raw(url)
+        if isinstance(raw, FetchFailure):
+            return raw
+        text = raw.body.decode(raw.charset or "utf-8", errors="replace")
+        failure = _status_failure(raw.status, text)
+        if failure:
+            return failure
+        ctype = raw.content_type.split(";")[0].strip().lower()
+        if ctype and not ctype.startswith(TEXT_TYPES):
+            return FetchFailure(FetchError.UNSUPPORTED_CONTENT, raw.status, ctype)
+        return FetchedPage(url, raw.final_url, raw.status, ctype or "text/html", text)
+
+
+@dataclass(frozen=True, slots=True)
+class RawResponse:
+    final_url: str
+    status: int
+    content_type: str
+    charset: str | None
+    body: bytes
+
+
+SUBRESOURCE_MAX_BYTES = 4 * 1024 * 1024
+MAX_SUBRESOURCES = 150
+PAGE_BUDGET_BYTES = 24 * 1024 * 1024
+
 
 @dataclass
 class BrowserFetcher:
     """Playwright Chromium으로 렌더링한다 (선택 설치: `career-core[browser]` + `playwright install chromium`).
 
-    새 컨텍스트(쿠키·저장소 없음), 다운로드 금지, 모든 요청의 호스트를 공개 주소로 확인한다.
+    Chromium이 직접 네트워크에 나가지 않는다: 모든 요청을 가로채 `HttpFetcher`(공개 주소 검사·IP 고정·
+    리다이렉트마다 재검사·크기 상한)로 대신 가져와 응답을 채워 준다. 그래서 Chromium의 DNS 조회·
+    리다이렉트·DNS rebinding으로 내부 주소에 닿지 못한다. GET 외 요청, 서비스 워커, WebSocket은 막는다.
+    새 컨텍스트(쿠키·저장소 없음), 다운로드 금지.
     """
 
     timeout_ms: int = 25000
     screenshot: bool = True
     resolver: object = field(default=resolve_public)
+    transport: object = None  # 테스트용 httpx transport
 
     async def fetch(self, url: str) -> FetchedPage | FetchFailure:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
             return FetchFailure(FetchError.NEEDS_MANUAL_CHECK, detail="browser_not_installed")
-        blocked: list[str] = []
+        main = HttpFetcher(transport=self.transport, resolver=self.resolver)
+        sub = HttpFetcher(
+            transport=self.transport, resolver=self.resolver, max_bytes=SUBRESOURCE_MAX_BYTES
+        )
+        state = {"count": 0, "bytes": 0, "main": None}
 
         async def guard(route) -> None:
-            parts = urlsplit(route.request.url)
+            request = route.request
+            parts = urlsplit(request.url)
             if parts.scheme in ("data", "blob"):
                 await route.continue_()
                 return
-            if parts.scheme not in ("http", "https") or not parts.hostname:
+            if request.method != "GET" or parts.scheme not in ("http", "https"):
                 await route.abort()
                 return
-            try:
-                await self.resolver(parts.hostname, parts.port or 443)
-            except (AddressBlocked, ConnectionError):
-                blocked.append(parts.hostname)
+            is_main = request.is_navigation_request() and request.frame.parent_frame is None
+            if not is_main:
+                state["count"] += 1
+                if state["count"] > MAX_SUBRESOURCES or state["bytes"] > PAGE_BUDGET_BYTES:
+                    await route.abort()
+                    return
+            raw = await (main if is_main else sub).fetch_raw(
+                request.url, accept=request.headers.get("accept", "*/*")
+            )
+            if isinstance(raw, FetchFailure):
+                if is_main:
+                    state["main"] = raw
                 await route.abort()
                 return
-            await route.continue_()
+            state["bytes"] += len(raw.body)
+            headers = {"content-type": raw.content_type} if raw.content_type else {}
+            await route.fulfill(status=raw.status, headers=headers, body=raw.body)
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(args=["--disable-dev-shm-usage"])
@@ -217,15 +308,20 @@ class BrowserFetcher:
                     java_script_enabled=True,
                     locale="ko-KR",
                     viewport={"width": 1280, "height": 1600},
+                    service_workers="block",
                 )
                 await context.route("**/*", guard)
+                if hasattr(context, "route_web_socket"):
+                    await context.route_web_socket("**/*", lambda ws: ws.close())
                 page = await context.new_page()
                 try:
                     resp = await page.goto(url, wait_until="networkidle", timeout=self.timeout_ms)
                 except Exception:  # noqa: BLE001 - 렌더링 실패는 수동 확인으로 넘긴다
-                    if blocked and urlsplit(url).hostname in blocked:
-                        return FetchFailure(FetchError.BLOCKED_ADDRESS)
+                    if isinstance(state["main"], FetchFailure):
+                        return state["main"]
                     return FetchFailure(FetchError.NEEDS_MANUAL_CHECK, detail="render_failed")
+                if isinstance(state["main"], FetchFailure):
+                    return state["main"]
                 status = resp.status if resp else 200
                 html = await page.content()
                 failure = _status_failure(status, html)

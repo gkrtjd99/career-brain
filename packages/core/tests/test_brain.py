@@ -301,8 +301,14 @@ async def test_confirm_rules(db, blobs, people):
     # 본인 확인 + 원문 근거 = evidence_supported
     assert await brain.confirm_claim(db, owner, claim) == "self_confirmed"
     span = await brain.create_span(db, owner, block.id, 0, 9)
-    assert await brain.attach_span(db, editor, claim, span) == "evidence_supported"
-    assert await brain.attach_span(db, editor, claim, span) == "evidence_supported"  # 중복 무시
+    # 편집자는 근거를 붙일 수 있지만 확인 상태를 올리지는 못한다 (올리는 것도 확인 행위).
+    assert await brain.attach_span(db, editor, claim, span) == "self_confirmed"
+    assert await brain.attach_span(db, owner, claim, span) == "evidence_supported"
+    assert await brain.attach_span(db, owner, claim, span) == "evidence_supported"  # 중복 무시
+    # 확인된 주장을 편집자가 뒤집거나 폐기할 수 없다.
+    for change in (ClaimStatus.DISPUTED, ClaimStatus.RETIRED):
+        with pytest.raises(ClaimRuleError, match="confirm_requires_approve"):
+            await brain.set_claim_status(db, editor, claim, change)
 
     # 확인 권한 없는 사람이 고치면 다시 확인받아야 한다
     assert await brain.edit_claim(db, editor, claim, statement="주문 서비스를 혼자 만들었다") == (
@@ -313,7 +319,7 @@ async def test_confirm_rules(db, blobs, people):
         assert row.confirmed_by is None and row.confirmed_at is None
     assert await brain.confirm_claim(db, owner, claim) == "evidence_supported"
 
-    assert await brain.set_claim_status(db, editor, claim, ClaimStatus.RETIRED) == "retired"
+    assert await brain.set_claim_status(db, owner, claim, ClaimStatus.RETIRED) == "retired"
     with pytest.raises(ClaimRuleError, match="claim_retired"):
         await brain.confirm_claim(db, owner, claim)
     with pytest.raises(ClaimRuleError, match="use_confirm"):
@@ -697,3 +703,103 @@ async def test_wiki_shows_only_confirmed_claims(db, blobs, people):
         assert r.headers["content-type"].startswith("text/markdown") and r.text == md
         r = await c.get(f"/core/wiki/experiences/{exp}", headers=auth("other"))
         assert r.status_code == 404
+
+
+async def test_restricted_claims_are_not_sent_for_questions(db, blobs, people):
+    """restricted 원본에서 온 주장은 'private'로 바꿔 달아 밖으로 보내지 않는다."""
+    owner = people["owner"]
+    await parsed(db, blobs, owner, data_class="restricted")
+    block = await first_block(db, owner)
+    span = await brain.create_span(db, owner, block.id, 0, 9)
+    exp = await brain.create_experience(db, owner, title="Acme", role="Backend")
+    await brain.add_claim(
+        db, owner, exp, statement="기밀 원본에서 온 주장", kind="result", span_ids=[span]
+    )
+    await brain.add_claim(db, owner, exp, statement="사용자가 쓴 주장", kind="result")
+    sid = await interviews.start_interview(db, owner, exp)
+    client = ScriptedClient(json.dumps({"questions": [{"focus": "metric", "question": "몇 명?"}]}))
+    await interviews.add_ai_questions(db, gateway(db, client), owner, sid)
+    sent = client.calls[0]
+    assert "기밀 원본에서 온 주장" not in sent.messages[0].content
+    assert "사용자가 쓴 주장" in sent.messages[0].content
+    assert "restricted" not in sent.data_classes
+
+
+async def test_stricter_reupload_raises_data_class(db, blobs, people):
+    from career_core.db import Source
+
+    owner = people["owner"]
+    first = await upload_source(
+        db,
+        blobs,
+        owner,
+        filename="cv.txt",
+        data=b"same bytes",
+        declared_mime="text/plain",
+        max_bytes=1024,
+        data_class="private",
+    )
+    again = await upload_source(
+        db,
+        blobs,
+        owner,
+        filename="cv.txt",
+        data=b"same bytes",
+        declared_mime="text/plain",
+        max_bytes=1024,
+        data_class="restricted",
+    )
+    assert again.deduplicated and again.source_id == first.source_id
+    lower = await upload_source(
+        db,
+        blobs,
+        owner,
+        filename="cv.txt",
+        data=b"same bytes",
+        declared_mime="text/plain",
+        max_bytes=1024,
+        data_class="public",
+    )
+    assert lower.deduplicated
+    async with db.workspace_session(owner.workspace_id) as s:
+        assert (await s.get(Source, first.source_id)).data_class == "restricted"  # 낮추지 않는다
+
+
+async def test_metered_call_without_usage_counts_toward_budget(db, people):
+    from career_core.llm.gateway import month_spend
+
+    class NoUsage:
+        async def complete(self, model, request):
+            return ModelCompletion(text="ok", model=model, stop_reason="stop", parts=())
+
+    config = parse_models_config("""
+[endpoints.api]
+preset = "openai"
+data_classes = ["public", "private"]
+[routes]
+default = "api/gpt-6.1-sol"
+[budget]
+monthly_usd = 1000
+""")
+    owner = people["owner"]
+    gw = ModelGateway(
+        db,
+        config,
+        PriceBook.load(),
+        client_factory=lambda ep, key: NoUsage(),
+        env={"OPENAI_API_KEY": "k"},
+    )
+    from career_core.llm import ChatMessage, ModelRequest
+
+    result = await gw.run(
+        owner,
+        "test",
+        ModelRequest(
+            messages=(ChatMessage("user", "x" * 1000),),
+            max_output_tokens=100,
+            data_classes=frozenset({"private"}),
+        ),
+    )
+    assert result.cost_basis == "estimated" and result.cost_usd is not None
+    spent = await month_spend(db, owner.workspace_id, gw._clock())
+    assert spent > 0
