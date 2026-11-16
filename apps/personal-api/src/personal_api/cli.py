@@ -260,10 +260,12 @@ async def _reindex(settings: Settings) -> None:
     try:
         actor = await _actor(db)
         await enqueue_index(db, actor.workspace_id)
-        space = build_gateway(settings, db).embedding_space()
+        gw = build_gateway(settings, db)
+        space, why = gw.embedding_space(), gw.embedding_status()
     finally:
         await db.dispose()
-    print(f"index job queued (space: {space or 'none — keyword search only'}); run the worker")
+    shown = space or f"none ({why}) — keyword search only"
+    print(f"index job queued (space: {shown}); run the worker")
 
 
 async def _search(settings: Settings, query: str, limit: int) -> None:

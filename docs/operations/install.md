@@ -112,8 +112,9 @@ career.example.com {
 
 | 선택 | 설정 | 자원 | 언제 |
 |---|---|---|---|
-| 없음 (기본) | `embed` 줄을 두지 않음 | 추가 없음 | 가장 가볍다. 키워드 검색만 |
-| OpenAI API | `embed = "openai/text-embedding-3-small"` + `OPENAI_API_KEY` | 로컬 메모리 거의 없음, $0.02/1M 토큰 | **작은 서버 권장** |
+| OpenAI API (**예시 설정 기본**) | `embed = "openai/text-embedding-3-small"` + `[embedding] dimensions = 512` + `OPENAI_API_KEY` | 로컬 메모리 거의 없음, $0.02/1M 토큰 | 작은 서버. 키가 없으면 호출하지 않고 키워드 검색만 |
+| OpenAI API (더 정확) | `embed = "openai/text-embedding-3-large"` + `dimensions = 1024` | $0.13/1M 토큰 (개인 자료 전체 색인도 몇 센트) | 한국어 바꿔 말하기·한영 섞인 검색이 많을 때 |
+| 없음 | `embed` 줄을 지움 | 추가 없음 | 가장 가볍다. 키워드 검색만 |
 | 로컬 (fastembed) | `[endpoints.embed-local] preset = "local"` + `embed = "embed-local/minishlab/potion-multilingual-128M"` | 이미지 +190MB, 사용 중 RAM ~1GB (mmap 로드) | 자료를 밖으로 보내지 않을 때 |
 
 - 바꾼 뒤에는 `personal-api reindex` (Docker: `docker compose run --rm app reindex`)로 다시 색인한다.

@@ -59,17 +59,19 @@ interview = "claude/claude-opus-5-5"     # 인터뷰 질문 생성
 # 포스터 이미지·스캔 PDF 공고의 글자 읽기 (비전 모델). 없으면 "직접 확인 필요"로 둔다. default로 넘어가지 않는다.
 # 스캔 PDF는 쪽을 이미지로 바꾸는 pdf-render extra도 필요하다 (앞 4쪽까지).
 # job_extract_image = "claude/claude-haiku-5-5"
-# 의미 검색용 임베딩. 없으면 키워드 검색만 한다 (가장 가볍다). default로 넘어가지 않는다.
-#   API(가벼운 서버 권장):  embed = "openai/text-embedding-3-small"    # $0.02 / 1M 토큰
+# 의미 검색용 임베딩. default로 넘어가지 않는다. 기본은 OpenAI text-embedding-3-small 512차원
+# ($0.02 / 1M 토큰). OPENAI_API_KEY가 없으면 호출하지 않고 키워드 검색만 한다. 줄을 지우면 키워드만.
+#   더 정확하게(한국어 바꿔 말하기에 강함, 단가 6.5배):  embed = "openai/text-embedding-3-large" + dimensions = 1024
 #   로컬(오프라인·비공개):  embed = "embed-local/minishlab/potion-multilingual-128M"  # 어휘를 잘라 약 0.3GB, 사용 중 RAM ~0.5GB
 # 바꾼 뒤에는 `personal-api reindex`로 다시 색인한다. 모델·차원이 다른 벡터는 섞지 않는다.
-# embed = "openai/text-embedding-3-small"
+# 비교: docs/architecture/search.md "임베딩만 비교"
+embed = "openai/text-embedding-3-small"
 # 판정 모델 (참고 의견만: 자동 연결·충족 판정 없음). 없으면 기준선(검색 점수·단어 일치)만. default로 넘어가지 않는다.
 # judge_claim = "claude/claude-haiku-5-5"        # 학습 연결 후보: "이 주장이 요건을 보여 주는가" + 이유
 # judge_visibility = "claude/claude-haiku-5-5"   # 지원 문서 요건 가시성 + 문서 속 인용
 
-# [embedding]
-# dimensions = 512   # OpenAI text-embedding-3만. 줄이면 저장·검색이 가벼워진다.
+[embedding]
+dimensions = 512   # OpenAI text-embedding-3만. 3-small은 512·1024·1536의 정확도가 거의 같아 가벼운 512.
 # batch_size = 64
 
 [budget]

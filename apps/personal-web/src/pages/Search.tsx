@@ -22,6 +22,7 @@ const ALL: SearchKind[] = ["claim", "block", "answer", "study_note", "study_mist
 
 function semanticNote(note: string) {
   if (note === "no_embedding_route") return "임베딩 모델 미설정";
+  if (note === "embedding_api_key_missing") return "임베딩 API 키 없음";
   if (note === "egress_scope_required") return "외부 전송 권한 없음";
   if (note === "index_empty") return "색인이 비어 있음";
   if (note === "empty_query") return "빈 검색어";
