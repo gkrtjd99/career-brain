@@ -46,6 +46,10 @@ ACTION_SCOPES: dict[str, str] = {
     # O09 학습. 경험 후보로 올리기도 study.write (주장은 확인 대기로만 생긴다).
     "study.read": "read",
     "study.write": "draft-write",
+    # O11 내보내기·유지보수. 공간 전체 자료를 다루므로 소유자만.
+    "workspace.export": "workspace-admin",
+    "maintenance.read": "workspace-admin",
+    "maintenance.purge": "workspace-admin",
 }
 
 

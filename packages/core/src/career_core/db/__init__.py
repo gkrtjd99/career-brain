@@ -78,3 +78,8 @@ __all__ += [
     "StudyReview",
     "StudySession",
 ]
+
+# O11 내보내기·복원
+from career_core.db.models import ExportRun
+
+__all__ += ["ExportRun"]
