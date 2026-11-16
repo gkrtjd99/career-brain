@@ -1192,6 +1192,12 @@ def _c0025_fetch_confirmations(arc) -> None:
         arc.add_table("core.job_fetch_confirmations")
 
 
+@schema_step("c0029", "parse_runs.hidden_text 추가 (옛 묶음의 파싱은 숨김 글을 넣었다: 'keep')")
+def _c0029_parse_hidden_text(arc) -> None:
+    if arc.has("core.parse_runs"):
+        arc.rewrite("core.parse_runs", lambda row: {**row, "hidden_text": "keep"})
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

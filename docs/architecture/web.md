@@ -106,6 +106,8 @@ O10에서 비어 있던 것을 작은 읽기 경로로 더했다 (migration 없�
 c0023에서 더한 것: `GET /core/runs/workflows/{workflow}/estimate?units=`(`runs.read`, 일괄 실행 예상 비용 — `runs.md`), `GET /core/interviews?run_id=`(이 일괄 실행이 질문을 만든 세션).
 인터뷰 질문에 `run_id`(그 질문을 만든 일괄 실행, 직접 요청·정해진 질문은 `null`), 인터뷰 세션 목록에 `run_ids`(질문을 만든 실행들, 오래된 것부터). 숨김 글 검사 코드 `hidden_text_same_color`·`hidden_text_annotation`·`annotation_text`.
 
+c0029: `POST /core/sources` 폼 `hidden_text`(`keep` 기본 · `exclude` = DOCX 숨김 서식 글을 원본 블록에서 뺌), 응답 `UploadOut.hidden_text`·원본 상세 `ParseOut.hidden_text`(실제 값). 자료 올리기 화면은 DOCX를 고르면 "숨김 서식 글은 빼고 읽기"를 보여 준다. 숨김 글 검사 코드 `hidden_text_covered`(PDF 글 뒤에 덮은 불투명 도형·이미지, 이름표 "덮어 가린 글").
+
 함께 바뀐 응답: 공고 목록에 `created_at`·`saved_at`, 지원 목록에 `questions`·`unwritten`, 검색의 원문 결과에 `block_id`·`parse_run_id`·`ordinal`·`match_start`·`match_end`.
 
 ## 웹에서 일괄 실행 시작 (c0023)

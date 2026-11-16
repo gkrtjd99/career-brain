@@ -104,6 +104,8 @@ class ParseRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+    # c0029: 숨김 서식 글을 블록에 넣는지 (keep) 빼는지 (exclude, DOCX만)
+    hidden_text: Mapped[str] = mapped_column(Text, default="keep")
 
 
 class DocumentBlock(Base):

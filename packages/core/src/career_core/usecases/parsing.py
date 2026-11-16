@@ -21,6 +21,7 @@ from career_core.ports import (
     ActorContext,
     BlobStore,
     EgressPolicy,
+    HiddenTextParser,
     LocalParser,
     LocalParseResult,
     ParsedBlock,
@@ -58,6 +59,7 @@ class _RunView:
     blob_key: str
     mime_type: str
     data_class: str
+    hidden_text: str = "keep"
 
 
 async def _load(db: Database, ws: UUID, run_id: UUID) -> _RunView | None:
@@ -75,6 +77,7 @@ async def _load(db: Database, ws: UUID, run_id: UUID) -> _RunView | None:
             blob_key=version.blob_key,
             mime_type=version.mime_type,
             data_class=source.data_class,
+            hidden_text=run.hidden_text or "keep",
         )
 
 
@@ -155,7 +158,13 @@ async def process_parse_run(deps: ParsingDeps, workspace_id: UUID, run_id: UUID)
         )
     try:
         # PDF(최대 300쪽)·HTML 파싱은 동기 CPU 작업: 스레드에서 해 heartbeat가 lease를 계속 늘리게 한다
-        result = await asyncio.to_thread(parser.parse, data)
+        # c0029: 숨김 서식 글을 빼기로 한 파싱은 그것을 할 수 있는 추출기에서만 (지금은 DOCX)
+        parse = (
+            parser.parse_visible
+            if view.hidden_text == "exclude" and isinstance(parser, HiddenTextParser)
+            else parser.parse
+        )
+        result = await asyncio.to_thread(parse, data)
     except ParseError as exc:
         return await _finish(deps.db, workspace_id, run_id, missing=[], error_code=exc.code)
 

@@ -99,6 +99,8 @@ class UploadOut(BaseModel):
     version_id: UUID
     parse_run_id: UUID | None
     deduplicated: bool
+    # c0029: 숨김 서식 글을 블록에 넣는지(keep)·빼는지(exclude, DOCX만). 같은 파일이면 처음 값
+    hidden_text: str = "keep"
 
 
 class ParseOut(BaseModel):
@@ -107,6 +109,7 @@ class ParseOut(BaseModel):
     pages_total: int | None
     missing_pages: list[int]
     error_code: str | None
+    hidden_text: str = "keep"
 
 
 class VersionOut(BaseModel):
@@ -248,6 +251,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
         file: Annotated[UploadFile, File()],
         title: Annotated[str | None, Form()] = None,
         data_class: Annotated[str, Form()] = "private",
+        hidden_text: Annotated[str, Form()] = "keep",
     ) -> UploadOut:
         data = await file.read(deps.max_upload_bytes + 1)
         try:
@@ -261,6 +265,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 max_bytes=deps.max_upload_bytes,
                 title=title,
                 data_class=data_class,
+                hidden_text=hidden_text,
             )
         except UploadRejected as exc:
             raise HTTPException(status_code=exc.status, detail=exc.code) from exc
@@ -269,6 +274,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
             version_id=result.version_id,
             parse_run_id=result.parse_run_id,
             deduplicated=result.deduplicated,
+            hidden_text=result.hidden_text,
         )
 
     @router.get("/sources/{source_id}", response_model=SourceOut)
@@ -302,6 +308,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                     pages_total=r.pages_total,
                     missing_pages=list(r.missing_pages or []),
                     error_code=r.error_code,
+                    hidden_text=r.hidden_text,
                 ),
             )
             for v, r in rows

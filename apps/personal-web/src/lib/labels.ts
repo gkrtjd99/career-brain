@@ -327,6 +327,8 @@ export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
   hidden_text_same_color: { label: "배경과 같은 색 글", group: "manipulation" },
   hidden_text_annotation: { label: "숨긴 주석·양식 칸 글", group: "manipulation" },
   annotation_text: { label: "인쇄되지 않는 주석 글", group: "info" },
+  // PDF 글 뒤에 덮은 불투명 도형·이미지
+  hidden_text_covered: { label: "덮어 가린 글", group: "manipulation" },
   pages_unreadable: { label: "읽지 못한 쪽", group: "info" },
   pages_not_checked: { label: "검사하지 않은 쪽", group: "info" },
 };

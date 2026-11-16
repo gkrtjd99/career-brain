@@ -132,6 +132,16 @@ class LocalParser(Protocol):
     def parse(self, data: bytes) -> LocalParseResult: ...
 
 
+@runtime_checkable
+class HiddenTextParser(Protocol):
+    """숨김 서식 글을 뺀 블록도 만들 수 있는 로컬 추출기 (c0029, 지금은 DOCX).
+
+    ``parse_runs.hidden_text = 'exclude'``인 파싱은 ``parse`` 대신 이것을 부른다.
+    """
+
+    def parse_visible(self, data: bytes) -> LocalParseResult: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ProviderParseStatus:
     state: str  # "pending" | "done" | "failed"
@@ -238,6 +248,7 @@ __all__ = [
     "DenyAllPermissionPolicy",
     "EgressPolicy",
     "EmbeddingClient",
+    "HiddenTextParser",
     "IdentityResolver",
     "LocalParseResult",
     "LocalParser",
