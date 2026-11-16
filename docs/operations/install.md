@@ -107,7 +107,7 @@ career.example.com {
 |---|---|---|---|
 | 없음 (기본) | `embed` 줄을 두지 않음 | 추가 없음 | 가장 가볍다. 키워드 검색만 |
 | OpenAI API | `embed = "openai/text-embedding-3-small"` + `OPENAI_API_KEY` | 로컬 메모리 거의 없음, $0.02/1M 토큰 | **작은 서버 권장** |
-| 로컬 (fastembed) | `[endpoints.embed-local] preset = "local"` + `embed = "embed-local/minishlab/potion-multilingual-128M"` | 이미지 +190MB, 사용 중 RAM ~1.6GB | 자료를 밖으로 보내지 않을 때 |
+| 로컬 (fastembed) | `[endpoints.embed-local] preset = "local"` + `embed = "embed-local/minishlab/potion-multilingual-128M"` | 이미지 +190MB, 사용 중 RAM ~1GB (mmap 로드) | 자료를 밖으로 보내지 않을 때 |
 
 - 바꾼 뒤에는 `personal-api reindex` (Docker: `docker compose run --rm app reindex`)로 다시 색인한다.
 - 로컬 모델은 `CAREER_EMBED_IDLE_SECONDS`(기본 300초) 동안 안 쓰면 메모리에서 내린다. 스레드 수는 `CAREER_EMBED_THREADS`(기본 2).

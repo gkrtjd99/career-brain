@@ -187,3 +187,21 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 순환 FK 2개를 `DEFERRABLE INITIALLY IMMEDIATE`로: `fk_job_postings_confirmed_version`(공고 → 확정 버전), `fk_document_revisions_suggestion`(revision → 수정안). 평소엔 지금처럼 즉시 검사하고, 복원만 `SET CONSTRAINTS ALL DEFERRED`로 ID 그대로 넣은 뒤 commit 전에 검사한다. 추가만 되는 표를 UPDATE하지 않아도 되고, `ck_document_suggestions_applied` 같은 CHECK도 그대로 지킨다.
 - 내보내기·복원은 앱 계정이 그 공간 문맥(`app.workspace_id`) 안에서만 한다. 소유자 계정·BYPASSRLS가 필요 없다. 표는 카탈로그에서 찾고(`workspace_id` 칸), 빼는 표는 `EXCLUDED_TABLES`(`jobs`, `embeddings`)에 이유와 함께 둔다. 새 표가 미룰 수 없는 순환 FK나 내보내지 않는 표로의 FK를 만들면 계획 단계에서 오류가 난다.
 - 상세·형식·운영 절차: `docs/operations/backup.md`.
+
+## 학습 검색·정리·시간대 (c0013)
+
+`down_revision = c0011`. 모두 RLS FORCE, 공간 복합 FK.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `embeddings.target_kind` | `ck_embeddings_target_kind`에 `study_note`(학습 기록 메모), `study_mistake`(오답) 추가 | (그대로) |
+| `study_items.status` | `ck_study_items_status`에 `merged` 추가 | (그대로) |
+| `study_item_merges` (새 표) | 합친 항목 기록: `source_item_id` → `target_item_id`, `created_by`. 원래 항목당 1행(`uq_study_item_merges_source`), 자기 자신 금지(CHECK), 두 칸 모두 `(workspace_id, id)` 복합 FK `ON DELETE CASCADE` | `SELECT, INSERT, UPDATE, DELETE` |
+| `study_requirements` | 빠진 요건 정리용 `DELETE` 권한 추가 (`study_requirement_claims`는 CASCADE, 학습 항목·시험의 `requirement_id`는 `SET NULL (칸)`) | `SELECT, INSERT, DELETE` |
+| `study_settings` (새 표) | 공간당 1행(`uq_study_settings_workspace`): 표시 시간대 `timezone`(IANA 이름, 1–64자, 값 검사는 앱 `zoneinfo`), `updated_by` | `SELECT, INSERT, UPDATE` |
+
+- 합친 관계를 `study_items`의 자기 참조 칸이 아니라 따로 둔 이유: 내보내기(O11)가 FK 순서로 표를 넣는데, 같은 표 안의 참조는 행 순서까지 맞춰야 한다. 별도 표는 `study_items` 다음에 넣으면 된다.
+- 응시·경험 후보는 합쳐도 원래 항목을 가리킨 채 남는다 (`SELECT, INSERT` 표를 UPDATE하지 않는다).
+- 새 표는 `workspace_id`가 있어 내보내기·복원 대상이 자동으로 된다 (`test_export.py`).
+- downgrade: `study_settings`·`study_item_merges`를 지우고, `merged` 항목은 `dropped`로, 학습 임베딩은 지운 뒤 CHECK를 되돌린다.
+- 상세: `docs/architecture/study.md`, `docs/architecture/search.md`.

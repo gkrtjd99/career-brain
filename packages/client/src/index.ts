@@ -414,8 +414,35 @@ export function createClient({
       patch<T.StatusOut>(`/core/study/mistakes/${id(mistakeId)}`, { status }),
     reviewMistake: (mistakeId: string, grade: T.ReviewGrade) =>
       post<T.ReviewOut>(`/core/study/mistakes/${id(mistakeId)}/reviews`, { grade }),
-    dueReviews: (opts: { until?: string; limit?: number } = {}) =>
-      get<T.DueReview[]>("/core/study/reviews/due", { until: opts.until, limit: opts.limit }),
+    dueReviews: (opts: { until?: string; limit?: number; tz?: string } = {}) =>
+      get<T.DueReview[]>("/core/study/reviews/due", {
+        until: opts.until,
+        limit: opts.limit,
+        tz: opts.tz,
+      }),
+    // 학습 백로그 (c0013): 시간대 설정·D-day·병합/삭제·요건 정리·주장 후보·요건 빈도
+    studySettings: () => get<T.StudySettings>("/core/study/settings"),
+    putStudySettings: (timezone: string) =>
+      json<T.StudySettings>("PUT", "/core/study/settings", { json: { timezone } }),
+    upcomingAssessments: (opts: { days?: number; tz?: string } = {}) =>
+      get<T.UpcomingAssessment[]>("/core/study/assessments/upcoming", opts),
+    mergeStudyItem: (itemId: string, into: string) =>
+      post<T.MergeOut>(`/core/study/items/${id(itemId)}/merge`, { into }),
+    deleteStudyItem: (itemId: string) =>
+      json<T.DeleteItemOut>("DELETE", `/core/study/items/${id(itemId)}`),
+    cleanupRequirements: (
+      postingId: string,
+      body: { requirement_ids?: string[] | null; drop_items?: boolean } = {},
+    ) => post<T.CleanupOut>(`/core/study/postings/${id(postingId)}/requirements/cleanup`, body),
+    claimSuggestions: (
+      postingId: string,
+      opts: { field?: T.RequirementField; text?: string; limit?: number } = {},
+    ) => get<T.ClaimSuggestions>(`/core/study/postings/${id(postingId)}/claim-suggestions`, opts),
+    requirementFrequency: (opts: { include_archived?: boolean; min_postings?: number } = {}) =>
+      get<T.RequirementFrequency>("/core/study/requirements/frequency", {
+        include_archived: opts.include_archived ? "true" : undefined,
+        min_postings: opts.min_postings,
+      }),
   };
 }
 

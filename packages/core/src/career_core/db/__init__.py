@@ -88,3 +88,8 @@ __all__ += ["Approval", "Run", "RunEvent"]
 from career_core.db.models import ExportRun
 
 __all__ += ["ExportRun"]
+
+# c0013 학습 설정·항목 병합
+from career_core.db.models import StudyItemMerge, StudySettings
+
+__all__ += ["StudyItemMerge", "StudySettings"]

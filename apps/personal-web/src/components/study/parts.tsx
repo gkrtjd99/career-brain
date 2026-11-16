@@ -11,7 +11,7 @@ import { ErrorText } from "../common";
 export function useStudyInvalidate() {
   const qc = useQueryClient();
   return () => {
-    for (const key of ["study-items", "study-item", "assessments", "assessment", "mistakes", "due-reviews", "coverage", "activity"])
+    for (const key of ["study-items", "study-item", "assessments", "assessment", "mistakes", "due-reviews", "coverage", "activity", "study-settings", "claim-suggestions", "requirement-frequency", "upcoming-assessments"])
       qc.invalidateQueries({ queryKey: [key] });
   };
 }

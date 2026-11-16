@@ -22,7 +22,7 @@ from career_core.llm.types import (
     UsagePart,
 )
 
-# 합성 30문항 측정(docs/architecture/search.md): e5-large와 같은 재현율, 메모리는 절반 이하.
+# 합성 30문항 측정(docs/architecture/search.md): e5-large와 같은 R@5, mmap 로드로 최대 RSS ~0.95GB.
 DEFAULT_LOCAL_MODEL = "minishlab/potion-multilingual-128M"
 IDLE_UNLOAD_SECONDS = 300
 
@@ -71,7 +71,12 @@ class LocalEmbeddingClient:
                 except ImportError as exc:
                     raise ModelCallError("local_embedding_not_installed") from exc
                 try:
-                    model = TextEmbedding(name, cache_dir=self._cache_dir, threads=self._threads)
+                    # 정적(model2vec) 모델은 임베딩 행렬을 mmap으로 연다: 벡터는 같고 쓰는 행만 메모리에
+                    # 올라가 potion-multilingual-128M 최대 RSS가 ~1.44GB → ~0.95GB (search.md 측정).
+                    # ONNX 모델은 이 인자를 무시한다 (fastembed 0.9).
+                    model = TextEmbedding(
+                        name, cache_dir=self._cache_dir, threads=self._threads, mmap=True
+                    )
                 except ValueError as exc:
                     raise ModelCallError("model_not_found") from exc
                 self._models[name] = model

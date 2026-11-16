@@ -1,6 +1,7 @@
 import type {
   Assessment,
   AssessmentKind,
+  ClaimSuggestions,
   Coverage,
   RequirementCoverage,
   RequirementField,
@@ -10,8 +11,8 @@ import type {
 import { Badge, Button, EmptyState, Input, Label, Section, Select, Sheet, StatusBadge } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Link2, Plus, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { ChevronRight, Link2, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, List, Loaded, PageHeader, Tabs } from "../components/common";
 import { AttemptForm, AttemptRow, MistakeForm, ReviewCard, useStudyInvalidate } from "../components/study/parts";
@@ -27,7 +28,7 @@ import {
 } from "../lib/labels";
 
 const route = getRouteApi("/study");
-export type StudyTab = "reviews" | "coverage" | "items" | "assessments" | "mistakes";
+export type StudyTab = "reviews" | "coverage" | "frequency" | "items" | "assessments" | "mistakes";
 
 export function StudyPage() {
   const { tab = "reviews", posting } = route.useSearch();
@@ -45,11 +46,13 @@ export function StudyPage() {
         items={[
           { value: "reviews", label: `오늘 복습${due.data?.length ? ` ${due.data.length}` : ""}` },
           { value: "coverage", label: "공고별 충족" },
+          { value: "frequency", label: "요건 빈도" },
           { value: "items", label: "학습 항목" },
           { value: "assessments", label: "시험 준비" },
           { value: "mistakes", label: "오답" },
         ]}
       />
+      {tab === "reviews" ? <TimezoneLine /> : null}
       {tab === "reviews" && reviewed ? <p className="mb-2 text-xs text-ok">{reviewed}</p> : null}
       {tab === "reviews" ? (
         <Loaded query={due}>
@@ -68,6 +71,7 @@ export function StudyPage() {
         </Loaded>
       ) : null}
       {tab === "coverage" ? <CoverageTab postingId={posting} onPosting={(p) => go("coverage", p)} /> : null}
+      {tab === "frequency" ? <FrequencyTab /> : null}
       {tab === "items" ? <ItemsTab /> : null}
       {tab === "assessments" ? <AssessmentsTab /> : null}
       {tab === "mistakes" ? <MistakesTab /> : null}
@@ -116,6 +120,11 @@ function CoverageView({ postingId }: { postingId: string }) {
   const q = useQuery({ queryKey: ["coverage", postingId], queryFn: () => api.coverage(postingId) });
   const [planMsg, setPlanMsg] = useState<string | null>(null);
   const [linkFor, setLinkFor] = useState<RequirementCoverage | null>(null);
+  const [suggestFor, setSuggestFor] = useState<string | null>(null);
+  const cleanup = useMutation({
+    mutationFn: () => api.cleanupRequirements(postingId, { drop_items: false }),
+    onSuccess: invalidate,
+  });
   const plan = useMutation({
     mutationFn: (lines?: { field: RequirementField; text: string }[]) =>
       api.planFromPosting(postingId, lines ? { lines } : {}),
@@ -165,7 +174,18 @@ function CoverageView({ postingId }: { postingId: string }) {
               판정은 사용자가 연결한 주장과 학습 기록뿐이며 합격 가능성이 아닙니다.
             </p>
             {planMsg ? <p className="text-[13px] text-ok">{planMsg}</p> : null}
-            <ErrorText error={plan.error ?? link.error ?? unlink.error} />
+            <ErrorText error={plan.error ?? link.error ?? unlink.error ?? cleanup.error} />
+            {reqs.some((r) => !r.current) ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
+                <span className="min-w-0 flex-1">
+                  공고를 다시 확정하면서 빠진 요건 {reqs.filter((r) => !r.current).length}줄이 남아 있습니다. 정리하면 그 요건과 주장 연결만 지우고,
+                  학습 항목은 그대로 둡니다.
+                </span>
+                <Button size="sm" variant="ghost" disabled={cleanup.isPending} onClick={() => cleanup.mutate()}>
+                  <Trash2 size={14} /> 빠진 요건 정리
+                </Button>
+              </div>
+            ) : null}
             <Section title="자격·우대 요건">
               {reqs.length ? (
                 <ul className="space-y-2">
@@ -177,6 +197,18 @@ function CoverageView({ postingId }: { postingId: string }) {
                       onLink={() => setLinkFor(r)}
                       onUnlink={(claimId) => r.requirement_id && unlink.mutate({ requirementId: r.requirement_id, claimId })}
                       busy={plan.isPending || unlink.isPending}
+                      suggestOpen={suggestFor === `${r.field}:${r.text}`}
+                      onSuggest={() => setSuggestFor(suggestFor === `${r.field}:${r.text}` ? null : `${r.field}:${r.text}`)}
+                      suggestions={
+                        suggestFor === `${r.field}:${r.text}` && r.current ? (
+                          <SuggestionPanel
+                            postingId={postingId}
+                            r={r}
+                            onLink={(claimId) => link.mutate({ req: r, claimId })}
+                            linking={link.isPending}
+                          />
+                        ) : null
+                      }
                     />
                   ))}
                 </ul>
@@ -230,12 +262,18 @@ function RequirementRow({
   onLink,
   onUnlink,
   busy,
+  suggestOpen,
+  onSuggest,
+  suggestions,
 }: {
   r: RequirementCoverage;
   onPlan: () => void;
   onLink: () => void;
   onUnlink: (claimId: string) => void;
   busy: boolean;
+  suggestOpen: boolean;
+  onSuggest: () => void;
+  suggestions: ReactNode;
 }) {
   const c = COVERAGE[r.coverage];
   return (
@@ -277,13 +315,166 @@ function RequirementRow({
         <Button size="sm" variant="ghost" onClick={onLink}>
           <Link2 size={14} /> 주장 연결
         </Button>
+        {r.current ? (
+          <Button size="sm" variant="ghost" aria-expanded={suggestOpen} onClick={onSuggest}>
+            <Search size={14} /> 후보 찾기
+          </Button>
+        ) : null}
         {!r.items.length && r.coverage !== "evidenced" ? (
           <Button size="sm" variant="ghost" onClick={onPlan} disabled={busy}>
             <Plus size={14} /> 학습 항목
           </Button>
         ) : null}
       </div>
+      {suggestions}
     </li>
+  );
+}
+
+function SuggestionPanel({
+  postingId,
+  r,
+  onLink,
+  linking,
+}: {
+  postingId: string;
+  r: RequirementCoverage;
+  onLink: (claimId: string) => void;
+  linking: boolean;
+}) {
+  const q = useQuery({
+    queryKey: ["claim-suggestions", postingId, r.field, r.text, r.claims.length],
+    queryFn: () => api.claimSuggestions(postingId, { field: r.field, text: r.text, limit: 5 }),
+  });
+  return (
+    <div className="mt-2 rounded-md border border-dashed border-line px-2.5 py-2">
+      <Loaded query={q}>
+        {(res: ClaimSuggestions) => {
+          const line = res.lines[0];
+          return (
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted">
+                검색 제안 ({res.mode === "hybrid" ? "키워드 + 의미" : "키워드"}, 검색어 “{line?.query}”). 맞는 주장만 직접 연결하세요. 제안만으로는
+                연결되거나 충족으로 바뀌지 않습니다.
+              </p>
+              {line?.candidates.length ? (
+                <ul className="space-y-1">
+                  {line.candidates.map((c) => (
+                    <li key={c.claim_id} className="flex items-start gap-1.5 text-[13px]">
+                      <StatusBadge status={c.status} />
+                      <span className="min-w-0 flex-1">
+                        {c.statement}
+                        {c.experience_title ? <span className="text-xs text-muted"> · {c.experience_title}</span> : null}
+                      </span>
+                      <Button size="sm" variant="ghost" disabled={linking} onClick={() => onLink(c.claim_id)}>
+                        <Link2 size={13} /> 연결
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[13px] text-muted">찾은 후보가 없습니다. “주장 연결”에서 직접 검색할 수 있습니다.</p>
+              )}
+            </div>
+          );
+        }}
+      </Loaded>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- 요건 빈도
+
+function FrequencyTab() {
+  const [archived, setArchived] = useState(false);
+  const q = useQuery({
+    queryKey: ["requirement-frequency", archived],
+    queryFn: () => api.requirementFrequency({ include_archived: archived }),
+  });
+  return (
+    <Loaded query={q}>
+      {(f) => (
+        <div className="space-y-3">
+          <p className="text-xs text-muted">
+            내가 저장한 공고{archived ? "(보관 포함)" : ""}만 센 숫자입니다. 채용 시장 전체 통계가 아닙니다. 기술 낱말은 간단한 규칙으로 묶습니다
+            (예: 도커·Docker, k8s·Kubernetes).
+          </p>
+          <label className="flex items-center gap-1.5 text-[13px]">
+            <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> 보관한 공고도 세기
+          </label>
+          {f.total_postings && f.groups.length ? (
+            <List>
+              {f.groups.map((g) => (
+                <li key={g.key} className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 text-sm">
+                      저장 공고 {f.total_postings}개 중 <b className="tabular-nums">{g.postings}개</b>가 <b>{g.label}</b> 요구
+                    </span>
+                    <span className="h-1.5 w-24 shrink-0 overflow-hidden rounded-full bg-subtle" aria-hidden>
+                      <span className="block h-full bg-accent" style={{ width: `${(g.postings / f.total_postings) * 100}%` }} />
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-muted">
+                    {[g.required ? `자격 ${g.required}` : null, g.preferred ? `우대 ${g.preferred}` : null].filter(Boolean).join(" · ")}
+                    {g.examples.length ? ` · 예: ${g.examples.join(" / ")}` : ""}
+                  </p>
+                </li>
+              ))}
+            </List>
+          ) : (
+            <EmptyState>저장한 공고의 자격·우대 요건이 없습니다.</EmptyState>
+          )}
+        </div>
+      )}
+    </Loaded>
+  );
+}
+
+// ---------------------------------------------------------------- 표시 시간대
+
+const COMMON_ZONES = ["Asia/Seoul", "Asia/Tokyo", "UTC", "Europe/London", "America/New_York", "America/Los_Angeles"];
+
+function TimezoneLine() {
+  const invalidate = useStudyInvalidate();
+  const q = useQuery({ queryKey: ["study-settings"], queryFn: api.studySettings });
+  const [editing, setEditing] = useState(false);
+  const save = useMutation({
+    mutationFn: (tz: string) => api.putStudySettings(tz),
+    onSuccess: () => {
+      setEditing(false);
+      invalidate();
+    },
+  });
+  if (!q.data) return null;
+  const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const zones = Array.from(new Set([q.data.timezone, browser, ...COMMON_ZONES].filter(Boolean)));
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+      <span>
+        복습 마감: {q.data.timezone} 기준 오늘({q.data.today}) 끝{q.data.is_default ? " (기본값)" : ""}
+      </span>
+      {editing ? (
+        <Select
+          aria-label="표시 시간대"
+          className="h-7 w-auto text-xs"
+          value={q.data.timezone}
+          disabled={save.isPending}
+          onChange={(e) => save.mutate(e.target.value)}
+        >
+          {zones.map((z) => (
+            <option key={z} value={z}>
+              {z}
+              {z === browser ? " (이 브라우저)" : ""}
+            </option>
+          ))}
+        </Select>
+      ) : (
+        <button className="text-accent hover:underline" onClick={() => setEditing(true)}>
+          시간대 바꾸기
+        </button>
+      )}
+      <ErrorText error={save.error} />
+    </div>
   );
 }
 

@@ -9,7 +9,7 @@ import pytest
 from career_core.adapters.blobstore import LocalBlobStore
 from career_core.adapters.embed_local import e5_prefix
 from career_core.adapters.llm_openai import OpenAICompatibleClient
-from career_core.db import Embedding, ModelCall
+from career_core.db import Embedding, Job, ModelCall
 from career_core.domain.workspace import Role, scopes_for_role
 from career_core.evals.search_eval import evaluate, load_fixture, seed
 from career_core.interfaces.http import CoreDeps, build_router
@@ -373,3 +373,141 @@ async def test_search_http(db, blobs, people):
         assert r.json()["hits"] == []
     async with db.workspace_session(owner.workspace_id) as s:
         assert await s.scalar(select(func.count()).select_from(Embedding)) == 19
+
+
+# --- 학습 기록 검색 (메모·오답) -------------------------------------------------------
+
+
+async def test_study_records_are_searchable_and_labelled(db, people):
+    from career_core.usecases import study
+
+    owner, other = people["owner"], people["other"]
+    item = await study.create_item(db, owner, title="합성 캐시 공부")
+    await study.log_session(
+        db, owner, item, minutes=30, notes="합성 메모: 레디스 캐시 무효화 순서를 정리했다"
+    )
+    await study.add_mistake(
+        db,
+        owner,
+        study_item_id=item,
+        question="합성 문제: 트랜잭션 격리 수준",
+        wrong_answer="READ UNCOMMITTED가 기본",
+        correct_answer="READ COMMITTED가 기본",
+    )
+    exp = await brain.create_experience(db, owner, title="합성 경험")
+    await brain.add_claim(db, owner, exp, statement="레디스 캐시로 응답을 줄였다", kind="result")
+
+    # 기본 검색(브레인)에는 학습 기록이 섞이지 않는다
+    res = await search(db, owner, "레디스 캐시")
+    assert {h.kind for h in res.hits} == {"claim"}
+    assert {h.record for h in res.hits} == {"experience"}
+
+    kinds = ("claim", "study_note", "study_mistake")
+    res = await search(db, owner, "레디스 캐시", kinds=kinds)
+    note = next(h for h in res.hits if h.kind == "study_note")
+    assert note.record == "study" and note.study_title == "합성 캐시 공부"
+    assert note.experience_id is None and note.experience_title is None
+    assert note.claim_status is None
+    res = await search(db, owner, "격리 수준", kinds=kinds)
+    [mistake] = [h for h in res.hits if h.kind == "study_mistake"]
+    assert mistake.record == "study" and mistake.study_item_id == item
+    assert mistake.question == "합성 문제: 트랜잭션 격리 수준"
+    res = await search(db, owner, "READ COMMITTED", kinds=kinds)  # 정답 칸도 찾는다
+    assert any(h.id == mistake.id for h in res.hits)
+    assert (await search(db, other, "레디스 캐시", kinds=kinds)).hits == []
+
+    # 의미 색인: 학습 기록은 private 등급 (API 임베딩이 private을 허용하면 보낸다)
+    fake = FakeEmbedder()
+    gw = gateway(db, API, fake)
+    await index(db, gw)
+    sent = [t for _, texts in fake.calls for t in texts]
+    assert "합성 메모: 레디스 캐시 무효화 순서를 정리했다" in sent
+    assert any(t.startswith("합성 문제: 트랜잭션 격리 수준\nREAD UNCOMMITTED") for t in sent)
+    kinds_indexed = {v.target_kind for v in await rows(db, owner, Embedding)}
+    assert {"study_note", "study_mistake", "claim"} <= kinds_indexed
+    res = await search(db, owner, "캐시 무효화", gateway=gw, kinds=("study_note",))
+    assert res.mode == "hybrid" and res.hits[0].semantic_rank is not None
+
+    # 학습 항목을 지우면 그 메모·오답의 벡터도 지운다
+    await study.delete_item(db, owner, item)
+    assert {v.target_kind for v in await rows(db, owner, Embedding)} == {"claim"}
+
+
+# --- 색인 실행 중 변경 ---------------------------------------------------------------
+
+
+class EditingEmbedder(FakeEmbedder):
+    """첫 호출 중에 주장을 고친다 (색인 작업이 대상을 고른 뒤 바뀐 자료)."""
+
+    def __init__(self, on_first):
+        super().__init__()
+        self.on_first = on_first
+
+    async def embed(self, model, texts, *, input_type, dimensions):
+        if self.on_first is not None:
+            hook, self.on_first = self.on_first, None
+            await hook()
+        return await super().embed(model, texts, input_type=input_type, dimensions=dimensions)
+
+
+async def test_change_during_index_run_is_indexed(db, people):
+    owner = people["owner"]
+    exp = await brain.create_experience(db, owner, title="합성 경험")
+    claim = await brain.add_claim(db, owner, exp, statement="처음 문장 (합성)", kind="result")
+
+    async def edit():
+        # 실행 중인 작업이 있으므로 이 수정의 색인 예약은 새 작업을 만들지 않는다
+        await brain.edit_claim(db, owner, claim, statement="실행 중에 고친 문장 (합성)")
+
+    fake = EditingEmbedder(edit)
+    gw = gateway(db, LOCAL, fake)
+    await run_until_idle(db, index_handlers(IndexDeps(db, gw)))  # 대상 1개 < per_step
+    sent = [t for _, texts in fake.calls for t in texts]
+    assert sent[0] == "처음 문장 (합성)" and "실행 중에 고친 문장 (합성)" in sent
+    res = await search(db, owner, "고친 문장", gateway=gw, kinds=("claim",))
+    assert res.hits[0].id == claim and res.hits[0].semantic_rank is not None
+    async with db.workspace_session(owner.workspace_id) as s:
+        statuses = (await s.execute(select(Job.status).where(Job.kind == "embed"))).scalars()
+        assert set(statuses) == {"done"}
+
+
+async def test_index_final_check_waits_for_pending_request(db, people):
+    """예약 트랜잭션이 커밋되기 전이면 마지막 확인이 기다렸다가 그 변경을 본다."""
+    import asyncio
+
+    from career_core.db import Claim
+    from career_core.usecases.index_queue import request_index
+    from career_core.usecases.indexing import process_index
+    from sqlalchemy import update
+
+    owner = people["owner"]
+    ws = owner.workspace_id
+    exp = await brain.create_experience(db, owner, title="합성 경험")
+    claim = await brain.add_claim(db, owner, exp, statement="옛 문장 (합성)", kind="result")
+    fake = FakeEmbedder()
+    deps = IndexDeps(db, gateway(db, LOCAL, fake))
+    await run_until_idle(db, index_handlers(deps))
+    async with db.workspace_session(ws) as s:  # 실행 중인 작업 하나 (worker가 집은 상태)
+        s.add(Job(workspace_id=ws, kind="embed", target_id=ws, status="running"))
+
+    fake.calls.clear()
+    async with db.workspace_session(ws) as s:
+        await s.execute(update(Claim).where(Claim.id == claim).values(statement="새 문장 (합성)"))
+        await request_index(s, ws)  # 실행 중인 작업이 있어 새 작업은 생기지 않는다
+        step = asyncio.create_task(process_index(deps, ws, ws))
+        await asyncio.sleep(0.3)
+        assert not step.done()  # 커밋 전: 마지막 확인이 lock을 기다린다
+    outcome = await step
+    assert not outcome.done  # 커밋된 변경을 보고 색인했다 → 한 번 더 확인
+    assert [t for _, texts in fake.calls for t in texts] == ["새 문장 (합성)"]
+    assert (await process_index(deps, ws, ws)).done
+    async with db.workspace_session(ws) as s:
+        # 남은 대상이 없다는 확인과 같은 트랜잭션에서 작업을 끝냈다 → 이후 예약은 새 작업이 된다
+        statuses = (await s.execute(select(Job.status).where(Job.kind == "embed"))).scalars()
+        assert set(statuses) == {"done"}
+        await request_index(s, ws)
+    async with db.workspace_session(ws) as s:
+        queued = await s.scalar(
+            select(func.count()).select_from(Job).where(Job.kind == "embed", Job.status == "queued")
+        )
+        assert queued == 1

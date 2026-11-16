@@ -12,28 +12,32 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from career_core.db import (
     Claim,
     Database,
+    Embedding,
     Experience,
     JobPosting,
     StudyAssessment,
     StudyAttempt,
     StudyClaimCandidate,
     StudyItem,
+    StudyItemMerge,
     StudyMistake,
     StudyRequirement,
     StudyRequirementClaim,
     StudyReview,
     StudySession,
+    StudySettings,
 )
 from career_core.db.base import utcnow
 from career_core.domain.brain import (
@@ -45,6 +49,7 @@ from career_core.domain.brain import (
 )
 from career_core.domain.postings import PostingStatus
 from career_core.domain.study import (
+    DEFAULT_TIMEZONE,
     TEST_KINDS,
     AssessmentKind,
     AssessmentStatus,
@@ -59,14 +64,25 @@ from career_core.domain.study import (
     ReviewState,
     StudyRuleError,
     classify_step,
+    d_day,
+    day_end,
+    day_start,
     due_after,
     first_due,
+    local_date,
     next_review,
+    normalize_line,
+    requirement_query,
+    requirement_terms,
     split_process,
+    zone,
 )
+from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound
 from career_core.usecases.index_queue import request_index
+from career_core.usecases.search import STUDY_KINDS
+from career_core.usecases.search import search as search_records
 
 MAX_TITLE = 300
 MAX_TEXT = 4000
@@ -129,6 +145,44 @@ async def _get(s: AsyncSession, model: type, ident: UUID | None, what: str):
     if row is None:
         raise NotFound(what)
     return row
+
+
+async def _live_item(s: AsyncSession, ident: UUID | None) -> StudyItem:
+    """기록을 더할 수 있는 학습 항목. 다른 항목으로 합쳐진 항목이면 409 `item_merged`."""
+    item = await _get(s, StudyItem, ident, "study_item")
+    if item.status == ItemStatus.MERGED:
+        raise StudyRuleError("item_merged")
+    return item
+
+
+async def _merged_sources(s: AsyncSession, item_ids: Iterable[UUID]) -> dict[UUID, list[UUID]]:
+    """합친 항목 → 그 항목으로 합쳐진 항목들 (병합은 항상 한 단계: 합쳐진 항목을 다시 가리키지 않는다)."""
+    ids = list(item_ids)
+    if not ids:
+        return {}
+    out: dict[UUID, list[UUID]] = {}
+    for src, dst in (
+        await s.execute(
+            select(StudyItemMerge.source_item_id, StudyItemMerge.target_item_id)
+            .where(StudyItemMerge.target_item_id.in_(ids))
+            .order_by(StudyItemMerge.created_at)
+        )
+    ).all():
+        out.setdefault(dst, []).append(src)
+    return out
+
+
+async def _merge_targets(s: AsyncSession, item_ids: Iterable[UUID]) -> dict[UUID, UUID]:
+    """합쳐진 항목 → 합친 항목."""
+    ids = list(item_ids)
+    if not ids:
+        return {}
+    rows = await s.execute(
+        select(StudyItemMerge.source_item_id, StudyItemMerge.target_item_id).where(
+            StudyItemMerge.source_item_id.in_(ids)
+        )
+    )
+    return dict(rows.all())
 
 
 # ---------------------------------------------------------------- 공고 요건
@@ -249,7 +303,7 @@ async def update_item(
 ) -> str:
     """학습 상태를 바꾼다. 완료해도 주장·경험은 생기지 않는다 (학습함 ≠ 입증함)."""
     async with db.workspace_session(actor.workspace_id) as s:
-        item = await _get(s, StudyItem, item_id, "study_item")
+        item = await _live_item(s, item_id)
         if title is not None:
             item.title = _title(title)
         if kind is not None:
@@ -258,6 +312,8 @@ async def update_item(
             item.notes = _text(notes)
         if status is not None:
             item.status = _enum(ItemStatus, status, "invalid_status")
+            if item.status == ItemStatus.MERGED:
+                raise StudyRuleError("invalid_status")  # 병합은 merge_items로만
             if item.status == ItemStatus.DONE:
                 item.completed_at = item.completed_at or now or utcnow()
             else:
@@ -276,7 +332,7 @@ async def log_session(
     resources: list[dict] | None = None,
 ) -> UUID:
     async with db.workspace_session(actor.workspace_id) as s:
-        item = await _get(s, StudyItem, item_id, "study_item")
+        item = await _live_item(s, item_id)
         session = StudySession(
             id=uuid4(),
             workspace_id=actor.workspace_id,
@@ -290,6 +346,8 @@ async def log_session(
         s.add(session)
         if item.status == ItemStatus.PLANNED:
             item.status = ItemStatus.IN_PROGRESS.value
+        if session.notes:
+            await request_index(s, actor.workspace_id)  # 학습 메모도 검색 대상 (학습 기록으로 표시)
     return session.id
 
 
@@ -392,7 +450,7 @@ async def record_attempt(
         if assessment_id is not None:
             await _get(s, StudyAssessment, assessment_id, "assessment")
         if study_item_id is not None:
-            await _get(s, StudyItem, study_item_id, "study_item")
+            await _live_item(s, study_item_id)
         attempt = StudyAttempt(
             id=uuid4(),
             workspace_id=actor.workspace_id,
@@ -440,7 +498,12 @@ async def add_mistake(
             attempt = await _get(s, StudyAttempt, attempt_id, "attempt")
             study_item_id = study_item_id or attempt.study_item_id
         if study_item_id is not None:
-            await _get(s, StudyItem, study_item_id, "study_item")
+            item = await _get(s, StudyItem, study_item_id, "study_item")
+            if item.status == ItemStatus.MERGED:
+                target = (await _merge_targets(s, [item.id])).get(item.id)
+                if target is None or attempt_id is None:
+                    raise StudyRuleError("item_merged")
+                study_item_id = target  # 합쳐진 항목의 응시에서 적는 오답은 합친 항목으로
         m = StudyMistake(
             id=uuid4(),
             workspace_id=actor.workspace_id,
@@ -457,6 +520,7 @@ async def add_mistake(
             created_at=now,
         )
         s.add(m)
+        await request_index(s, actor.workspace_id)  # 오답도 검색 대상 (학습 기록으로 표시)
     return m.id
 
 
@@ -532,16 +596,29 @@ class DueMistake:
 
 
 async def due_reviews(
-    db: Database, actor: ActorContext, *, now: datetime | None = None, limit: int = DUE_LIMIT
+    db: Database,
+    actor: ActorContext,
+    *,
+    until: datetime | None = None,
+    now: datetime | None = None,
+    tz: str | None = None,
+    limit: int = DUE_LIMIT,
 ) -> list[DueMistake]:
-    """`now`까지 복습할 오답 (가장 오래 밀린 것부터)."""
-    now = now or utcnow()
+    """오늘 복습할 오답 (가장 오래 밀린 것부터).
+
+    마감은 표시 시간대(`tz` → 공간 설정 → Asia/Seoul)에서 `now`가 속한 하루의 끝이다.
+    `until`을 주면 그 시각까지(포함)로 바꾼다.
+    """
     async with db.workspace_session(actor.workspace_id) as s:
+        if until is not None:
+            due = StudyMistake.due_at <= until
+        else:
+            due = StudyMistake.due_at < day_end(now or utcnow(), await _zone(s, tz))
         rows = (
             await s.execute(
                 select(StudyMistake, StudyItem.title)
                 .outerjoin(StudyItem, StudyItem.id == StudyMistake.study_item_id)
-                .where(StudyMistake.status == MistakeStatus.OPEN, StudyMistake.due_at <= now)
+                .where(StudyMistake.status == MistakeStatus.OPEN, due)
                 .order_by(StudyMistake.due_at, StudyMistake.created_at)
                 .limit(max(1, min(limit, DUE_LIMIT)))
             )
@@ -693,11 +770,12 @@ async def propose_claim(
         raise StudyRuleError("text_too_long")
     claim_kind = _enum(ClaimKind, kind, "invalid_claim_kind")
     async with db.workspace_session(actor.workspace_id) as s:
-        item = await _get(s, StudyItem, item_id, "study_item")
+        item = await _live_item(s, item_id)
         await _get(s, Experience, experience_id, "experience")
         if attempt_id is not None:
             attempt = await _get(s, StudyAttempt, attempt_id, "attempt")
-            if attempt.study_item_id != item.id:
+            merged = (await _merged_sources(s, [item.id])).get(item.id, [])
+            if attempt.study_item_id not in (item.id, *merged):
                 raise StudyRuleError("attempt_not_for_item")
         elif item.status != ItemStatus.DONE:
             raise StudyRuleError("no_study_result")
@@ -921,6 +999,10 @@ async def list_items(
         q = select(StudyItem).order_by(StudyItem.created_at)
         if status is not None:
             q = q.where(StudyItem.status == _enum(ItemStatus, status, "invalid_status"))
+        else:
+            q = q.where(
+                StudyItem.status != ItemStatus.MERGED
+            )  # 합쳐진 항목은 합친 항목 안에서 보인다
         items = (await s.execute(q)).scalars().all()
         ids = [i.id for i in items]
         minutes = dict(
@@ -1029,11 +1111,30 @@ class ItemView:
     attempts: list[AttemptView]
     mistakes: list[MistakeView]
     claim_candidates: list[CandidateView]
+    merged_into_id: UUID | None = None
+    # 이 항목으로 합쳐진 항목 (응시·후보 기록은 원래 항목에 남아 있고 여기서 함께 보인다)
+    merged_from: list[MergedFrom] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class MergedFrom:
+    id: UUID
+    title: str
 
 
 async def get_item(db: Database, actor: ActorContext, item_id: UUID) -> ItemView:
     async with db.workspace_session(actor.workspace_id) as s:
         item = await _get(s, StudyItem, item_id, "study_item")
+        sources = (await _merged_sources(s, [item.id])).get(item.id, [])
+        merged_into = (await _merge_targets(s, [item.id])).get(item.id)
+        owners = [item.id, *sources]
+        merged_from = (
+            await s.execute(
+                select(StudyItem.id, StudyItem.title)
+                .where(StudyItem.id.in_(sources))
+                .order_by(StudyItem.created_at)
+            )
+        ).all()
         sessions = (
             (
                 await s.execute(
@@ -1049,7 +1150,7 @@ async def get_item(db: Database, actor: ActorContext, item_id: UUID) -> ItemView
             (
                 await s.execute(
                     select(StudyAttempt)
-                    .where(StudyAttempt.study_item_id == item_id)
+                    .where(StudyAttempt.study_item_id.in_(owners))
                     .order_by(StudyAttempt.taken_at)
                 )
             )
@@ -1071,7 +1172,7 @@ async def get_item(db: Database, actor: ActorContext, item_id: UUID) -> ItemView
             await s.execute(
                 select(StudyClaimCandidate, Claim.statement, Claim.status)
                 .join(Claim, Claim.id == StudyClaimCandidate.claim_id)
-                .where(StudyClaimCandidate.study_item_id == item_id)
+                .where(StudyClaimCandidate.study_item_id.in_(owners))
                 .order_by(StudyClaimCandidate.created_at)
             )
         ).all()
@@ -1096,6 +1197,8 @@ async def get_item(db: Database, actor: ActorContext, item_id: UUID) -> ItemView
             CandidateView(c.claim_id, c.attempt_id, statement, status)
             for c, statement, status in candidates
         ],
+        merged_into_id=merged_into,
+        merged_from=[MergedFrom(i, t) for i, t in merged_from],
     )
 
 
@@ -1320,7 +1423,27 @@ async def posting_coverage(db: Database, actor: ActorContext, posting_id: UUID) 
             .scalars()
             .all()
         )
-        item_ids = [i.id for i in item_rows]
+        # 합쳐진 항목은 합친 항목으로 보여 준다 (그 항목의 응시도 합친 항목의 최근 응시로 센다).
+        merged_to = await _merge_targets(
+            s, [i.id for i in item_rows if i.status == ItemStatus.MERGED]
+        )
+        target_rows = {
+            t.id: t
+            for t in (
+                (
+                    await s.execute(
+                        select(StudyItem).where(StudyItem.id.in_(set(merged_to.values())))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        }
+        shown_ids = {i.id for i in item_rows if i.status != ItemStatus.MERGED} | set(target_rows)
+        owner_of = {i: i for i in shown_ids} | {
+            src: dst for dst, srcs in (await _merged_sources(s, shown_ids)).items() for src in srcs
+        }
+        item_ids = list(owner_of)
         a_ids = [a.id for a in assessment_rows]
         attempts = (
             (
@@ -1339,7 +1462,7 @@ async def posting_coverage(db: Database, actor: ActorContext, posting_id: UUID) 
     last: dict[UUID, AttemptView] = {}
     for a in attempts:  # taken_at 순이므로 마지막 값이 최근
         if a.study_item_id:
-            last[a.study_item_id] = _attempt_view(a)
+            last[owner_of.get(a.study_item_id, a.study_item_id)] = _attempt_view(a)
         if a.assessment_id:
             last[a.assessment_id] = _attempt_view(a)
     claims: dict[UUID, list[LinkedClaim]] = {}
@@ -1347,9 +1470,10 @@ async def posting_coverage(db: Database, actor: ActorContext, posting_id: UUID) 
         claims.setdefault(req_id, []).append(LinkedClaim(c.id, c.statement, c.status))
     items: dict[UUID, list[LinkedItem]] = {}
     for i in item_rows:
-        items.setdefault(i.requirement_id, []).append(
-            LinkedItem(i.id, i.title, i.status, last.get(i.id))
-        )
+        shown = target_rows.get(merged_to.get(i.id), i) if i.status == ItemStatus.MERGED else i
+        row_items = items.setdefault(i.requirement_id, [])
+        if all(x.id != shown.id for x in row_items):
+            row_items.append(LinkedItem(shown.id, shown.title, shown.status, last.get(shown.id)))
     assessments: dict[UUID, list[LinkedAssessment]] = {}
     for a in assessment_rows:
         assessments.setdefault(a.requirement_id, []).append(
@@ -1393,3 +1517,549 @@ async def posting_coverage(db: Database, actor: ActorContext, posting_id: UUID) 
         requirements=out,
         counts=counts,
     )
+
+
+# ---------------------------------------------------------------- 표시 시간대 설정
+
+
+async def _zone(s: AsyncSession, override: str | None = None) -> ZoneInfo:
+    """요청 값 → 공간 설정 → 기본값(Asia/Seoul) 순서."""
+    if override:
+        return zone(override)
+    name = await s.scalar(select(StudySettings.timezone))
+    return zone(name or DEFAULT_TIMEZONE)
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsView:
+    timezone: str
+    is_default: bool  # 저장한 설정이 없어 기본값을 쓰는 중
+    today: date  # 그 시간대의 오늘
+    day_ends_at: datetime  # 오늘 복습 마감 (다음 날 0시, UTC)
+
+
+def _settings_view(name: str, is_default: bool, now: datetime) -> SettingsView:
+    tz = zone(name)
+    return SettingsView(name, is_default, local_date(now, tz), day_end(now, tz))
+
+
+async def get_settings(
+    db: Database, actor: ActorContext, *, now: datetime | None = None
+) -> SettingsView:
+    async with db.workspace_session(actor.workspace_id) as s:
+        name = await s.scalar(select(StudySettings.timezone))
+    return _settings_view(name or DEFAULT_TIMEZONE, name is None, now or utcnow())
+
+
+async def set_settings(
+    db: Database, actor: ActorContext, *, timezone: str, now: datetime | None = None
+) -> SettingsView:
+    name = timezone.strip() if isinstance(timezone, str) else ""
+    zone(name)  # 모르는 시간대는 저장하지 않는다
+    async with db.workspace_session(actor.workspace_id) as s:
+        row = await s.scalar(select(StudySettings))
+        if row is None:
+            s.add(
+                StudySettings(
+                    id=uuid4(),
+                    workspace_id=actor.workspace_id,
+                    timezone=name,
+                    updated_by=actor.subject_id,
+                )
+            )
+        else:
+            row.timezone, row.updated_by = name, actor.subject_id
+    return _settings_view(name, False, now or utcnow())
+
+
+# ---------------------------------------------------------------- 다가오는 시험 (오늘 화면 D-day)
+
+
+@dataclass(frozen=True, slots=True)
+class UpcomingAssessment:
+    id: UUID
+    title: str
+    kind: str
+    scheduled_at: datetime
+    d_day: int  # 0 = 오늘, 1 = 내일 (표시 시간대 날짜 기준)
+    requirement: RequirementRef | None
+
+
+async def upcoming_assessments(
+    db: Database,
+    actor: ActorContext,
+    *,
+    now: datetime | None = None,
+    tz: str | None = None,
+    days: int = 30,
+    limit: int = 20,
+) -> list[UpcomingAssessment]:
+    """일정이 있는 예정 시험 중 오늘부터 `days`일 안의 것 (가까운 순)."""
+    now = now or utcnow()
+    days = max(0, min(days, 365))
+    async with db.workspace_session(actor.workspace_id) as s:
+        z = await _zone(s, tz)
+        start = day_start(now, z)
+        end = day_end(now + timedelta(days=days), z)
+        rows = (
+            (
+                await s.execute(
+                    select(StudyAssessment)
+                    .where(
+                        StudyAssessment.status == AssessmentStatus.PLANNED,
+                        StudyAssessment.scheduled_at >= start,
+                        StudyAssessment.scheduled_at < end,
+                    )
+                    .order_by(StudyAssessment.scheduled_at, StudyAssessment.created_at)
+                    .limit(max(1, min(limit, DUE_LIMIT)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        refs = await _requirement_refs(s, {a.requirement_id for a in rows if a.requirement_id})
+    return [
+        UpcomingAssessment(
+            a.id,
+            a.title,
+            a.kind,
+            a.scheduled_at,
+            d_day(a.scheduled_at, now, z),
+            refs.get(a.requirement_id) if a.requirement_id else None,
+        )
+        for a in rows
+    ]
+
+
+# ---------------------------------------------------------------- 학습 항목 병합·삭제
+
+
+@dataclass(frozen=True, slots=True)
+class MergeResult:
+    target_id: UUID
+    sessions_moved: int
+    mistakes_moved: int
+    # 불변 기록: 옮기지 않고 원래 항목에 남긴다 (합친 항목에서 함께 보인다)
+    attempts_kept: int
+    candidates_kept: int
+
+
+async def merge_items(
+    db: Database, actor: ActorContext, source_id: UUID, *, into: UUID
+) -> MergeResult:
+    """`source_id` 항목을 `into` 항목으로 합친다.
+
+    - 학습 기록(sessions)·오답(mistakes)은 합친 항목으로 옮긴다 (고칠 수 있는 행).
+    - 응시(attempts)·경험 후보(claim candidates)는 고치지 않는 기록이라 원래 항목에 그대로 두고,
+      원래 항목을 `merged`로 표시해 합친 항목의 화면·충족 보기에서 함께 보이게 한다.
+    - 요건·시험 연결은 합친 항목에 없을 때만 넘겨받는다. 원래 항목의 연결도 기록으로 남는다
+      (충족 보기에서는 합친 항목으로 보인다).
+    """
+    if source_id == into:
+        raise StudyRuleError("merge_same_item")
+    async with db.workspace_session(actor.workspace_id) as s:
+        src = await _live_item(s, source_id)
+        dst = await _live_item(s, into)
+        sessions = await s.execute(
+            update(StudySession)
+            .where(StudySession.study_item_id == src.id)
+            .values(study_item_id=dst.id)
+            .execution_options(synchronize_session=False)
+        )
+        mistakes = await s.execute(
+            update(StudyMistake)
+            .where(StudyMistake.study_item_id == src.id)
+            .values(study_item_id=dst.id)
+            .execution_options(synchronize_session=False)
+        )
+        # 이미 src로 합쳐져 있던 항목도 dst를 바로 가리키게 한다 (병합은 늘 한 단계).
+        await s.execute(
+            update(StudyItemMerge)
+            .where(StudyItemMerge.target_item_id == src.id)
+            .values(target_item_id=dst.id)
+            .execution_options(synchronize_session=False)
+        )
+        owners = [src.id, *(await _merged_sources(s, [dst.id])).get(dst.id, [])]
+        attempts = await s.scalar(
+            select(func.count())
+            .select_from(StudyAttempt)
+            .where(StudyAttempt.study_item_id.in_(owners))
+        )
+        candidates = await s.scalar(
+            select(func.count())
+            .select_from(StudyClaimCandidate)
+            .where(StudyClaimCandidate.study_item_id.in_(owners))
+        )
+        dst.requirement_id = dst.requirement_id or src.requirement_id
+        dst.assessment_id = dst.assessment_id or src.assessment_id
+        if src.notes:
+            joined = f"{dst.notes}\n\n{src.notes}" if dst.notes else src.notes
+            dst.notes = joined if len(joined) <= MAX_TEXT else dst.notes
+        if dst.status == ItemStatus.PLANNED and sessions.rowcount:
+            dst.status = ItemStatus.IN_PROGRESS.value
+        src.status = ItemStatus.MERGED.value
+        src.completed_at = None
+        s.add(
+            StudyItemMerge(
+                id=uuid4(),
+                workspace_id=actor.workspace_id,
+                source_item_id=src.id,
+                target_item_id=dst.id,
+                created_by=actor.subject_id,
+            )
+        )
+    return MergeResult(dst.id, sessions.rowcount, mistakes.rowcount, attempts or 0, candidates or 0)
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    item_id: UUID
+    sessions_deleted: int
+    mistakes_deleted: int
+    merged_items_deleted: int
+
+
+async def delete_item(db: Database, actor: ActorContext, item_id: UUID) -> DeleteResult:
+    """학습 항목을 지운다 (학습 기록·오답, 이 항목으로 합쳐진 항목 포함).
+
+    응시·경험 후보·복습 기록이 있으면 409 `item_has_records`: 고치지 않는 기록을 지우지 않는다.
+    그런 항목은 `dropped`로 두거나 다른 항목에 합친다.
+    """
+    async with db.workspace_session(actor.workspace_id) as s:
+        item = await _get(s, StudyItem, item_id, "study_item")
+        sources = (await _merged_sources(s, [item.id])).get(item.id, [])
+        owners = [item.id, *sources]
+        mistake_ids = list(
+            (
+                await s.execute(
+                    select(StudyMistake.id).where(StudyMistake.study_item_id.in_(owners))
+                )
+            ).scalars()
+        )
+        records = (
+            await s.scalar(
+                select(func.count())
+                .select_from(StudyAttempt)
+                .where(StudyAttempt.study_item_id.in_(owners))
+            )
+            or await s.scalar(
+                select(func.count())
+                .select_from(StudyClaimCandidate)
+                .where(StudyClaimCandidate.study_item_id.in_(owners))
+            )
+            or await s.scalar(
+                select(func.count())
+                .select_from(StudyReview)
+                .where(StudyReview.mistake_id.in_(mistake_ids))
+            )
+        )
+        if records:
+            raise StudyRuleError("item_has_records")
+        session_ids = list(
+            (
+                await s.execute(
+                    select(StudySession.id).where(StudySession.study_item_id.in_(owners))
+                )
+            ).scalars()
+        )
+        # 지운 학습 메모·오답의 검색 벡터도 지운다 (검색은 원본이 없으면 어차피 빠진다).
+        await s.execute(
+            delete(Embedding).where(
+                Embedding.target_kind.in_(STUDY_KINDS),
+                Embedding.target_id.in_(session_ids + mistake_ids),
+            )
+        )
+        await s.execute(delete(StudyItem).where(StudyItem.id.in_(sources)))
+        await s.execute(delete(StudyItem).where(StudyItem.id == item.id))
+    return DeleteResult(item.id, len(session_ids), len(mistake_ids), len(sources))
+
+
+# ---------------------------------------------------------------- 공고에서 빠진 요건 정리
+
+
+@dataclass(frozen=True, slots=True)
+class CleanupResult:
+    removed: list[UUID]
+    items_unlinked: int
+    assessments_unlinked: int
+    items_dropped: int
+    assessments_cancelled: int
+    claim_links_removed: int
+
+
+async def cleanup_requirements(
+    db: Database,
+    actor: ActorContext,
+    posting_id: UUID,
+    *,
+    requirement_ids: Iterable[UUID] | None = None,
+    drop_items: bool = False,
+) -> CleanupResult:
+    """다시 확정하면서 공고에서 빠진 요건(충족 보기의 `current: false`)을 지운다.
+
+    - 지금 공고에 있는 요건은 지우지 않는다 (409 `requirement_current`).
+    - 요건 ↔ 주장 연결은 함께 지워지고, 학습 항목·시험은 남긴 채 요건 연결만 끊긴다.
+      `drop_items`면 끊기는 학습 항목(계획·진행 중)은 `dropped`, 예정 시험은 `cancelled`로 바꾼다.
+    """
+    async with db.workspace_session(actor.workspace_id) as s:
+        posting = await _saved_posting(s, posting_id)
+        current = {
+            (f.value, " ".join(t.split()))
+            for f in RequirementField
+            for t in _posting_list(posting, f)
+        }
+        reqs = (
+            (
+                await s.execute(
+                    select(StudyRequirement).where(StudyRequirement.posting_id == posting.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        by_id = {r.id: r for r in reqs}
+        if requirement_ids is None:
+            chosen = [r for r in reqs if (r.field, r.text) not in current]
+        else:
+            chosen = []
+            for rid in dict.fromkeys(requirement_ids):
+                if rid not in by_id:
+                    raise NotFound("requirement")
+                if (by_id[rid].field, by_id[rid].text) in current:
+                    raise StudyRuleError("requirement_current")
+                chosen.append(by_id[rid])
+        ids = [r.id for r in chosen]
+        items = (
+            (await s.execute(select(StudyItem).where(StudyItem.requirement_id.in_(ids))))
+            .scalars()
+            .all()
+        )
+        assessments = (
+            (
+                await s.execute(
+                    select(StudyAssessment).where(StudyAssessment.requirement_id.in_(ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        links = await s.scalar(
+            select(func.count())
+            .select_from(StudyRequirementClaim)
+            .where(StudyRequirementClaim.requirement_id.in_(ids))
+        )
+        dropped = cancelled = 0
+        if drop_items:
+            for i in items:
+                if i.status in (ItemStatus.PLANNED, ItemStatus.IN_PROGRESS):
+                    i.status, dropped = ItemStatus.DROPPED.value, dropped + 1
+            for a in assessments:
+                if a.status == AssessmentStatus.PLANNED:
+                    a.status, cancelled = AssessmentStatus.CANCELLED.value, cancelled + 1
+            await s.flush()
+        # 학습 항목·시험의 요건 칸은 DB가 비우고(SET NULL), 주장 연결은 함께 지운다(CASCADE).
+        await s.execute(delete(StudyRequirement).where(StudyRequirement.id.in_(ids)))
+    return CleanupResult(ids, len(items), len(assessments), dropped, cancelled, links or 0)
+
+
+# ---------------------------------------------------------------- 요건 → 주장 후보 (검색 제안)
+
+SUGGEST_LINES = 40  # 한 번에 제안할 요건 줄 수 상한 (의미 검색이면 줄마다 검색어 임베딩 1회)
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimSuggestion:
+    claim_id: UUID
+    statement: str
+    status: str
+    experience_id: UUID | None
+    experience_title: str | None
+    score: float
+    keyword_rank: int | None
+    semantic_rank: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class LineSuggestions:
+    field: str
+    text: str
+    requirement_id: UUID | None
+    query: str
+    candidates: list[ClaimSuggestion]
+
+
+@dataclass(frozen=True, slots=True)
+class SuggestionsResult:
+    posting_id: UUID
+    lines: list[LineSuggestions]
+    mode: str  # hybrid | keyword (마지막 검색 기준)
+    semantic_note: str | None
+    # 검색 제안일 뿐: 사용자가 하나씩 연결해야 반영되고, 충족 판정에 쓰지 않는다.
+    basis: str = "search_suggestion"
+
+
+async def suggest_claims(
+    db: Database,
+    actor: ActorContext,
+    posting_id: UUID,
+    *,
+    gateway: ModelGateway | None = None,
+    field: str | None = None,
+    text: str | None = None,
+    limit: int = 5,
+) -> SuggestionsResult:
+    """저장 공고의 요건마다 연결할 만한 주장 후보를 검색으로 찾는다 (키워드 + 설정 시 의미 검색).
+
+    아무것도 연결하지 않고 충족 여부도 바꾸지 않는다. 연결은 `link_claim`(사용자 확인)으로만.
+    이미 연결된 주장과 이의 제기(disputed)·폐기된 주장은 빼고, 확인 대기 주장은 상태를 붙여 보여 준다.
+    """
+    limit = max(1, min(limit, 20))
+    async with db.workspace_session(actor.workspace_id) as s:
+        posting = await _saved_posting(s, posting_id)
+        if text is not None:
+            name = _enum(RequirementField, field or RequirementField.REQUIREMENTS, "invalid_field")
+            line = " ".join(text.split())
+            if line not in _posting_list(posting, name):
+                raise StudyRuleError("requirement_not_in_posting")
+            wanted = [(name, line)]
+        else:
+            wanted = [
+                (f.value, " ".join(t.split()))
+                for f in (RequirementField.REQUIREMENTS, RequirementField.PREFERRED)
+                for t in _posting_list(posting, f)
+            ]
+            wanted = list(dict.fromkeys(wanted))[:SUGGEST_LINES]
+        reqs = {
+            (r.field, r.text): r.id
+            for r in (
+                await s.execute(
+                    select(StudyRequirement).where(StudyRequirement.posting_id == posting.id)
+                )
+            ).scalars()
+        }
+        linked: dict[UUID, set[UUID]] = {}
+        for rid, cid in (
+            await s.execute(
+                select(StudyRequirementClaim.requirement_id, StudyRequirementClaim.claim_id).where(
+                    StudyRequirementClaim.requirement_id.in_(list(reqs.values()))
+                )
+            )
+        ).all():
+            linked.setdefault(rid, set()).add(cid)
+
+    lines: list[LineSuggestions] = []
+    mode, note = "keyword", None
+    for name, line in wanted:
+        rid = reqs.get((name, line))
+        skip = linked.get(rid, set()) if rid else set()
+        query = requirement_query(line)
+        result = await search_records(
+            db, actor, query, gateway=gateway, kinds=("claim",), limit=limit + len(skip)
+        )
+        mode, note = result.mode, result.semantic_note
+        found = [
+            ClaimSuggestion(
+                h.id,
+                h.snippet,
+                h.claim_status or "",
+                h.experience_id,
+                h.experience_title,
+                h.score,
+                h.keyword_rank,
+                h.semantic_rank,
+            )
+            for h in result.hits
+            if h.id not in skip and h.claim_status != ClaimStatus.DISPUTED
+        ][:limit]
+        lines.append(LineSuggestions(name, line, rid, query, found))
+    return SuggestionsResult(posting_id, lines, mode, note)
+
+
+# ---------------------------------------------------------------- 저장 공고 요건 빈도
+
+
+@dataclass(frozen=True, slots=True)
+class FrequencyGroup:
+    key: str
+    label: str
+    postings: int  # 이 낱말이 나온 저장 공고 수 (공고당 한 번)
+    required: int  # 그중 자격 요건에 나온 공고 수
+    preferred: int  # 그중 우대 사항에 나온 공고 수
+    examples: list[str]  # 원문 예시 (최대 3줄)
+    posting_ids: list[UUID]
+
+
+@dataclass(frozen=True, slots=True)
+class FrequencyResult:
+    total_postings: int
+    groups: list[FrequencyGroup]
+    statuses: list[str]
+    # 사용자가 저장한 공고만 센다. 채용 시장 전체 통계가 아니다.
+    basis: str = "saved_postings_only"
+
+
+@dataclass
+class _Group:
+    label: str
+    postings: dict[UUID, None] = field(default_factory=dict)  # 순서 있는 집합
+    required: set[UUID] = field(default_factory=set)
+    preferred: set[UUID] = field(default_factory=set)
+    examples: list[str] = field(default_factory=list)
+
+
+async def requirement_frequency(
+    db: Database,
+    actor: ActorContext,
+    *,
+    include_archived: bool = False,
+    min_postings: int = 1,
+    limit: int = 50,
+) -> FrequencyResult:
+    """저장 공고들 사이의 요건 빈도: "저장 공고 N개 중 M개가 X 요구".
+
+    요건·우대 줄에서 기술 낱말을 규칙으로 뽑아 묶는다 (`domain.study.requirement_terms`).
+    낱말이 없는 줄은 정규화한 문장 전체로 묶는다. 전형 절차는 세지 않는다.
+    """
+    statuses = [PostingStatus.SAVED.value]
+    if include_archived:
+        statuses.append(PostingStatus.ARCHIVED.value)
+    async with db.workspace_session(actor.workspace_id) as s:
+        postings = (
+            (
+                await s.execute(
+                    select(JobPosting)
+                    .where(JobPosting.status.in_(statuses))
+                    .order_by(JobPosting.saved_at, JobPosting.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    groups: dict[str, _Group] = {}
+    for p in postings:
+        for f in (RequirementField.REQUIREMENTS, RequirementField.PREFERRED):
+            for raw in _posting_list(p, f):
+                line = " ".join(raw.split())
+                terms = requirement_terms(line)
+                keys = [(t.key, t.label) for t in terms] or [("line:" + normalize_line(line), line)]
+                for key, label in keys:
+                    g = groups.setdefault(key, _Group(label))
+                    g.postings.setdefault(p.id, None)
+                    (g.required if f == RequirementField.REQUIREMENTS else g.preferred).add(p.id)
+                    if line not in g.examples and len(g.examples) < 3:
+                        g.examples.append(line)
+    out = [
+        FrequencyGroup(
+            key,
+            g.label,
+            len(g.postings),
+            len(g.required),
+            len(g.preferred),
+            g.examples,
+            list(g.postings),
+        )
+        for key, g in groups.items()
+        if len(g.postings) >= max(1, min_postings)
+    ]
+    out.sort(key=lambda g: (-g.postings, -g.required, g.label.lower()))
+    return FrequencyResult(len(postings), out[: max(1, min(limit, 200))], statuses)
