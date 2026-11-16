@@ -21,6 +21,13 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
+from career_core.domain.korean import (
+    canonical_tech,
+    found_spellings,
+    korean_numbers,
+    korean_tech_terms,
+)
+
 
 class DocumentRuleError(ValueError):
     def __init__(self, code: str) -> None:
@@ -84,12 +91,18 @@ MAX_BLOCKS = 200
 MAX_BLOCK_CHARS = 10_000
 MAX_DOCUMENT_CHARS = 60_000
 MAX_CLAIMS_PER_BLOCK = 20
+MAX_SPANS_PER_BLOCK = 50
 
 
 # --- 본문 블록과 수정 연산 -------------------------------------------------------------
 #
 # 문서 본문은 문단(블록) 목록이다: {"id", "text", "origin": user|ai, "claim_ids": [...]}.
 # 제출 문자열은 블록을 줄바꿈 하나로 잇는다.
+#
+# 문장 단위 근거(c0012, 선택): "spans": [{"start", "end", "claim_ids"}] — 블록 글 안의 위치(코드 포인트,
+# NFC 정리 후). spans가 있으면 검사는 문장마다 그 문장에 걸친 span의 근거만 본다. 없으면 예전처럼 문단 단위.
+# span의 주장은 블록 claim_ids에도 합쳐 둔다(문단 단위만 아는 화면·제출본도 근거 목록을 그대로 본다).
+# spans가 없는 블록에는 키를 두지 않는다 — 예전 revision과 해시가 같다.
 
 
 def new_block_id() -> str:
@@ -121,6 +134,57 @@ def _claim_ids(value: Any) -> list[str]:
     return out
 
 
+def _spans(value: Any, text: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > MAX_SPANS_PER_BLOCK:
+        raise DocumentRuleError("invalid_spans")
+    out: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise DocumentRuleError("invalid_spans")
+        start, end = item.get("start"), item.get("end")
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or isinstance(start, bool)
+            or isinstance(end, bool)
+            or not 0 <= start < end <= len(text)
+        ):
+            raise DocumentRuleError("invalid_spans")
+        claims = _claim_ids(item.get("claim_ids"))
+        if not claims:
+            raise DocumentRuleError("invalid_spans")
+        out.append({"start": start, "end": end, "claim_ids": claims})
+    out.sort(key=lambda x: (x["start"], x["end"]))
+    return out
+
+
+def _reanchor(old_text: str, new_text: str, spans: Sequence[dict[str, Any]]) -> list[dict]:
+    """글이 바뀌면 span이 가리키던 글을 새 글에서 다시 찾는다. 못 찾으면 그 span은 뺀다."""
+    out = []
+    for sp in spans:
+        piece = old_text[sp["start"] : sp["end"]]
+        i = new_text.find(piece) if piece else -1
+        if i >= 0:
+            out.append({**sp, "start": i, "end": i + len(piece)})
+    return out
+
+
+def _finish_block(block: dict[str, Any]) -> dict[str, Any]:
+    """span 주장을 블록 claim_ids에 합치고, 빈 spans 키는 지운다."""
+    spans = block.get("spans") or []
+    out = {k: v for k, v in block.items() if k != "spans"}
+    if spans:
+        out["spans"] = spans
+        span_claims = [c for sp in spans for c in sp["claim_ids"]]
+        merged = list(dict.fromkeys([*out.get("claim_ids", []), *span_claims]))
+        if len(merged) > MAX_CLAIMS_PER_BLOCK:
+            raise DocumentRuleError("too_many_claims")
+        out["claim_ids"] = merged
+    return out
+
+
 def apply_operations(
     blocks: Sequence[dict[str, Any]], operations: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -130,7 +194,10 @@ def apply_operations(
     - insert {text, index?, claim_ids?}: index가 없으면 끝에
     - delete {block_id}
     - link {block_id, claim_ids}: 근거 연결을 이 목록으로 바꾼다
-    - set_blocks {blocks: [{id?, text, claim_ids?}]}: 전체 교체. 같은 id·같은 글이면 origin 유지
+    - set_blocks {blocks: [{id?, text, claim_ids?, spans?}]}: 전체 교체. 같은 id·같은 글이면 origin 유지
+    - link_spans {block_id, spans: [{start, end, claim_ids}]}: 문장 단위 근거를 이 목록으로 바꾼다
+
+    replace·insert·set_blocks도 spans를 받는다. 주지 않았는데 글이 바뀌면 옛 span을 새 글에서 다시 찾는다.
     """
     out = [{**b, "claim_ids": list(b.get("claim_ids") or [])} for b in blocks]
 
@@ -147,23 +214,29 @@ def apply_operations(
         if kind == "replace":
             i = find(op.get("block_id"))
             text = _block_text(op.get("text"))
-            if text != out[i]["text"]:
-                out[i] = {**out[i], "text": text, "origin": BlockOrigin.USER.value}
+            old = out[i]
+            if text != old["text"]:
+                out[i] = {**old, "text": text, "origin": BlockOrigin.USER.value}
+                out[i]["spans"] = _reanchor(old["text"], text, old.get("spans") or [])
             if op.get("claim_ids") is not None:
                 out[i]["claim_ids"] = _claim_ids(op["claim_ids"])
+            if op.get("spans") is not None:
+                out[i]["spans"] = _spans(op["spans"], text)
         elif kind == "insert":
             index = op.get("index")
             if index is None:
                 index = len(out)
             if not isinstance(index, int) or not 0 <= index <= len(out):
                 raise DocumentRuleError("invalid_index")
+            text = _block_text(op.get("text"))
             out.insert(
                 index,
                 {
                     "id": new_block_id(),
-                    "text": _block_text(op.get("text")),
+                    "text": text,
                     "origin": BlockOrigin.USER.value,
                     "claim_ids": _claim_ids(op.get("claim_ids")),
+                    "spans": _spans(op.get("spans"), text),
                 },
             )
         elif kind == "delete":
@@ -171,6 +244,9 @@ def apply_operations(
         elif kind == "link":
             i = find(op.get("block_id"))
             out[i]["claim_ids"] = _claim_ids(op.get("claim_ids"))
+        elif kind == "link_spans":
+            i = find(op.get("block_id"))
+            out[i]["spans"] = _spans(op.get("spans"), out[i]["text"])
         elif kind == "set_blocks":
             items = op.get("blocks")
             if not isinstance(items, list):
@@ -185,9 +261,13 @@ def apply_operations(
                 prev = old.get(item.get("id"))
                 if prev is None or prev["id"] in seen:
                     block_id, origin = new_block_id(), BlockOrigin.USER.value
+                    spans: list[dict] = []
                 else:
                     block_id = prev["id"]
                     origin = prev["origin"] if prev["text"] == text else BlockOrigin.USER.value
+                    spans = _reanchor(prev["text"], text, prev.get("spans") or [])
+                if item.get("spans") is not None:
+                    spans = _spans(item["spans"], text)
                 seen.add(block_id)
                 new.append(
                     {
@@ -195,11 +275,13 @@ def apply_operations(
                         "text": text,
                         "origin": origin,
                         "claim_ids": _claim_ids(item.get("claim_ids")),
+                        "spans": spans,
                     }
                 )
             out = new
         else:
             raise DocumentRuleError("unknown_operation")
+    out = [_finish_block(b) for b in out]
     if len(out) > MAX_BLOCKS:
         raise DocumentRuleError("too_many_blocks")
     if sum(len(b["text"]) for b in out) > MAX_DOCUMENT_CHARS:
@@ -478,6 +560,23 @@ def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_SPLIT.split(text or "") if s.strip()]
 
 
+def sentence_ranges(text: str) -> list[tuple[int, int, str]]:
+    """문장과 블록 글 안의 위치 [start, end). split_sentences와 같은 문장을 같은 순서로."""
+    out = []
+    pos = 0
+    t = text or ""
+    for m in [*_SENTENCE_SPLIT.finditer(t), None]:
+        end = m.start() if m else len(t)
+        piece = t[pos:end]
+        stripped = piece.strip()
+        if stripped:
+            start = pos + (len(piece) - len(piece.lstrip()))
+            out.append((start, start + len(stripped), stripped))
+        if m:
+            pos = m.end()
+    return out
+
+
 def _strip_particle(word: str) -> str:
     for p in _PARTICLES:
         if word.endswith(p) and len(word) - len(p) >= 2:
@@ -518,8 +617,15 @@ class Terms:
         return 1 if self.latin else min(2, len(self.words))
 
 
+def tech_terms(text: str) -> list[str]:
+    """영문 기술명 + 한글로 쓴 기술명, 대표 표기로 ("파이썬" → python, "K8s" → kubernetes)."""
+    return list(
+        dict.fromkeys([*(canonical_tech(t) for t in latin_terms(text)), *korean_tech_terms(text)])
+    )
+
+
 def key_terms(requirement: str) -> Terms:
-    latin = list(dict.fromkeys(latin_terms(requirement)))
+    latin = tech_terms(requirement)
     if latin:
         return Terms(tuple(latin), True)
     return Terms(tuple(dict.fromkeys(korean_terms(requirement))), False)
@@ -536,7 +642,8 @@ def matched_terms(text: str, terms: Terms) -> list[str]:
     """요건 단어 중 본문에 있는 것. 판정 기준(needed)을 못 넘으면 빈 목록."""
     if not terms.words:
         return []
-    hits = [w for w in terms.words if (_has_latin(text, w) if terms.latin else w in text)]
+    # 기술명은 한영 표기를 같이 본다 ("Python" 요건 ↔ 문서의 "파이썬")
+    hits = [w for w in terms.words if (found_spellings(text, w) if terms.latin else w in text)]
     return hits if len(hits) >= terms.needed else []
 
 
@@ -547,9 +654,15 @@ def number_parts(text: str) -> set[str]:
     """글에 있는 숫자 조각. "1,200" → 1200, "2021.03" → 2021, 3 (앞자리 0 제거).
 
     날짜 표기가 달라도("2021년 3월" / "2021.03") 같은 숫자로 본다.
+    한국어 수 표현도 숫자로 본다: "두 배" → 2, "세 명" → 3, "절반" → 50, "3천 명" → 3000 (domain.korean).
     """
     t = _THOUSANDS.sub("", text or "")
-    return {n.lstrip("0") or "0" for n in re.findall(r"\d+", t)}
+    values, spans = korean_numbers(t)
+    for start, end in sorted(spans, reverse=True):
+        t = t[:start] + " " + t[end:]
+    found = {n for v in values for n in re.findall(r"\d+", v)}
+    found |= set(re.findall(r"\d+", t))
+    return {n.lstrip("0") or "0" for n in found}
 
 
 _ACTION = re.compile(
@@ -805,8 +918,13 @@ def fact_changes(
     new_orgs = sorted(o for o in orgs if o not in sources)
     if new_orgs:
         reasons.append({"code": "organization", "values": new_orgs})
-    src_latin = set(latin_terms(sources))
-    new_terms = sorted(set(latin_terms(suggested)) - src_latin)
+    # 같은 기술의 다른 표기("파이썬" → "Python")는 새 기술이 아니다
+    src_latin = set(latin_terms(sources)) | set(tech_terms(sources))
+    new_terms = sorted(
+        t
+        for t in set(latin_terms(suggested))
+        if t not in src_latin and canonical_tech(t) not in src_latin
+    )
     if new_terms:
         reasons.append({"code": "new_term", "values": new_terms})
     return reasons
@@ -854,11 +972,32 @@ class EvidenceClaim:
 
 
 @dataclass(frozen=True, slots=True)
+class SpanInput:
+    """문장 단위 근거: 블록 글의 [start, end)에 연결된 주장."""
+
+    start: int
+    end: int
+    claims: tuple[EvidenceClaim, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class BlockInput:
     id: str
     text: str
     origin: str = BlockOrigin.USER
     claims: tuple[EvidenceClaim, ...] = ()
+    # 있으면 문장마다 그 문장에 걸친 span의 근거만 본다. 없으면 문단(claims) 단위.
+    spans: tuple[SpanInput, ...] = ()
+
+    def sentence_claims(self, start: int, end: int) -> tuple[EvidenceClaim, ...]:
+        if not self.spans:
+            return self.claims
+        out: dict[str, EvidenceClaim] = {}
+        for sp in self.spans:
+            if sp.start < end and sp.end > start:
+                for c in sp.claims:
+                    out.setdefault(c.id, c)
+        return tuple(out.values())
 
 
 @dataclass(frozen=True, slots=True)
@@ -930,6 +1069,14 @@ def requirement_visibility(ctx: CheckContext, blocks: Sequence[BlockInput]) -> l
             continue
         brain_ids = [c.id for c in ctx.brain if c.confirmed and matched_terms(c.text, terms)]
         doc_terms = matched_terms(text, terms)
+        # 기술명 표기가 공고와 다름 ("Python" 요건, 문서엔 "파이썬"만): 실제 쓴 기술이면 공고 표기 병기를 제안
+        spelling = []
+        if terms.latin:
+            for w in doc_terms:
+                posted = found_spellings(req, w)
+                written = found_spellings(text, w)
+                if posted and not {p.lower() for p in posted} & {x.lower() for x in written}:
+                    spelling.append({"term": w, "posting": posted[0], "document": written})
         linked = any(
             matched_terms(b.text, terms)
             and any(c.confirmed and matched_terms(c.text, terms) for c in b.claims)
@@ -937,6 +1084,9 @@ def requirement_visibility(ctx: CheckContext, blocks: Sequence[BlockInput]) -> l
         )
         if brain_ids and doc_terms:
             verdict, tip = "met_visible", "유지합니다."
+            if spelling:
+                names = ", ".join(f"'{x['posting']}'" for x in spelling)
+                tip = f"유지합니다. 공고 표기({names})를 같이 적으면 사람·기계 모두 찾기 쉽습니다."
         elif brain_ids:
             verdict, tip = "missing", "브레인에 근거가 있습니다. 해당 경험을 문서에 드러냅니다."
         elif doc_terms:
@@ -955,6 +1105,7 @@ def requirement_visibility(ctx: CheckContext, blocks: Sequence[BlockInput]) -> l
                 "brain_claim_ids": brain_ids[:20],
                 "document_terms": doc_terms,
                 "linked": linked,
+                "spelling_differs": spelling,
                 "suggestion": tip,
             }
         )
@@ -993,10 +1144,16 @@ def check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str,
                     detail={"claim_ids": [c.id for c in b.claims]},
                 )
             )
-        sentences = split_sentences(b.text)
+        sentences = sentence_ranges(b.text)
         specific_block = False
-        for s in sentences:
-            specific = _is_specific(s, ctx, posting_terms, claim_text)
+        level = "sentence" if b.spans else "paragraph"
+        block_confirmed, block_claim_text = confirmed, claim_text
+        for start, end, s in sentences:
+            if b.spans:
+                # 문장 단위 근거: 이 문장에 걸친 span의 확인된 주장만
+                confirmed = [c for c in b.sentence_claims(start, end) if c.confirmed]
+                claim_text = "\n".join(c.text for c in confirmed)
+            specific = _is_specific(s, ctx, posting_terms, block_claim_text)
             specific_block = specific_block or specific
             if _mentions_target(s, ctx) and not specific:
                 findings.append(
@@ -1043,7 +1200,9 @@ def check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str,
                         {
                             "kinds": [
                                 k for k, v in (("experience", experience), ("number", nums)) if v
-                            ]
+                            ],
+                            # sentence: 문장 단위 근거(spans)로 판정 / paragraph: 문단 근거로 판정
+                            "evidence_level": level,
                         },
                     )
                 )
@@ -1072,7 +1231,7 @@ def check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str,
                             {"terms": sorted(lead)},
                         )
                     )
-        if sentences and not specific_block and not confirmed:
+        if sentences and not specific_block and not block_confirmed:
             findings.append(
                 Finding(
                     "paragraph_not_specific",

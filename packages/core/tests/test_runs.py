@@ -714,7 +714,7 @@ async def test_start_requires_workflow_action(db, env):
         await run_uc.start_run(deps, env["owner"], "shell", {})
     with pytest.raises(RunRuleError, match="invalid_input"):
         await run_uc.start_run(deps, env["owner"], "save_job_urls", {"urls": []})
-    assert set(WORKFLOWS) == {"save_job_urls", "submit_application"}
+    assert set(WORKFLOWS) == {"save_job_urls", "submit_application", "suggest_document_batch"}
 
 
 # ---------------------------------------------------------------- 공간 격리 (§17.1)
@@ -817,7 +817,7 @@ async def test_http_runs_and_approvals(db, env, client):
     names = [
         w["name"] for w in (await client.get("/core/runs/workflows", headers=auth("viewer"))).json()
     ]
-    assert sorted(names) == ["save_job_urls", "submit_application"]
+    assert sorted(names) == ["save_job_urls", "submit_application", "suggest_document_batch"]
 
     aid, did = await draft_application(db, owner, "https://jobs.example.test/h/ap")
     body = {"action": "applications.submit", "target_id": str(aid), "payload": payload(did, 1)}

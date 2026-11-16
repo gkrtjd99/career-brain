@@ -411,7 +411,8 @@ class ApplicationDocument(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID]
-    application_id: Mapped[UUID]
+    # NULL이면 공간 공용 문서 (c0012)
+    application_id: Mapped[UUID | None] = mapped_column(default=None)
     kind: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(Text)
     question_index: Mapped[int | None] = mapped_column(Integer, default=None)
@@ -420,6 +421,9 @@ class ApplicationDocument(Base):
     byte_limit: Mapped[int | None] = mapped_column(Integer, default=None)
     count_rule: Mapped[dict] = mapped_column(JSONB, default=dict)
     current_revision: Mapped[int] = mapped_column(Integer, default=0)
+    # 복사해 온 원본 문서와 그때의 revision (c0012)
+    source_document_id: Mapped[UUID | None] = mapped_column(default=None)
+    source_revision_id: Mapped[UUID | None] = mapped_column(default=None)
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -477,6 +481,7 @@ class DocumentSuggestion(Base):
     reject_reasons: Mapped[list] = mapped_column(JSONB, default=list)
     model_call_id: Mapped[UUID | None] = mapped_column(default=None)
     applied_revision_id: Mapped[UUID | None] = mapped_column(default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)  # c0012
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -773,3 +778,45 @@ class ExportRun(Base):
     rows_total: Mapped[int] = mapped_column(BigInteger)
     blobs_total: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- c0012: 문서 설정·전형 단계
+
+
+class DocumentSettings(Base):
+    """공간의 문서 설정 1행. cliches가 NULL이면 기본 상투어 목록을 쓴다."""
+
+    __tablename__ = "document_settings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    cliches: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    own_contacts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ApplicationStage(Base):
+    """제출본에 묶인 전형 단계(서류·시험·면접)와 결과. 결과만 기록한다."""
+
+    __tablename__ = "application_stages"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    submission_id: Mapped[UUID]
+    position: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    outcome: Mapped[str] = mapped_column(Text, default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
