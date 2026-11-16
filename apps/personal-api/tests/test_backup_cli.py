@@ -55,7 +55,8 @@ async def test_export_then_restore_into_empty_install(pg, db, tmp_path, monkeypa
             assert (await brain.get_experience(tdb, restored, exp)).title == "합성 경험"
             async with tdb.workspace_session(restored.workspace_id) as s:
                 kinds = (await s.execute(text("SELECT kind FROM core.jobs"))).scalars().all()
-            assert kinds == ["embed"]  # 검색 벡터는 다시 만든다
+            # 검색 벡터는 다시 만들고, 내보낼 때 대기 중이던 파싱도 다시 넣는다
+            assert sorted(kinds) == ["embed", "parse"]
         finally:
             await tdb.dispose()
         assert await cli._restore(target, str(out), dry_run=False) == 1

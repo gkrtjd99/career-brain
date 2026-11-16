@@ -20,6 +20,13 @@ class Settings:
     models_config: str = "models.toml"
     # 동적 공고 페이지를 Playwright로 렌더링 (선택 설치: extra `browser` + `playwright install chromium`)
     browser_fetch: bool = False
+    # 원격 MCP OAuth (선택). issuer를 정하면 켜진다: docs/architecture/mcp.md "원격 연결 (OAuth)"
+    public_url: str | None = (
+        None  # 예: https://career.example.com (MCP 자원 = {public_url}/api/core/mcp)
+    )
+    oauth_issuer: str | None = None
+    oauth_jwks_url: str | None = None
+    oauth_audience: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -34,4 +41,8 @@ class Settings:
             max_upload_bytes=int(os.environ.get("CAREER_MAX_UPLOAD_MB", "20")) * 1024 * 1024,
             models_config=os.environ.get("CAREER_MODELS_CONFIG", "models.toml"),
             browser_fetch=os.environ.get("CAREER_BROWSER_FETCH", "0").lower() in ("1", "true"),
+            public_url=os.environ.get("CAREER_PUBLIC_URL") or None,
+            oauth_issuer=os.environ.get("CAREER_OAUTH_ISSUER") or None,
+            oauth_jwks_url=os.environ.get("CAREER_OAUTH_JWKS_URL") or None,
+            oauth_audience=os.environ.get("CAREER_OAUTH_AUDIENCE") or None,
         )

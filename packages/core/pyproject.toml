@@ -24,6 +24,10 @@ llm = ["anthropic>=2.8,<3", "openai>=3.51,<4"]
 local-embed = ["fastembed>=0.9,<1"]
 # 동적 공고 페이지 렌더링. 설치 후 `playwright install chromium` (약 150MB). 기본 구성에는 없다.
 browser = ["playwright>=1.50"]
+# 원격 MCP의 외부 OAuth 액세스 토큰(JWT) 검증. 인가 서버는 포함하지 않는다 (docs/architecture/mcp.md).
+oauth = ["pyjwt[crypto]>=2.10,<3"]
+# 내보내기 묶음 암호화 (age 형식). `age` 명령이 있으면 그것을 먼저 쓴다 (docs/operations/backup.md).
+age = ["pyrage>=1.2,<2"]
 
 [build-system]
 requires = ["hatchling"]

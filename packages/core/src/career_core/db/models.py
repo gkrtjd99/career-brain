@@ -773,3 +773,54 @@ class ExportRun(Base):
     rows_total: Mapped[int] = mapped_column(BigInteger)
     blobs_total: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- c0014: 감사·삭제 기록·외부 신원
+
+
+class AuditEvent(Base):
+    """감사 사건 (MCP 도구 호출 등). 인자 원문 없이 sha256만. 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    actor_id: Mapped[UUID | None] = mapped_column(default=None)
+    actor_kind: Mapped[str] = mapped_column(Text)
+    channel: Mapped[str] = mapped_column(Text)
+    event: Mapped[str] = mapped_column(Text)
+    tool: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    args_sha256: Mapped[str | None] = mapped_column(Text, default=None)
+    attributes: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Deletion(Base):
+    """사용자 삭제 기록 (DELETE trigger가 남긴다). 복원 뒤 다시 적용한다. 추가·조회만."""
+
+    __tablename__ = "deletions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    target_table: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[UUID]
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OAuthIdentity(Base):
+    """외부 인가 서버의 (issuer, subject) → 이 공간의 actor. 조회는 ``core.lookup_oauth_identity``."""
+
+    __tablename__ = "oauth_identities"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    actor_id: Mapped[UUID]
+    issuer: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

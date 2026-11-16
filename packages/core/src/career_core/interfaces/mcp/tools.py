@@ -146,27 +146,20 @@ class PendingArgs(Args):
 
 async def _pending_claims(env: ToolEnv, a: PendingArgs) -> Any:
     """확인 대기(extracted) 주장. 사람이 웹에서 확정한다 (이 도구로는 확정할 수 없다)."""
-    out: list[dict] = []
-    for e in await brain_uc.list_experiences(env.db, env.actor):
-        if not e.needs_review:
-            continue
-        view = await brain_uc.get_experience(env.db, env.actor, e.id)
-        for c in view.claims:
-            if c.status == "extracted":
-                out.append(
-                    {
-                        "claim_id": str(c.id),
-                        "experience_id": str(e.id),
-                        "experience_title": e.title,
-                        "kind": c.kind,
-                        "statement": c.statement,
-                        "contribution": c.contribution,
-                        "evidence": len(c.evidence),
-                    }
-                )
-            if len(out) >= a.limit:
-                return {"claims": out, "truncated": True}
-    return {"claims": out, "truncated": False}
+    rows, truncated = await brain_uc.list_pending_claims(env.db, env.actor, limit=a.limit)
+    claims = [
+        {
+            "claim_id": str(c.claim_id),
+            "experience_id": str(c.experience_id),
+            "experience_title": c.experience_title,
+            "kind": c.kind,
+            "statement": c.statement,
+            "contribution": c.contribution,
+            "evidence": c.evidence,
+        }
+        for c in rows
+    ]
+    return {"claims": claims, "truncated": truncated}
 
 
 class EvidenceArgs(Args):

@@ -9,7 +9,7 @@ workspace는 요청 body·path·query로 받지 않는다. 항상 ``IdentityReso
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -38,7 +38,13 @@ from career_core.interfaces.http.search import add_search_routes
 from career_core.interfaces.http.study import add_study_routes
 from career_core.interfaces.http.usage import add_usage_routes
 from career_core.llm.gateway import ModelGateway
-from career_core.ports import ActorContext, BlobStore, IdentityResolver, PermissionPolicy
+from career_core.ports import (
+    ActorContext,
+    AuditSink,
+    BlobStore,
+    IdentityResolver,
+    PermissionPolicy,
+)
 from career_core.uploads import UploadRejected
 from career_core.usecases.sources import upload_source
 
@@ -55,6 +61,10 @@ class CoreDeps:
     monthly_budget_usd: Decimal | None = None
     # 없으면 AI 보충 질문 경로가 503을 돌려준다. 추출은 worker가 처리한다.
     models: ModelGateway | None = None
+    # MCP 도구 호출 감사 기록. 없으면 core.audit_events(DbAuditSink)에 남긴다.
+    audit: AuditSink | None = None
+    # 원격 MCP의 외부 OAuth 토큰 검증 (interfaces.mcp.oauth.McpOAuth). 없으면 API 토큰만.
+    mcp_oauth: Any = None
 
 
 class WorkspaceOut(BaseModel):
@@ -196,6 +206,9 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_mcp_routes(router, deps)
     add_maintenance_routes(router, deps, authorize)
     add_activity_routes(router, deps, authorize)
+    from career_core.interfaces.http.audit import add_audit_routes
+
+    add_audit_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 

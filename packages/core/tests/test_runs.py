@@ -12,7 +12,7 @@ import httpx
 import pytest
 from career_core.db import Job, JobPosting, JobPostingVersion, ModelCall
 from career_core.db.base import utcnow
-from career_core.db.models import ApplicationSubmission, Approval, Run, RunEvent
+from career_core.db.models import Application, ApplicationSubmission, Approval, Run, RunEvent
 from career_core.domain.runs import ApprovalError, RunRuleError, content_hash
 from career_core.domain.workspace import Role, ScopePermissionPolicy, scopes_for_role
 from career_core.interfaces.http import CoreDeps, build_router
@@ -34,6 +34,7 @@ from career_core.usecases import applications as app_uc
 from career_core.usecases import approvals as approval_uc
 from career_core.usecases import postings as posting_uc
 from career_core.usecases import runs as run_uc
+from career_core.usecases.approvals import summary_changes
 from career_core.usecases.brain import NotFound
 from career_core.usecases.runs import RunDeps, StepContext, StepResult, Workflow
 from career_core.usecases.workspaces import create_workspace
@@ -505,8 +506,12 @@ async def test_change_after_approval_invalidates_it(db, env):
         base_revision=1,
         operations=[{"op": "replace", "block_id": doc.blocks[0].id, "text": "고친 문단입니다."}],
     )
-    # 승인한 내용 그대로 보내도 대상(문서)이 승인 때와 다르다
-    with pytest.raises(ApprovalError, match="target_changed"):
+    # 문서를 저장한 그 트랜잭션에서 승인이 바로 닫힌다 (c0014 trigger, 조회 전에도)
+    async with db.workspace_session(owner.workspace_id) as s:
+        row = await s.get(Approval, req.id)
+        assert (row.status, row.invalid_reason) == ("invalidated", "target_changed")
+    # 승인한 내용 그대로 보내도 쓸 수 없다
+    with pytest.raises(ApprovalError, match="approval_invalidated"):
         await app_uc.submit_application(db, editor, aid, revisions={did: 1}, approval_id=req.id)
     stale = await approval_uc.get_approval(db, owner, req.id)
     assert (stale.status, stale.invalid_reason) == ("invalidated", "target_changed")
@@ -531,7 +536,8 @@ async def test_change_after_approval_invalidates_it(db, env):
         db, editor, action="applications.submit", target_id=aid, payload=payload(did, 2)
     )
     await app_uc.update_document(db, owner, aid, did, {"char_limit": 400})
-    with pytest.raises(ApprovalError, match="target_changed"):
+    assert (await approval_uc.get_approval(db, owner, req3.id)).status == "invalidated"
+    with pytest.raises(ApprovalError, match="approval_not_pending"):
         await approval_uc.decide_approval(db, owner, req3.id, approve=True)
 
     # 만료
@@ -859,3 +865,160 @@ async def test_http_runs_and_approvals(db, env, client):
     assert (await client.get(f"/core/approvals/{ap2['id']}", headers=auth("viewer"))).json()[
         "status"
     ] == "used"
+
+
+# ---------------------------------------------------------------- 승인 즉시 무효화·변경 비교 (c0014)
+
+
+async def _status(db, ws, approval_id):
+    async with db.workspace_session(ws) as s:
+        row = await s.get(Approval, approval_id)
+        return row.status, row.invalid_reason
+
+
+async def _request(db, actor, aid, did, revision=1):
+    return await approval_uc.request_approval(
+        db, actor, action="applications.submit", target_id=aid, payload=payload(did, revision)
+    )
+
+
+async def test_target_change_closes_open_approvals_in_the_same_transaction(db, env):
+    owner, editor = env["owner"], env["editor"]
+    ws = owner.workspace_id
+    aid, did = await draft_application(db, owner, "https://jobs.example.test/inv/1")
+    pending = await _request(db, editor, aid, did)
+    approved = await _request(db, editor, aid, did)
+    await approval_uc.decide_approval(db, owner, approved.id, approve=True)
+
+    # 대상 버전 밖의 칸(제목)은 승인을 건드리지 않는다
+    await app_uc.update_document(db, owner, aid, did, {"title": "새 제목 (합성)"})
+    async with db.workspace_session(ws) as s:
+        await s.execute(update(Application).where(Application.id == aid).values(title="새 지원"))
+    assert await _status(db, ws, pending.id) == ("pending", None)
+    assert await _status(db, ws, approved.id) == ("approved", None)
+
+    # 공고 확정 값이 바뀌면 그 공고의 지원에 걸린 열린 승인이 모두 닫힌다
+    async with db.workspace_session(ws) as s:
+        posting_id = await s.scalar(select(Application.posting_id).where(Application.id == aid))
+        await s.execute(
+            update(JobPosting)
+            .where(JobPosting.id == posting_id)
+            .values(pending_changes=["deadline"])
+        )
+    assert await _status(db, ws, pending.id) == ("invalidated", "target_changed")
+    assert await _status(db, ws, approved.id) == ("invalidated", "target_changed")
+
+    # 지원 상태가 바뀌어도 (예: 승인 없이 직접 제출) 열린 승인이 닫힌다
+    again = await _request(db, editor, aid, did)
+    await app_uc.submit_application(db, owner, aid, revisions={did: 1})
+    assert await _status(db, ws, again.id) == ("invalidated", "target_changed")
+    with pytest.raises(ApprovalError, match="approval_not_pending"):
+        await approval_uc.decide_approval(db, owner, again.id, approve=True)
+
+
+async def test_waiting_run_is_woken_and_fails_when_target_changes(db, env):
+    """승인 대기 중인 실행: 대상이 바뀌면 누가 승인을 조회하지 않아도 바로 실패로 끝난다."""
+    owner, editor = env["owner"], env["editor"]
+    deps = RunDeps(db=db)
+    handlers = run_handlers(deps)
+    aid, did = await draft_application(db, owner, "https://jobs.example.test/inv/2")
+    run = await run_uc.start_run(
+        deps, editor, "submit_application", {"application_id": str(aid), "revisions": {str(did): 1}}
+    )
+    await run_until_idle(db, handlers)
+    assert (await run_uc.get_run(db, owner, run.id)).status == "waiting_approval"
+    doc = await app_uc.get_document(db, owner, aid, did)
+    await app_uc.save_revision(
+        db,
+        owner,
+        aid,
+        did,
+        base_revision=1,
+        operations=[{"op": "replace", "block_id": doc.blocks[0].id, "text": "고친 문단 (합성)"}],
+    )
+    async with db.workspace_session(owner.workspace_id) as s:
+        assert (await s.get(Run, run.id)).status == "queued"
+        jobs = (
+            await s.execute(
+                text("SELECT status FROM core.jobs WHERE kind = 'run' AND target_id = :r"),
+                {"r": run.id},
+            )
+        ).scalars()
+        assert "queued" in list(jobs)
+    await run_until_idle(db, handlers)
+    r = await run_uc.get_run(db, owner, run.id)
+    assert (r.status, r.error_code) == ("failed", "approval_invalidated")
+    codes = [e.code for e in await run_uc.run_events(db, owner, run.id)]
+    assert "approval_invalidated" in codes
+
+
+async def test_approval_diff_shows_what_changed_since_the_request(db, env):
+    owner, editor = env["owner"], env["editor"]
+    aid, did = await draft_application(db, owner, "https://jobs.example.test/inv/3")
+    req = await _request(db, editor, aid, did)
+    same = await approval_uc.approval_diff(db, owner, req.id)
+    assert same.changes == [] and not same.target_changed and same.current == same.requested
+
+    doc = await app_uc.get_document(db, owner, aid, did)
+    await app_uc.save_revision(
+        db,
+        owner,
+        aid,
+        did,
+        base_revision=1,
+        operations=[{"op": "replace", "block_id": doc.blocks[0].id, "text": "바뀐 문단 (합성)"}],
+    )
+    await app_uc.update_document(db, owner, aid, did, {"char_limit": 300})
+    diff = await approval_uc.approval_diff(db, owner, req.id)
+    assert diff.target_changed and diff.approval.status == "invalidated"
+    by_path = {c.path: c for c in diff.changes}
+    rev = by_path[f"documents[{did}].revision"]
+    assert (rev.kind, rev.before, rev.after) == ("changed", 1, 2)
+    assert rev.label  # 문서 제목
+    assert by_path[f"documents[{did}].char_limit"].after == 300
+    assert f"documents[{did}].content_hash" in by_path
+    # 다른 공간에서는 보이지 않는다
+    with pytest.raises(NotFound):
+        await approval_uc.approval_diff(db, env["other"], req.id)
+
+
+def test_summary_changes_pairs_list_items_by_id():
+    before = {
+        "title": "A",
+        "documents": [{"document_id": "d1", "title": "자기소개", "revision": 1}],
+    }
+    after = {
+        "title": "A",
+        "status": "submitted",
+        "documents": [
+            {"document_id": "d2", "title": "포트폴리오", "revision": 1},
+            {"document_id": "d1", "title": "자기소개", "revision": 3},
+        ],
+    }
+    got = [(c.path, c.kind, c.before, c.after, c.label) for c in summary_changes(before, after)]
+    assert got == [
+        ("documents[d1].revision", "changed", 1, 3, "자기소개"),
+        ("documents[d2]", "added", None, after["documents"][0], "포트폴리오"),
+        ("status", "added", None, "submitted", None),
+    ]
+
+
+async def test_read_time_hash_check_still_catches_changes_the_trigger_missed(db, env, pg):
+    """trigger를 끈 채(복제 모드) 바꾼 변경도 결정·사용 때 해시 비교가 막는다 (최종 방어)."""
+    owner, editor = env["owner"], env["editor"]
+    aid, did = await draft_application(db, owner, "https://jobs.example.test/inv/4")
+    req = await _request(db, editor, aid, did)
+    eng = create_engine(pg.owner, poolclass=NullPool)
+    try:
+        with eng.begin() as conn:
+            conn.execute(text("SET LOCAL session_replication_role = replica"))
+            conn.execute(
+                text("UPDATE core.application_documents SET char_limit = 123 WHERE id = :d"),
+                {"d": did},
+            )
+    finally:
+        eng.dispose()
+    assert await _status(db, owner.workspace_id, req.id) == ("pending", None)
+    with pytest.raises(ApprovalError, match="target_changed"):
+        await approval_uc.decide_approval(db, owner, req.id, approve=True)
+    assert await _status(db, owner.workspace_id, req.id) == ("invalidated", "target_changed")

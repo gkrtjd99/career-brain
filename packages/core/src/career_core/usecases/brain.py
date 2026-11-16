@@ -546,3 +546,51 @@ async def claims_by_ids(db: Database, actor: ActorContext, ids: list[UUID]) -> l
 
 
 MAX_BRIEF_IDS = 200
+
+
+# ---------------------------------------------------------------- 확인 대기 주장 (한 번의 조회)
+
+
+@dataclass(frozen=True, slots=True)
+class PendingClaim:
+    claim_id: UUID
+    experience_id: UUID
+    experience_title: str
+    kind: str
+    statement: str
+    contribution: str
+    evidence: int  # 근거 수 (원문 위치 + 인터뷰 답변)
+    created_at: datetime
+
+
+MAX_PENDING_CLAIMS = 200
+
+
+async def list_pending_claims(
+    db: Database, actor: ActorContext, *, limit: int = 50
+) -> tuple[list[PendingClaim], bool]:
+    """확인 대기(extracted) 주장을 활성 경험 순서대로. (목록, 잘림 여부). 경험마다 조회하지 않는다."""
+    limit = max(1, min(limit, MAX_PENDING_CLAIMS))
+    evidence = (
+        select(func.count(ClaimEvidence.id))
+        .where(ClaimEvidence.claim_id == Claim.id)
+        .correlate(Claim)
+        .scalar_subquery()
+    )
+    async with db.workspace_session(actor.workspace_id) as s:
+        rows = (
+            await s.execute(
+                select(Claim, Experience.title, evidence)
+                .join(Experience, Experience.id == Claim.experience_id)
+                .where(Claim.status == ClaimStatus.EXTRACTED, Experience.status == "active")
+                .order_by(Experience.created_at, Experience.id, Claim.created_at, Claim.id)
+                .limit(limit + 1)
+            )
+        ).all()
+    out = [
+        PendingClaim(
+            c.id, c.experience_id, title, c.kind, c.statement, c.contribution, n or 0, c.created_at
+        )
+        for c, title, n in rows[:limit]
+    ]
+    return out, len(rows) > limit

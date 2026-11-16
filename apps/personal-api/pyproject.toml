@@ -9,6 +9,8 @@ dependencies = ["career-core[llm]", "uvicorn[standard]>=0.30"]
 [project.optional-dependencies]
 local-embed = ["career-core[local-embed]"]
 browser = ["career-core[browser]"]
+oauth = ["career-core[oauth]"]
+age = ["career-core[age]"]
 
 [build-system]
 requires = ["hatchling"]

@@ -59,6 +59,9 @@ ACTION_SCOPES: dict[str, str] = {
     "workspace.export": "workspace-admin",
     "maintenance.read": "workspace-admin",
     "maintenance.purge": "workspace-admin",
+    # c0014 감사 기록(MCP 도구 호출)·외부 OAuth 신원 연결. 소유자만.
+    "audit.read": "workspace-admin",
+    "oauth.link": "workspace-admin",
 }
 
 

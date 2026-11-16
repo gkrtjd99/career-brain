@@ -1292,6 +1292,9 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
                 "title": d.title,
                 "revision": d.current_revision,
                 "content_hash": rev.content_hash if rev else None,
+                # 승인 변경 비교용 (O08 백로그): 글자 규칙
+                "char_limit": d.char_limit,
+                "byte_limit": d.byte_limit,
             }
         )
     state = {
@@ -1309,6 +1312,10 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
         "title": app.title,
         "posting_version_id": state["posting_version_id"],
         "documents": summary_docs,
+        # 승인 변경 비교용 (O08 백로그): 지원 상태, 공고 확정 값 해시, 공고 변경 대기 항목
+        "status": app.status,
+        "posting_fields": state["posting_fields"],
+        "posting_pending_changes": state["posting_pending_changes"],
     }
     return content_hash(state), summary
 

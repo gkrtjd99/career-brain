@@ -506,3 +506,124 @@ async def test_stdio_transport_resolves_token_per_message(env):
     assert out[1]["result"]["structuredContent"]["experiences"][0]["title"] == "합성 경험"
     assert out[2]["error"]["code"] == -32001  # 토큰 폐기 뒤
     assert out[3]["error"]["code"] == -32700
+
+
+# ---------------------------------------------------------------- 감사 기록·N+1 (c0014)
+
+
+async def _audit_rows(db, ws):
+    from career_core.db.models import AuditEvent
+
+    async with db.workspace_session(ws) as s:
+        return (
+            (await s.execute(select(AuditEvent).order_by(AuditEvent.created_at, AuditEvent.id)))
+            .scalars()
+            .all()
+        )
+
+
+async def test_tool_calls_are_audited_without_raw_arguments(env):
+    from career_core.usecases.audit import args_digest
+    from sqlalchemy import text
+    from sqlalchemy.exc import ProgrammingError
+
+    c, db, ws = env["client"], env["deps"].db, env["owner"].workspace_id
+    secret = "합성-비밀-질의-7f3a"
+    await call(c, "owner", "search_brain", {"query": secret})
+    await call(c, "viewer", "save_job_urls", {"urls": ["https://jobs.example.test/a"]})
+    await call(c, "owner", "get_posting", {"posting_id": "not-a-uuid"})
+    res = await rpc(c, "owner", "tools/call", {"name": "drop_tables", "arguments": {"q": secret}})
+    assert res.json()["error"]["message"] == "unknown tool"
+
+    rows = await _audit_rows(db, ws)
+    got = [(r.tool, r.status, (r.error_code or "").split(":")[0], r.actor_kind) for r in rows]
+    assert got == [
+        ("search_brain", "ok", "", "agent"),
+        ("save_job_urls", "error", "forbidden", "agent"),
+        ("get_posting", "error", "invalid_arguments", "agent"),
+        ("drop_tables", "error", "unknown_tool", "agent"),
+    ]
+    assert rows[0].args_sha256 == args_digest({"query": secret})
+    assert {r.channel for r in rows} == {"mcp-http"}
+    assert all(r.duration_ms >= 0 and r.actor_id == env["owner"].subject_id for r in rows)
+    # 인자 원문은 어디에도 없다
+    async with db.workspace_session(ws) as s:
+        dump = await s.scalar(
+            text("SELECT string_agg(to_jsonb(a)::text, '') FROM core.audit_events a")
+        )
+    assert secret not in dump and "jobs.example.test" not in dump
+    # 추가·조회만 (고치거나 지울 수 없다)
+    for stmt in ("UPDATE core.audit_events SET status = 'ok'", "DELETE FROM core.audit_events"):
+        with pytest.raises(ProgrammingError, match="permission denied"):
+            async with db.workspace_session(ws) as s:
+                await s.execute(text(stmt))
+    # 다른 공간에는 보이지 않는다
+    assert await _audit_rows(db, env["other"].workspace_id) == []
+
+    # 시스템 화면 API: 소유자만
+    assert (await c.get("/core/audit", headers=auth("editor"))).status_code == 403
+    page = (await c.get("/core/audit", headers=auth("owner"))).json()
+    assert [e["tool"] for e in page["events"]][:1] == ["drop_tables"]  # 최신 먼저
+    stats = {s["tool"]: (s["calls"], s["errors"]) for s in page["last_24h"]}
+    assert stats["search_brain"] == (1, 0) and stats["save_job_urls"] == (1, 1)
+    page = (await c.get("/core/audit?status=error&tool=get_posting", headers=auth("owner"))).json()
+    assert [e["error_code"].split(":")[0] for e in page["events"]] == ["invalid_arguments"]
+    other = (await c.get("/core/audit", headers=auth("other"))).json()
+    assert other["events"] == []
+
+
+async def test_stdio_calls_are_audited_with_their_channel(env):
+    deps = env["deps"]
+    line = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "list_experiences", "arguments": {}},
+    }
+    stdout = io.StringIO()
+
+    async def resolve():
+        return env["owner"]
+
+    await run_stdio(
+        McpServer(deps, channel="mcp-stdio"),
+        resolve,
+        stdin=io.StringIO(json.dumps(line) + "\n"),
+        stdout=stdout,
+    )
+    [row] = await _audit_rows(deps.db, env["owner"].workspace_id)
+    assert (row.channel, row.tool, row.status) == ("mcp-stdio", "list_experiences", "ok")
+
+
+async def test_list_pending_claims_uses_one_query_regardless_of_experiences(env):
+    from sqlalchemy import event
+
+    c, db, owner = env["client"], env["deps"].db, env["owner"]
+    statements: list[str] = []
+
+    def count(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    async def measure():
+        statements.clear()
+        event.listen(db.engine.sync_engine, "before_cursor_execute", count)
+        try:
+            res = await call(c, "owner", "list_pending_claims", {"limit": 50})
+        finally:
+            event.remove(db.engine.sync_engine, "before_cursor_execute", count)
+        return res["structuredContent"], len(statements)
+
+    await brain.add_claim(db, owner, env["experience"], statement="합성 주장 0", kind="result")
+    one, n_one = await measure()
+    for i in range(1, 4):
+        exp = await brain.create_experience(db, owner, title=f"합성 경험 {i}")
+        await brain.add_claim(db, owner, exp, statement=f"합성 주장 {i}", kind="result")
+    many, n_many = await measure()
+    assert len(one["claims"]) == 1 and len(many["claims"]) == 4
+    assert n_many == n_one  # 경험 수와 무관 (N+1 없음)
+    assert [x["statement"] for x in many["claims"]] == [f"합성 주장 {i}" for i in range(4)]
+    assert many["claims"][0]["experience_title"] == "합성 경험"
+    assert not many["truncated"]
+    capped = await call(c, "owner", "list_pending_claims", {"limit": 2})
+    assert len(capped["structuredContent"]["claims"]) == 2
+    assert capped["structuredContent"]["truncated"] is True

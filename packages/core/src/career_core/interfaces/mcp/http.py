@@ -3,6 +3,8 @@
 - 경로: ``POST /core/mcp`` (개인 앱에서는 ``/api/core/mcp``).
 - 인증: ``Authorization: Bearer <API 토큰>`` — HTTP API와 같은 ``IdentityResolver``. 요청마다 확인한다
   (토큰을 폐기하면 바로 막힌다). 공간은 토큰이 정하고 도구 인자로 받지 않는다.
+  ``deps.mcp_oauth``가 있으면 외부 인가 서버의 JWT도 받는다 (``oauth.py``). 401에는 보호 자원
+  메타데이터 주소(``resource_metadata``)를 알려 준다.
 - ``Origin`` 헤더가 있으면 같은 호스트여야 한다 (브라우저를 이용한 DNS rebinding 차단).
 - ``GET``(SSE 스트림)은 제공하지 않으므로 405.
 
@@ -41,7 +43,8 @@ def _origin_ok(request: Request) -> bool:
 
 
 def add_mcp_routes(router: APIRouter, deps) -> None:
-    server = McpServer(deps)
+    server = McpServer(deps, channel="mcp-http")
+    oauth = getattr(deps, "mcp_oauth", None)  # interfaces.mcp.oauth.McpOAuth | None
 
     @router.post("/mcp", include_in_schema=False)
     async def mcp(request: Request) -> Response:
@@ -49,14 +52,23 @@ def add_mcp_routes(router: APIRouter, deps) -> None:
             return JSONResponse({"detail": "origin not allowed"}, status_code=403)
         auth = request.headers.get("authorization") or ""
         scheme, _, token = auth.partition(" ")
+        token = token.strip() if scheme.lower() == "bearer" else ""
         actor = None
-        if scheme.lower() == "bearer" and token.strip():
-            actor = await deps.identity.resolve(token.strip())
+        if token:
+            # 기본은 API 토큰. 설정했으면 외부 인가 서버의 JWT도 (oauth.py, 공간은 DB 연결이 정한다)
+            actor = await deps.identity.resolve(token)
+            if actor is None and oauth is not None:
+                actor = await oauth.resolver.resolve(token)
         if actor is None:
+            challenge = (
+                oauth.config.www_authenticate(invalid_token=bool(token))
+                if oauth is not None
+                else "Bearer"
+            )
             return JSONResponse(
                 {"detail": "authentication required"},
                 status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
+                headers={"WWW-Authenticate": challenge},
             )
         version = request.headers.get("mcp-protocol-version")
         if version and version not in SUPPORTED_PROTOCOL_VERSIONS:

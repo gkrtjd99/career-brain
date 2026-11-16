@@ -141,6 +141,22 @@ class ApprovalOut(BaseModel):
     created_at: datetime
 
 
+class SummaryChangeOut(BaseModel):
+    path: str
+    kind: str
+    before: Any = None
+    after: Any = None
+    label: str | None = None
+
+
+class ApprovalDiffOut(BaseModel):
+    approval: ApprovalOut
+    requested: dict
+    current: dict | None
+    target_changed: bool
+    changes: list[SummaryChangeOut]
+
+
 def _run(v) -> RunOut:
     return RunOut.model_validate(v, from_attributes=True)
 
@@ -263,6 +279,18 @@ def add_approval_routes(router: APIRouter, deps, authorize) -> None:
     @router.get("/approvals/{approval_id}", response_model=ApprovalOut)
     async def detail(actor: reader, approval_id: UUID) -> ApprovalOut:
         return _approval(await call(approval_uc.get_approval, db, actor, approval_id))
+
+    @router.get("/approvals/{approval_id}/diff", response_model=ApprovalDiffOut)
+    async def diff(actor: reader, approval_id: UUID) -> ApprovalDiffOut:
+        """승인 화면의 변경 비교: 요청 때 요약과 지금 대상의 요약."""
+        d = await call(approval_uc.approval_diff, db, actor, approval_id)
+        return ApprovalDiffOut(
+            approval=_approval(d.approval),
+            requested=d.requested,
+            current=d.current,
+            target_changed=d.target_changed,
+            changes=[SummaryChangeOut.model_validate(c, from_attributes=True) for c in d.changes],
+        )
 
     @router.post("/approvals/{approval_id}/approve", response_model=ApprovalOut)
     async def approve(actor: decider, approval_id: UUID, body: DecisionIn) -> ApprovalOut:

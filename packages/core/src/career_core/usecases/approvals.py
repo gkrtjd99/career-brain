@@ -10,6 +10,10 @@
   대상 버전·내용 해시를 다시 계산해 요청 때와 다르면 쓰지 않고 무효(invalidated)로 표시한다.
   승인은 한 번만 쓴다 (``used``).
 - 행위별 대상 버전 계산은 ``ApprovalBinder``가 맡는다. 등록되지 않은 행위는 승인을 요청할 수 없다.
+- 즉시 무효화: 대상(지원·문서·공고)의 대상 버전 칸이 바뀌면 DB trigger(c0014)가 같은 트랜잭션에서
+  열린 승인을 ``invalidated``로 닫고 기다리던 실행을 깨운다. 어느 usecase가 바꿨는지와 무관하다.
+  조회·결정·사용 때의 해시 비교(``_refresh``, ``consume_approval``)는 최종 방어로 그대로 둔다.
+- 승인 화면의 변경 비교는 ``approval_diff``: 요청 때 요약(``summary``)과 지금 대상의 요약.
 """
 
 from __future__ import annotations
@@ -385,7 +389,122 @@ async def consume_approval(
     row.status = ApprovalStatus.USED.value
     row.used_by = actor.subject_id
     row.used_at = now
+    # 바로 DB에 쓴다: 같은 트랜잭션에서 소비자가 대상(지원 상태 등)을 바꾸면 c0014 trigger가 열린 승인을
+    # 무효로 닫는데, 그보다 먼저 'used'가 되어 있어야 한다.
+    await s.flush()
     return row
+
+
+# ---------------------------------------------------------------- 변경 비교 (승인 화면)
+
+
+@dataclass(frozen=True, slots=True)
+class SummaryChange:
+    """요청 때 요약과 지금 요약의 차이 하나. ``path`` 예: ``documents[<id>].revision``."""
+
+    path: str
+    kind: str  # changed | added | removed
+    before: Any
+    after: Any
+    label: str | None = None  # 목록 항목의 이름 (문서 제목 등)
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalDiff:
+    approval: ApprovalView
+    requested: dict  # 요청 때 요약 (approvals.summary)
+    current: dict | None  # 지금 대상의 요약. 대상이 없으면 None
+    target_changed: bool  # 지금 대상 버전 해시가 요청 때와 다르다
+    changes: list[SummaryChange]
+
+
+_MISSING = object()
+_ITEM_KEYS = ("document_id", "id")
+
+
+def _item_key(items: list) -> str | None:
+    """dict 목록이 모두 같은 ID 칸을 가지면 그 칸 이름."""
+    if not items or not all(isinstance(x, dict) for x in items):
+        return None
+    for key in _ITEM_KEYS:
+        if all(key in x for x in items):
+            return key
+    return None
+
+
+def summary_changes(before: Any, after: Any, path: str = "") -> list[SummaryChange]:
+    """두 요약의 차이. dict는 키별로, ID가 있는 dict 목록은 ID로 짝지어 비교한다."""
+    if isinstance(before, dict) and isinstance(after, dict):
+        out: list[SummaryChange] = []
+        for k in sorted(set(before) | set(after)):
+            p = f"{path}.{k}" if path else str(k)
+            b, a = before.get(k, _MISSING), after.get(k, _MISSING)
+            if b is _MISSING:
+                out.append(SummaryChange(p, "added", None, a))
+            elif a is _MISSING:
+                out.append(SummaryChange(p, "removed", b, None))
+            else:
+                out.extend(summary_changes(b, a, p))
+        return out
+    if isinstance(before, list) and isinstance(after, list):
+        key = _item_key(before + after) if (before or after) else None
+        if key is not None:
+            bmap = {str(x[key]): x for x in before}
+            amap = {str(x[key]): x for x in after}
+            out = []
+            for ident in [*bmap, *(i for i in amap if i not in bmap)]:
+                p = f"{path}[{ident}]"
+                b, a = bmap.get(ident), amap.get(ident)
+                label = str((a or b).get("title") or "") or None
+                if b is None:
+                    out.append(SummaryChange(p, "added", None, a, label))
+                elif a is None:
+                    out.append(SummaryChange(p, "removed", b, None, label))
+                else:
+                    for c in summary_changes(
+                        {k: v for k, v in b.items() if k != key},
+                        {k: v for k, v in a.items() if k != key},
+                        p,
+                    ):
+                        out.append(SummaryChange(c.path, c.kind, c.before, c.after, label))
+            return out
+    if before != after:
+        return [SummaryChange(path, "changed", before, after)]
+    return []
+
+
+async def approval_diff(
+    db: Database,
+    actor: ActorContext,
+    approval_id: UUID,
+    *,
+    binders: Mapping[str, ApprovalBinder] | None = None,
+    now: datetime | None = None,
+) -> ApprovalDiff:
+    """승인 화면의 변경 비교: 요청 때 요약과 지금 대상의 요약. 조회처럼 만료·대상 변경을 반영한다."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        row = await _lock(s, approval_id)
+        if row is None:
+            raise NotFound("approval")
+        await _refresh(s, row, binders, now or utcnow())
+        binder = _binder(row.action, binders)
+        try:
+            version, current = await binder.version(s, row.target_id)
+        except NotFound:
+            version, current = None, None
+        view = _view(row)
+    requested = dict(view.summary or {})
+    if current is None:
+        changes = [SummaryChange("target", "removed", view.target_id, None)]
+    else:
+        changes = summary_changes(requested, current)
+    return ApprovalDiff(
+        approval=view,
+        requested=requested,
+        current=current,
+        target_changed=version != view.target_version,
+        changes=changes,
+    )
 
 
 async def record_rejection(db: Database, workspace_id: UUID, approval_id: UUID, code: str) -> None:
@@ -404,7 +523,10 @@ async def record_rejection(db: Database, workspace_id: UUID, approval_id: UUID, 
 
 __all__ = [
     "ApprovalBinder",
+    "ApprovalDiff",
     "ApprovalView",
+    "SummaryChange",
+    "approval_diff",
     "close_for_run",
     "consume_approval",
     "decide_approval",
