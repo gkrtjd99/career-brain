@@ -1,0 +1,44 @@
+# career-brain
+
+개인 서버에서 경력·프로젝트·학습·문서·관심 공고·지원 이력을 관리하는 **개인용 커리어 브레인** 오픈소스.
+
+이 레포는 두 역할을 가진다.
+
+1. **바로 설치해서 쓰는 개인용 제품** — `apps/personal-web`(React) + `apps/personal-api`(FastAPI) + PostgreSQL + worker
+2. **공통 엔진** — `packages/core`(Python `career-core`), `packages/ui`, `packages/client`, `skills/`
+
+> 상태: 초기 스캐폴딩. 설계는 [docs/architecture/plan.md](docs/architecture/plan.md).
+
+## 구조
+
+```text
+apps/personal-web     React + TS + Vite (개인 대시보드)
+apps/personal-api     FastAPI composition root
+packages/core         career_core: domain / usecases / ports / db / migrations / adapters / jobs / interfaces
+packages/ui           문서 편집·근거 카드 등 공통 UI
+packages/client       TS API 클라이언트
+contracts/            OpenAPI·JSON Schema·호환성
+skills/               업무 스킬 (SKILL.md)
+deploy/compose/       개인용 compose
+```
+
+## 개발
+
+```bash
+uv sync                    # Python (3.13)
+uv run pytest
+npm install                # Node 24
+docker compose -f deploy/compose/compose.yaml up -d db
+uv run uvicorn personal_api.main:app --reload   # http://127.0.0.1:8000/api/core/health
+npm run dev                                       # http://localhost:5173
+```
+
+## 원칙
+
+- `packages/core`에 결제·플랜·서비스 운영 코드를 넣지 않는다. `IS_CLOUD` 분기를 만들지 않는다.
+- 비공개 레포의 어떤 모듈도 import하지 않는다.
+- 실제 개인정보·키·쿠키·DB 덤프를 커밋하지 않는다. 데모·테스트는 합성 데이터만.
+
+## License
+
+Apache-2.0

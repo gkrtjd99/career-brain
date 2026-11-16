@@ -1,0 +1,21 @@
+{
+  "name": "career-brain",
+  "private": true,
+  "workspaces": [
+    "packages/ui",
+    "packages/client",
+    "apps/personal-web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w personal-web",
+    "build": "npm run build -w personal-web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

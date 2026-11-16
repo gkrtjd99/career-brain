@@ -1,0 +1,15 @@
+# 개인용 로컬 개발 DB. 운영 배포 구성은 이후 추가한다.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: career
+      POSTGRES_PASSWORD: career-dev-only
+      POSTGRES_DB: career_brain
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:

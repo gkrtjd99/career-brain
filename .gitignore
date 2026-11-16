@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Env / secrets — 실제 키·쿠키·DB 덤프는 절대 커밋하지 않는다
+.env
+.env.*
+!.env.example
+*.dump
+*.sql.gz
+data/
+storage/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

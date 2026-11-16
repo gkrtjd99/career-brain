@@ -1,0 +1,9 @@
+{
+  "name": "@career-brain/client",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "인증·기본 URL을 주입받는 TS API 클라이언트",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" }
+}
