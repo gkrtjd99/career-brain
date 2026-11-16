@@ -206,6 +206,7 @@ export function MaintenanceTab() {
               </Button>
               {purge.data ? <p className="text-xs text-ok">{purge.data.deleted}개를 지웠습니다.</p> : null}
               <Problem error={purge.error} />
+              {m.auto ? <AutoMaintenanceLine auto={m.auto} /> : null}
             </Card>
           </Section>
           <ConfirmDialog
@@ -548,5 +549,21 @@ function ReportView({ report }: { report: MergeReport }) {
         </p>
       </details>
     </div>
+  );
+}
+
+/** 자동 정리(주기 유지보수) 상태: 마지막·다음 실행과 이 공간에서 한 일. */
+function AutoMaintenanceLine({ auto }: { auto: NonNullable<Maintenance["auto"]> }) {
+  if (!auto.interval_seconds) {
+    return <p className="text-xs text-muted">자동 정리: 꺼짐 (CAREER_MAINTENANCE_INTERVAL_SECONDS=0)</p>;
+  }
+  const done = Object.entries(auto.counts).filter(([, n]) => n > 0);
+  return (
+    <p className="text-xs text-muted">
+      자동 정리: {auto.running ? "실행 중" : auto.last_finished_at ? `마지막 ${formatDateTime(auto.last_finished_at)}` : "아직 안 돎"}
+      {auto.next_at ? ` · 다음 ${formatDateTime(auto.next_at)}` : ""}
+      {done.length ? ` · 이 공간: ${done.map(([k, n]) => `${k} ${int(n)}`).join(", ")}` : ""}
+      {auto.errors ? ` · 오류 ${int(auto.errors)}` : ""}
+    </p>
   );
 }
