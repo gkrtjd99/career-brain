@@ -29,7 +29,9 @@ from career_core.db.models import (
 )
 from career_core.db.session import Database
 from career_core.domain.workspace import ScopePermissionPolicy
+from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.usage import add_usage_routes
+from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext, BlobStore, IdentityResolver, PermissionPolicy
 from career_core.uploads import UploadRejected
 from career_core.usecases.sources import upload_source
@@ -45,6 +47,8 @@ class CoreDeps:
     max_upload_bytes: int = 20 * 1024 * 1024
     # 사용량 응답에 같이 보여줄 월 예산 (models.toml [budget]).
     monthly_budget_usd: Decimal | None = None
+    # 없으면 AI 보충 질문 경로가 503을 돌려준다. 추출은 worker가 처리한다.
+    models: ModelGateway | None = None
 
 
 class WorkspaceOut(BaseModel):
@@ -172,6 +176,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
         ]
 
     add_usage_routes(router, deps, authorize)
+    add_brain_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 

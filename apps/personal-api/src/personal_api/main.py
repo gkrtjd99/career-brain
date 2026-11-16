@@ -8,10 +8,11 @@ from contextlib import asynccontextmanager
 from career_core.adapters.blobstore import LocalBlobStore
 from career_core.db import Database
 from career_core.interfaces.http import CoreDeps, build_router
+from career_core.llm.gateway import ModelGateway
 from fastapi import FastAPI
 
 from personal_api.identity import PersonalTokenResolver
-from personal_api.models import load_config
+from personal_api.models import load_config, load_prices
 from personal_api.settings import Settings
 
 
@@ -32,6 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blobs=LocalBlobStore(settings.blob_dir),
         max_upload_bytes=settings.max_upload_bytes,
         monthly_budget_usd=models.budget.monthly_usd,
+        models=ModelGateway(db, models, load_prices(models)),
     )
     app.include_router(build_router(deps), prefix="/api")
     return app

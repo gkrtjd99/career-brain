@@ -72,3 +72,25 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 기록하지 않음: 프롬프트·응답 본문, 키.
 - 월 예산은 이번 달(UTC) `billing = 'metered'` 행의 `cost_usd` 합으로 본다. 동시에 여러 호출이 출발하면 한도를 조금 넘을 수 있다(사전 확인 방식). 서비스는 `BudgetPolicy`(예약·정산)를 주입해 정확히 막는다.
 
+## 경험·주장·근거·인터뷰 (c0004)
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `source_spans` | 원문 블록의 `[start_char, end_char)` 범위와 그 인용. `length(quote) = end - start` CHECK | `SELECT, INSERT` |
+| `experiences` | 경험 묶음(제목·조직·역할·기간 원문). `origin`: `ai_extraction`/`interview`/`user` | 전체 |
+| `extraction_runs` | 파싱 결과 1건에 대한 AI 추출 1회. 보낸 블록 수, 만든/버린 주장 수, `model_call_id` | 전체 |
+| `claims` | 주장 한 문장. `status`, `kind`, `contribution`(`personal`/`team`/`unknown`) | 전체 |
+| `claim_evidence` | 주장 ↔ 근거. `source_span` 또는 `interview_answer` 중 정확히 하나 | 전체 |
+| `interview_sessions` / `interview_questions` | 인터뷰와 질문(템플릿 또는 AI, AI면 `model_call_id`) | 전체 |
+| `interview_answers` | 사용자가 쓴 답 원문 | `SELECT, INSERT` |
+
+- 주장 상태: `extracted`(후보) → `self_confirmed`(본인 확인) / `evidence_supported`(본인 확인 + 원문 위치) / `disputed` / `retired`.
+  `ck_claims_confirmed`: 확정 상태면 `confirmed_by`, `confirmed_at`이 있고 `contribution <> 'unknown'`.
+- 확정은 `approve` 범위가 있는 사람만 한다. 확인 권한 없는 사람이 확정된 주장을 고치면 다시 `extracted`가 된다.
+- 근거 칸은 사용자 원문 위치와 사용자가 쓴 답만 가리킨다(`ck_claim_evidence_kind`). AI가 만든 텍스트를 근거로 연결할 방법이 없다.
+- 추출은 "고르기"다. 모델은 블록 번호와 인용을 내고, 코드가 원문에서 그 인용을 찾는다(정확히 일치, 또는 공백 차이만 허용).
+  못 찾은 주장은 버리고(`claims_dropped`), 근거 있는 주장이 하나도 없는 경험은 만들지 않는다. AI가 붙인 `contribution`은 참고값이고 상태는 항상 `extracted`로 시작한다.
+- 추출은 job(`kind = 'extract'`)으로 돈다. 원본의 외부 전송 등급이 그대로 모델 요청 등급이 되며, `restricted`는 게이트웨이에서 거부된다.
+  한 번에 보내는 본문은 40,000자까지이고, 잘렸으면 `partial`.
+- 모델 출력·프롬프트 본문은 저장하지 않는다. 추출 결과로 남는 것은 원문 인용과 모델이 쓴 주장 문장(후보)뿐이다.
+- 위키는 테이블이 아니라 보기다. `GET /api/core/wiki/experiences/{id}`(JSON)와 `/markdown`이 확정 주장(`self_confirmed`/`evidence_supported`)만 종류별로 묶고, 각 주장 아래 원문 인용·인터뷰 답을 붙인다. 후보는 "확인 대기 N건"으로만 표시한다.

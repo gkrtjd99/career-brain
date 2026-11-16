@@ -28,6 +28,12 @@ ACTION_SCOPES: dict[str, str] = {
     "sources.read": "read",
     "sources.write": "draft-write",
     "usage.read": "read",
+    "brain.read": "read",
+    "brain.write": "draft-write",
+    "claims.confirm": "approve",
+    # 자료를 외부 모델로 보내는 작업은 egress 권한이 있어야 한다.
+    "brain.extract": "egress",
+    "interview.ai": "egress",
 }
 
 

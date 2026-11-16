@@ -166,3 +166,134 @@ class ModelCall(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, default=None)
     provider_request_id: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- O04: 개인 사실 (Brain)
+
+
+class SourceSpan(Base):
+    """원문 블록 안의 글자 범위. quote는 그 범위를 그대로 복사한 값 (근거 표시용, 불변)."""
+
+    __tablename__ = "source_spans"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    document_block_id: Mapped[UUID]
+    start_char: Mapped[int] = mapped_column(Integer)
+    end_char: Mapped[int] = mapped_column(Integer)
+    quote: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Experience(Base):
+    __tablename__ = "experiences"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    title: Mapped[str] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text, default=None)
+    role: Mapped[str | None] = mapped_column(Text, default=None)
+    # 원문에 적힌 기간을 그대로 둔다. 날짜로 추측해 바꾸지 않는다.
+    period_text: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text, default="active")
+    origin: Mapped[str] = mapped_column(Text)
+    extraction_run_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ExtractionRun(Base):
+    __tablename__ = "extraction_runs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    parse_run_id: Mapped[UUID]
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    requested_by: Mapped[UUID]
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    blocks_total: Mapped[int] = mapped_column(Integer, default=0)
+    blocks_sent: Mapped[int] = mapped_column(Integer, default=0)
+    experiences_created: Mapped[int] = mapped_column(Integer, default=0)
+    claims_created: Mapped[int] = mapped_column(Integer, default=0)
+    claims_dropped: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class Claim(Base):
+    __tablename__ = "claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    experience_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)
+    statement: Mapped[str] = mapped_column(Text)
+    contribution: Mapped[str] = mapped_column(Text, default="unknown")
+    status: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)
+    extraction_run_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    confirmed_by: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ClaimEvidence(Base):
+    __tablename__ = "claim_evidence"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    claim_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)
+    source_span_id: Mapped[UUID | None] = mapped_column(default=None)
+    interview_answer_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InterviewSession(Base):
+    __tablename__ = "interview_sessions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    experience_id: Mapped[UUID | None] = mapped_column(default=None)
+    status: Mapped[str] = mapped_column(Text, default="open")
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InterviewQuestion(Base):
+    __tablename__ = "interview_questions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    session_id: Mapped[UUID]
+    ordinal: Mapped[int] = mapped_column(Integer)
+    focus: Mapped[str] = mapped_column(Text)
+    prompt: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)  # template | ai
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InterviewAnswer(Base):
+    """사용자가 직접 쓴 답. 근거로 쓰이므로 고치지 않는다 (다시 답하면 새 행)."""
+
+    __tablename__ = "interview_answers"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    question_id: Mapped[UUID]
+    answer: Mapped[str] = mapped_column(Text)
+    answered_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
