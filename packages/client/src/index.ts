@@ -1,5 +1,7 @@
+import { systemEndpoints } from "./system";
 import type * as T from "./types";
 
+export * from "./system";
 export * from "./types";
 
 export interface ClientOptions {
@@ -334,6 +336,8 @@ export function createClient({
       post<T.ReviewOut>(`/core/study/mistakes/${id(mistakeId)}/reviews`, { grade }),
     dueReviews: (opts: { until?: string; limit?: number } = {}) =>
       get<T.DueReview[]>("/core/study/reviews/due", { until: opts.until, limit: opts.limit }),
+
+    ...systemEndpoints({ request, get, post }),
   };
 }
 

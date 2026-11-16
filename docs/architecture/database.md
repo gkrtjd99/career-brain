@@ -171,3 +171,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 순환 FK 2개를 `DEFERRABLE INITIALLY IMMEDIATE`로: `fk_job_postings_confirmed_version`(공고 → 확정 버전), `fk_document_revisions_suggestion`(revision → 수정안). 평소엔 지금처럼 즉시 검사하고, 복원만 `SET CONSTRAINTS ALL DEFERRED`로 ID 그대로 넣은 뒤 commit 전에 검사한다. 추가만 되는 표를 UPDATE하지 않아도 되고, `ck_document_suggestions_applied` 같은 CHECK도 그대로 지킨다.
 - 내보내기·복원은 앱 계정이 그 공간 문맥(`app.workspace_id`) 안에서만 한다. 소유자 계정·BYPASSRLS가 필요 없다. 표는 카탈로그에서 찾고(`workspace_id` 칸), 빼는 표는 `EXCLUDED_TABLES`(`jobs`, `embeddings`)에 이유와 함께 둔다. 새 표가 미룰 수 없는 순환 FK나 내보내지 않는 표로의 FK를 만들면 계획 단계에서 오류가 난다.
 - 상세·형식·운영 절차: `docs/operations/backup.md`.
+
+## 감사·삭제 기록·외부 로그인·승인 즉시 무효 (c0014)
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `audit_events` | MCP 도구 호출 1회 = 1행: actor(ID·kind), `channel`(mcp-http/mcp-stdio), `event`, `tool`, `status`(ok/error), `error_code`, `duration_ms`, `args_sha256`(인자 정규 JSON의 sha256, 원문 없음), 짧은 `attributes`. 색인 `(workspace_id, created_at)` | **SELECT, INSERT** |
+| `deletions` | 삭제 기록(tombstone): `target_table`(`core.sources`·`job_postings`·`applications`·`study_items`만, CHECK), `target_id`, `deleted_at`. `(workspace_id, target_table, target_id)` UNIQUE | **SELECT, INSERT** |
+| `oauth_identities` | 외부 인가 서버 사용자 `(issuer, subject)` → (공간, actor). FK `(workspace_id, actor_id)` → `memberships` CASCADE, `revoked_at`. 부분 UNIQUE `(issuer, subject) WHERE revoked_at IS NULL` | `SELECT, INSERT, UPDATE` |
+
+- 세 표 모두 RLS FORCE. `oauth_identities`는 추가로 소유자 계정 전용 SELECT 정책(`oauth_lookup`)이 있고, 앱 계정은 SECURITY DEFINER 함수 `core.lookup_oauth_identity(issuer, subject)`(살아 있는 연결의 공간·actor만 돌려줌)로만 공간 문맥 없이 찾는다. 토큰을 받는 순간에는 공간을 모르기 때문이다. 공간 ID를 토큰에서 받지 않는다.
+- trigger `record_deletion` (AFTER DELETE, 위 4개 표): **그 공간 문맥의 삭제**만 남긴다 (`current_workspace_id() = OLD.workspace_id`이고 공간이 아직 있을 때). 공간 통째 삭제의 CASCADE·문맥 없는 관리 작업은 남기지 않는다. 같은 대상은 한 번 (`ON CONFLICT DO NOTHING`).
+- 승인 즉시 무효: `core.invalidate_application_approvals(app, reason)`와 trigger `approvals_on_application_change`(지원 상태·공고 변경, 삭제 → `target_missing`), `approvals_on_document_change`(문서 추가·삭제, revision·제한·세는 기준·문항·소속 변경), `approvals_on_posting_change`(확정 버전·확정 값·변경 대기 → 그 공고의 지원 전부). 열린(`pending`·`approved`) 제출 승인을 `invalidated`로. 트랜잭션 로컬 설정 `career.restoring = on`이면 건너뛴다 (복원이 행을 넣는 동안).
+- trigger `approvals_wake_run` (AFTER UPDATE OF status ON approvals): 열린 승인이 `invalidated`·`expired`로 바뀌고 그 승인을 기다리던 실행(`waiting_approval`, 같은 `approval_id`)이 있으면 `queued`로 바꾸고 사건(`approval_invalidated`/`approval_expired`)과 `run` job을 넣는다. 다음 단계가 실패 처리한다.
+- 내보내기: `audit_events`·`deletions`는 묶음에 들어가고, `oauth_identities`는 `EXCLUDED_TABLES`(설치마다 다시 연결).
+- 상세: `docs/architecture/runs.md`(무효화를 trigger로 둔 이유), `docs/architecture/mcp.md`(감사·OAuth), `docs/operations/backup.md`(삭제 기록 재적용).

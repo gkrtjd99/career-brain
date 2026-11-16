@@ -10,6 +10,7 @@ import { PostingPage } from "./pages/Posting";
 import { PostingsPage } from "./pages/Postings";
 import { SearchPage } from "./pages/Search";
 import { SettingsPage } from "./pages/Settings";
+import type { SystemTab } from "./pages/System";
 import type { StudyTab } from "./pages/Study";
 import { TodayPage } from "./pages/Today";
 import { UsagePage } from "./pages/Usage";
@@ -137,6 +138,19 @@ export const studyItemRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/StudyItem"), "StudyItemPage"),
 });
 
+const SYSTEM_TABS: SystemTab[] = ["runs", "approvals", "maintenance", "audit"];
+export const systemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/system",
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { tab?: SystemTab; approval?: string; run?: string } => ({
+    ...(SYSTEM_TABS.includes(s.tab as SystemTab) && s.tab !== "runs" ? { tab: s.tab as SystemTab } : {}),
+    ...(typeof s.approval === "string" && s.approval ? { approval: s.approval } : {}),
+    ...(typeof s.run === "string" && s.run ? { run: s.run } : {}),
+  }),
+  component: lazyRouteComponent(() => import("./pages/System"), "SystemPage"),
+});
+
 const routeTree = rootRoute.addChildren([
   todayRoute,
   brainRoute,
@@ -151,6 +165,7 @@ const routeTree = rootRoute.addChildren([
   documentRoute,
   studyRoute,
   studyItemRoute,
+  systemRoute,
 ]);
 
 export const router = createRouter({

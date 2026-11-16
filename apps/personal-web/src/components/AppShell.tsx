@@ -11,6 +11,7 @@ import {
   Menu,
   Search,
   Settings,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -32,6 +33,7 @@ const MAIN: NavItem[] = [
   { to: "/study", label: "학습", icon: GraduationCap },
 ];
 const SYSTEM: NavItem[] = [
+  { to: "/system", label: "시스템", icon: ShieldCheck },
   { to: "/usage", label: "사용량", icon: Gauge },
   { to: "/settings", label: "설정", icon: Settings },
 ];

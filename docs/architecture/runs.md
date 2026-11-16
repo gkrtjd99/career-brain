@@ -64,12 +64,20 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 - **결정**: `approvals.decide`(approve) + **사람**(`ActorContext.kind == "human"`). agent는 owner 토큰이어도 `has_scope("approve")`가 거짓이다. DB도 `approved`/`used`면 `decided_via = 'human'`을 요구한다 (`ck_approvals_human_decision`). 승인 화면은 본 내용의 `payload_hash`를 같이 보내고, 다르면 409.
 - **사용**: 소비 usecase가 자기 트랜잭션 안에서 `consume_approval`을 부른다. 대상 버전과 내용 해시를 **그 순간 다시 계산**해 다르면 쓰지 않고(`target_changed` / `payload_changed`, 409) 승인을 `invalidated`로 닫는다. 한 번 쓰면 `used`, 결과 ID(`used_result_id`)를 남긴다.
 - **무효화**: 조회·결정·사용 때 만료면 `expired`, 대상이 바뀌었으면 `invalidated`. 실행이 취소되면 그 실행의 열린 승인도 `invalidated`(`run_cancelled`).
+- **즉시 무효화 (c0014)**: 대상이 바뀌는 **그 트랜잭션 안에서** 열린 승인(`pending`·`approved`)을 `invalidated`로 닫는다 (`invalid_reason`: `target_changed`, 대상이 지워지면 `target_missing`). 그 승인을 기다리던 실행은 바로 `queued`로 깨어나고(`approval_invalidated` / `approval_expired` 이벤트, `run` job) 다음 단계에서 실패 처리한다.
+  - **왜 DB trigger인가**: 대상 칸을 바꾸는 곳이 여러 usecase(문서 저장·지원 상태·공고 확정·변경 반영)이고 다른 작업자·직접 SQL·관리 작업도 있다. usecase hook은 하나만 빠뜨려도 열린 승인이 남는다. trigger는 쓰는 쪽과 상관없이 같은 트랜잭션에서 걸리고, 롤백되면 무효화도 같이 롤백된다.
+  - 대상 칸: `applications`(상태·공고), `application_documents`(추가·삭제, 현재 revision·글자/바이트 제한·세는 기준·문항·소속 지원), `job_postings`(확정 버전·확정 값·변경 대기). 목록은 `usecases/applications.py::submission_target`과 같다. 제목처럼 대상 버전에 없는 칸은 승인을 닫지 않는다.
+  - **뒷받침**: 조회·결정·사용 때의 해시 비교는 그대로 둔다. trigger 목록에서 빠진 칸이 생겨도 사용 순간 다시 계산한 대상 버전이 다르면 쓰지 않는다 (시험: trigger를 끈 연결로 바꿔도 `submit`이 `target_changed`로 막힌다).
+  - `consume_approval`은 `used`로 바꾼 뒤 바로 flush한다. 같은 트랜잭션의 제출(지원 상태 변경)이 방금 쓴 승인을 다시 무효로 만들지 않게.
+  - 복원(`restore_workspace`)이 행을 넣는 동안은 트랜잭션 로컬 설정 `career.restoring = on`으로 멈춘다 (묶음의 승인 상태 그대로).
+- **변경 비교**: `GET /core/approvals/{id}/diff` → `{approval, requested, current, target_changed, changes[]}`. `requested`는 요청 때 저장한 요약, `current`는 지금 대상으로 다시 만든 요약(대상이 없으면 null). `changes`는 칸별 차이이고 문서 목록은 `document_id`로 짝짓는다 (`path` 예: `documents[<id>].revision`, `label`은 문서 제목). 웹 `/system?tab=approvals`가 이 비교를 보여 주고, 결정할 때 본 승인의 `payload_hash`를 보낸다.
 - 묶음 칸(행위·대상·버전·내용·요청자·만료)은 만든 뒤 바꿀 수 없다(trigger). 닫힌 승인(`used`·`rejected`·`invalidated`·`expired`)은 다시 열 수 없다.
 
 ### 제출 승인 (`applications.submit`)
 
 - 내용: `{"revisions": {document_id: revision_no}, "note": "…"}` (키 순서 무관).
 - 대상 버전: 지원 상태, 문서별 현재 revision·본문 해시·글자 제한·세는 기준·문항, 공고 확정 버전·확정 값 해시·변경 대기 항목. 문서 제목은 넣지 않는다.
+- 요약(`summary`, 비교용): 지원 제목, 문서별 제목·revision·본문 해시·글자/바이트 제한, 지원 상태, 공고 확정 값 해시·변경 대기 항목.
 - `POST /core/applications/{id}/submit`
   - `approval_id` 없음: 제출자가 승인 행위를 한다 → `applications.submit`(approve, 사람만).
   - `approval_id` 있음: 사람이 미리 승인했다 → `applications.submit_approved`(draft-write). 편집자·AI 실행이 제출할 수 있다.
@@ -84,6 +92,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 | `POST /core/runs/{id}/cancel` · `/interrupt` · `/resume` | `runs.control` |
 | `POST /core/approvals` `{action, target_id, payload, payload_hash?, reason?, expires_in_minutes?, idempotency_key?}` | `approvals.request` |
 | `GET /core/approvals?status=pending` · `GET /core/approvals/{id}` | `approvals.read` |
+| `GET /core/approvals/{id}/diff` (요청 때 요약 ↔ 지금 대상) | `approvals.read` |
 | `POST /core/approvals/{id}/approve` · `/reject` `{payload_hash?, note?}` | `approvals.decide` (사람) |
 
 다른 공간의 실행·승인 ID는 404다 (RLS). 같은 경로를 MCP 도구가 같은 usecase로 쓴다: `docs/architecture/mcp.md`.
