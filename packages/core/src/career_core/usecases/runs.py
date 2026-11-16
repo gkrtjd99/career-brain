@@ -123,6 +123,11 @@ class Workflow:
     steps: tuple[Step, ...]
     validate: Callable[[dict[str, Any]], dict[str, Any]]
     description: str = ""
+    # 시작 전 예상 비용용 단위별 입력 글자 수 (검증한 입력 → 단위마다 하나, 계획 단계가 ``position.chars``에
+    # 같은 값을 남긴다). 없으면 예상은 호출 1회 평균만 쓴다 (``usecases/run_estimates.py``)
+    input_sizes: Callable[[Database, ActorContext, dict[str, Any]], Awaitable[list[int]]] | None = (
+        None
+    )
 
 
 @dataclass(frozen=True, slots=True)

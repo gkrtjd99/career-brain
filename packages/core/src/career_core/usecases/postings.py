@@ -5,6 +5,10 @@
 
 LLM 추출도 "고르기"다. 모든 값에 본문 인용이 있어야 하고 코드가 본문에서 그 인용을 찾는다.
 날짜는 인용 안에 그 월·일 숫자가 있어야 한다. 찾지 못한 값은 비우고 확인 필요로 둔다.
+
+가져오기 작업의 저장(실행 끝 기록·새 버전·비용 확인 요청·확인 쓰기)은 먼저 작업 행을 잠그고 이 worker가
+아직 lease를 쥐고 있는지 본다(``jobs.lease.guard_lease``). 느린 페이지·비전 읽기 도중 lease를 잃은 옛
+worker가 새 worker 뒤에 같은 버전을 한 번 더 더하거나 끝난 실행을 되돌리지 않는다.
 """
 
 from __future__ import annotations
@@ -66,6 +70,7 @@ from career_core.domain.postings import (
     is_heading_line,
     normalize_url,
 )
+from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ImageInput, ModelCallError, ModelDenied, ModelRequest
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ACTOR_AGENT, ActorContext, BlobStore, ParseError
@@ -520,6 +525,7 @@ def _comparable(extracted: dict) -> dict:
 
 async def _finish_run(db, ws, run_id, **values) -> StepOutcome:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)
         run = await s.get(JobFetchRun, run_id)
         for k, v in values.items():
             setattr(run, k, v)
@@ -1133,6 +1139,7 @@ async def _take_confirmation(
 ) -> bool:
     """사람이 확인한 요청 중 같은 파일·같은 쪽·확인한 금액 이하인 것이 있으면 ``used``로 바꾸고 True."""
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)  # lease를 잃은 worker는 확인을 쓰지 않는다
         rows = (
             await s.scalars(
                 select(JobFetchConfirmation)
@@ -1171,6 +1178,7 @@ async def _ask_confirmation(
     notes: list[str],
 ) -> None:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)
         # 같은 공고의 옛 확인 요청(아직 결정하지 않은 것)은 새 요청으로 바뀐다
         await s.execute(
             update(JobFetchConfirmation)
@@ -1452,6 +1460,7 @@ async def _store_version(
             ws, hashlib.sha256(screenshot).hexdigest(), screenshot, screenshot_type
         )
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)  # 옛 worker가 새 worker 뒤에 같은 버전을 한 번 더 더하지 않게
         prev = await s.scalar(
             select(JobPostingVersion)
             .where(JobPostingVersion.posting_id == posting_id)

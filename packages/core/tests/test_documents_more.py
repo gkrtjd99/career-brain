@@ -904,6 +904,39 @@ async def test_batch_run_stops_when_document_changes(db, env):
         )
 
 
+async def test_batch_input_sizes_match_what_the_plan_records(db, env):
+    """시작 전 예상의 문단별 글자 수(``input_sizes``)와 실행 계획이 남기는 ``position.chars``가 같다."""
+    owner = env["owner"]
+    texts = [
+        "주문 API 지연을 줄였습니다.",
+        "정산 배치를 다시 짜서 야간 작업 시간을 절반으로 줄였습니다.",
+    ]
+    aid, did = await _doc_with_blocks(db, env, texts)
+    llm = SuggestingLLM()
+    gw = ModelGateway(db, CONFIG, PriceBook.load(), client_factory=lambda ep, k: llm, env=ENV)
+    deps = RunDeps(db=db, gateway=gw)
+    wf = deps.registry()["suggest_document_batch"]
+    raw = {"application_id": str(aid), "document_id": str(did), "base_revision": 1}
+    sizes = await wf.input_sizes(db, owner, wf.validate({**raw, "instruction": "짧게"}))
+    assert sizes == [len(t) + 2 for t in texts]
+    second = (await uc.get_document(db, owner, aid, did)).blocks[1].id
+    assert await wf.input_sizes(db, owner, wf.validate({**raw, "block_ids": [second]})) == [
+        len(texts[1])
+    ]
+    with pytest.raises(RunRuleError, match="invalid_input"):
+        await wf.input_sizes(db, owner, wf.validate({**raw, "block_ids": ["nope"]}))
+    view = await run_uc.start_run(
+        deps, owner, "suggest_document_batch", {**raw, "instruction": "짧게"}
+    )
+    await run_until_idle(db, run_handlers(deps))
+    done = await run_uc.get_run(db, owner, view.id)
+    assert done.status == "done" and done.position["chars"] == sizes
+    assert done.position["next"] == 2  # 단계를 지나도 글자 수 목록이 남는다
+    # 다른 공간에서는 문서가 보이지 않는다
+    with pytest.raises(brain.NotFound):
+        await wf.input_sizes(db, env["other"], wf.validate(raw))
+
+
 # ---------------------------------------------------------------- HTTP
 
 

@@ -782,6 +782,11 @@ async def test_batch_runs_start_from_http_with_estimate(db, env):
             "based_on_calls": 0,
             "cost_unknown": False,
             "basis": "past_runs",
+            # 입력 글자 수 기준(POST, test_run_estimates.py)일 때만 채워진다
+            "chars": None,
+            "fixed_per_call_usd": None,
+            "per_1k_chars_usd": None,
+            "based_on_chars": 0,
         }
         for name in ("nope", "save_job_urls"):  # 없는 workflow, 모델을 쓰지 않는 workflow
             res = await client.get(f"/api/core/runs/workflows/{name}/estimate", headers=h)

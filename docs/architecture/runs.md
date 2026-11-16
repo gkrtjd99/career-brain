@@ -48,6 +48,20 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
   - 잠금 순서는 어디서나 작업 행 → 실행 행이다 (heartbeat는 작업 행만). worker 밖(시험·도구가 usecase를 바로 부를 때)에는 문맥 변수가 없어 검사하지 않는다.
   - heartbeat·끝 기록(`_owned`)도 같은 `lease_token`일 때만 쓴다.
   - 시험 `test_documents_runs_web.py`: 두 worker — 옛 worker가 단계 도중 lease를 잃고 새 worker가 집어 끝낸 뒤 옛 worker가 깨어나도 실행·위치·비용·사건이 그대로다. `attempts`가 같고 토큰만 다른 경우, lease가 지나기만 한 경우도 본다.
+- **실행 밖의 작업 처리기도 같은 `guard_lease`를 부른다** (`jobs/worker.py` 처리기 등록 전부). 결과를 저장하는 트랜잭션마다 맨 앞에서 작업 행을 잠그고 확인한다. 끝 기록(`_owned`)만으로는 늦게 끝난 옛 worker의 **대상 행 쓰기**를 막지 못한다:
+
+  | 처리기 (`kind`) | lease 대상 | 확인하는 저장 | 확인이 없을 때의 덮어쓰기 |
+  |---|---|---|---|
+  | `run` (`usecases/runs.py`) | 실행 ID | 첫 세션·단계 루프·예외 기록·단계 저장 | 위 목록 |
+  | `parse` (`usecases/parsing.py`) | 파싱 실행 ID | 블록 교체, 끝 기록, 제공자 작업 ID 저장, **외부 제출 직전** | 큰 PDF를 오래 읽던 옛 worker가 새 worker가 끝낸(또는 제공자를 기다리는) 실행을 다시 `waiting_provider`로 되돌리고 한 번 더 제출 |
+  | `extract` (`usecases/extraction.py`) | 추출 실행 ID | 후보 저장(추출 행도 `FOR UPDATE`), 실패 기록 | 멱등이 아니다: 두 worker가 같이 `pending`을 보고 경험·주장을 두 번 만들거나, 늦은 실패가 `complete`를 `failed`로 덮음 |
+  | `embed` (`usecases/indexing.py`) | 공간 ID | 벡터 저장, "남은 대상 없음" 확인·종료 | 옛 본문의 벡터·해시가 새 본문 벡터를 덮어 다음 색인 요청까지 남음, 새 worker의 작업을 대신 `done`으로 |
+  | `job_fetch` (`usecases/postings.py`) | 가져오기 실행 ID | 끝 기록(`_finish_run`), 새 버전, 비용 확인 요청, 확인 쓰기 | 옛 본문이 새 버전 뒤에 최신 버전으로 더해짐, 끝난 실행을 되돌림, 사람이 확인한 비용 확인을 옛 worker가 씀 |
+
+  - 잠금 순서는 여기서도 작업 행 → 대상 행(색인은 작업 행 → 공간 advisory lock)이다.
+  - **포기(`give_up`)**: 마지막 시도가 예외로 끝나면 worker가 먼저 `_owned`로 확인하고 작업을 `failed`로 닫은 뒤 처리기의 `give_up`을 부른다. 그때 작업 행은 이미 `running`이 아니므로 worker가 lease 문맥을 비우고 부른다 (`give_up` 안의 저장 함수가 거부되지 않게).
+  - 외부 호출(모델·페이지 가져오기)은 확인하지 않는다: 호출 전에 확인해도 호출 도중 잃을 수 있고, 저장 때 버려지므로 결과가 섞이지 않는다 (비용은 장부에 남는다). 다시 하면 바깥이 바뀌는 제출은 파싱 제공자 하나라 그 앞에서만 한 번 더 본다 (멱등 키도 그대로).
+  - 시험 `test_lease_handlers.py`: 두 worker — 추출(옛 worker가 늦게 잘못된 출력을 받아도 `complete` 그대로, 경험 1개), 공고 가져오기(옛 본문 버전이 더해지지 않음), lease가 지나기만 한 가져오기(저장하지 않고 다음 worker가 다시), 포기 기록. 확인을 끄면 앞의 셋이 실패한다.
 - 따라서 단계의 부수효과는 멱등이어야 한다. 쓰는 방법:
   - usecase 자체의 중복 방지 (공고 정규화 URL, 지원마다 제출본 1건)
   - 멱등 키 `ctx.effect_key(name)` = `run:{run_id}:{name}` (승인 요청 등)
@@ -71,10 +85,14 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 
 ### 시작 전 예상 비용 (c0023)
 
-`GET /core/runs/workflows/{workflow}/estimate?units=` (`runs.read`, `usecases/run_estimates.py`). 모델을 부르는 일괄 workflow(`suggest_document_batch`·`interview_question_batch`)만, 없거나 모델을 안 쓰는 workflow는 404.
+`GET /core/runs/workflows/{workflow}/estimate?units=` · `POST /core/runs/workflows/{workflow}/estimate` `{input}` (둘 다 `runs.read`, `usecases/run_estimates.py`). 모델을 부르는 일괄 workflow(`suggest_document_batch`·`interview_question_batch`)만, 없거나 모델을 안 쓰는 workflow는 404.
 
-- 가격표로 미리 계산하지 않는다 (글·응답 길이를 모른다). **이 공간에서 같은 workflow를 돌린 지난 실행** 20개(호출이 있었던 것)의 `cost_usd` 합 ÷ `model_calls` 합 = 호출 1회 평균, × 이번 호출 수(단위 하나당 1회).
-- 지난 실행이 없으면 `estimate_usd = null` — 화면은 호출 수만 보인다. 단가 미상 호출이 섞였으면 `cost_unknown = true`(평균은 아는 비용만, 하한).
+- 가격표로 미리 계산하지 않는다 (응답 길이를 모른다). **이 공간에서 같은 workflow를 돌린 지난 실행** 20개(호출이 있었던 것)의 장부 기준 비용을 쓴다. 근거는 응답의 `basis`:
+  - `input_chars` — POST로 **시작할 입력 그대로** 보냈을 때. 서버가 입력을 검증하고 workflow의 `input_sizes`로 단위별 글자 수를 센다 (문서: 문단 글 + 요청 글, 인터뷰: 경험 칸 + 보낼 주장 문장 — 질문 요청과 같은 고르기). 실행의 계획 단계도 **같은 함수의 값**을 `position.chars`(단위마다 숫자, 글은 없음)에 남긴다. 지난 실행마다 (호출 수, 처리한 글자 수 `chars[:next]`, 비용)으로 `비용 ≈ a × 호출 + b × 글자`를 최소제곱으로 맞추고(절편 없음), 예상 = a × 이번 호출 수 + b × 이번 글자 수. 응답에 `chars`·`fixed_per_call_usd`(a)·`per_1k_chars_usd`(b×1000)·`based_on_chars`.
+    - 왜 두 항인가: 호출마다 시스템 지시·근거·공고 문맥·응답이 거의 같은 크기로 붙는다. 글자 수에만 비례시키면(비용 ÷ 글자) 짧은 문단 몇 개와 긴 문단 몇 개의 예상 차이가 실제보다 훨씬 크게 나온다.
+  - `past_runs` — 그 밖: 호출 1회 평균(`cost_usd` 합 ÷ `model_calls` 합) × 이번 호출 수(단위 하나당 1회). GET(입력 없음), 글자 수를 남긴 지난 실행이 2개보다 적음(이 기능 전 실행은 `position.chars`가 없다), 지난 실행들의 호출당 글자 수가 거의 같아 a·b를 가를 수 없음(퍼짐 5% 미만), 맞춘 a나 b가 음수일 때. 입력을 보냈으면 `chars`는 그래도 채운다.
+- 지난 실행이 없으면 `estimate_usd = null` — 화면은 호출 수만 보인다. 단가 미상 호출이 섞였으면 `cost_unknown = true`(아는 비용만, 하한).
+- POST는 아무것도 만들지 않는다. 다른 공간의 문서·경험은 404(RLS). 글자 수만 돌려준다.
 - 구독 프록시 정가 환산액은 `runs.cost_usd`에 없으므로 들어가지 않는다. 예상은 약속이 아니다: 월 예산·단가 미상 거부는 실행 때 게이트웨이가 그대로 지킨다.
 
 ## 외부 한도 (§17.14)
@@ -112,7 +130,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
   - **왜 이 방식인가** (검토한 셋): ① 칸 목록 시험(파이썬 `submission_target`에 칸이 늘면 실패) — 시험이 목록을 하나 더 만들 뿐이고, 해시에 칸을 더하면서 시험 목록만 고치면 그대로 통과한다. ② 대상 버전을 행에 저장하는 칸 + trigger 갱신 — 저장값과 계산값이 또 갈라질 수 있다. ③ **계산 자체를 DB 함수 하나로**(채택) — 판정에 쓰는 값이 정의상 하나다. 함수 본문이 `BEGIN ATOMIC`(SQL 표준 본문)이라 PostgreSQL이 읽는 표·칸을 `pg_depend`에 적고, 시험이 "함수가 읽는 표마다 다시 계산 trigger가 있다"를 카탈로그로 확인한다 (`test_approvals_mcp.py::test_version_function_reads_only_tables_that_recheck`). 함수가 새 표를 읽게 바꾸고 trigger를 잊으면 그 시험이 실패한다. 읽는 칸을 지우려 해도 의존성 때문에 DB가 막는다.
   - 비용: 열린 승인이 없으면 `EXISTS` 한 번으로 끝난다. 열린 승인이 있는 지원의 문서 저장·공고 변경 때만 해시를 다시 만든다.
   - c0019로 올리면 버전 형식이 바뀐다 (파이썬 정규 JSON → `jsonb::text`의 sha256). 그때 열린 제출 승인은 `target_changed`로 닫히고 기다리던 실행은 깨어나 실패 처리된다. 다시 요청하면 된다.
-  - 새 승인 행위가 생기면: 그 대상의 `<kind>_target_version` 함수(`BEGIN ATOMIC`)와 다시 계산 trigger를 같은 방식으로 두고, `ApprovalBinder.version`이 그 함수를 부른다. 시험도 같은 꼴로 하나 더.
+  - 새 승인 행위가 생기면: 그 대상의 `<kind>_target_version` 함수(`BEGIN ATOMIC`)와 다시 계산 trigger를 같은 방식으로 두고, `ApprovalBinder.version`이 그 함수를 부른다. **잊으면 시험이 실패한다** (`test_approval_kinds.py`): `default_binders()`의 대상 종류(`target_kind`)마다 `core.<kind>_target_version(uuid) RETURNS text`(SQL 표준 본문), trigger 함수 `core.approvals_recheck_<kind>()`, 함수가 읽는 표(`pg_depend`)마다 그 함수를 부르는 켜진 `approvals_recheck` trigger, binder의 `version`이 그 함수를 부르는지를 본다. 반대로 core 함수 본문이 `target_kind = '…'`로 다루는 종류는 모두 binder가 있어야 한다. 시험은 빠뜨린 경우(함수 없는 새 종류, trigger 하나를 지운 상태)를 실제로 잡는지도 확인한다.
   - **뒷받침**: 조회·결정·사용 때의 해시 비교는 그대로 둔다. trigger가 꺼진 채 바뀐 변경도 사용 순간 다시 계산한 대상 버전이 다르면 쓰지 않는다 (시험: trigger를 끈 연결로 바꿔도 `submit`이 `target_changed`로 막힌다).
   - `consume_approval`은 `used`로 바꾼 뒤 바로 flush한다. 같은 트랜잭션의 제출(지원 상태 변경)이 방금 쓴 승인을 다시 무효로 만들지 않게.
   - 복원(`restore_workspace`)이 행을 넣는 동안은 트랜잭션 로컬 설정 `career.restoring = on`으로 멈춘다 (묶음의 승인 상태 그대로).
@@ -134,7 +152,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 |---|---|
 | `GET /core/runs/workflows` | `runs.read` |
 | `POST /core/runs` `{workflow, input, idempotency_key?}` → 202 | `runs.start` + workflow의 `action` |
-| `GET /core/runs/workflows/{workflow}/estimate?units=` (c0023, 위 "시작 전 예상 비용") | `runs.read` |
+| `GET /core/runs/workflows/{workflow}/estimate?units=` (c0023) · `POST …/estimate` `{input}` (입력 글자 수 기준, 위 "시작 전 예상 비용") | `runs.read` |
 | `GET /core/runs?status=&limit=` · `GET /core/runs/{id}` · `GET /core/runs/{id}/events?after=` | `runs.read` |
 | `POST /core/runs/{id}/cancel` · `/interrupt` · `/resume` | `runs.control` |
 | `POST /core/approvals` `{action, target_id, payload, payload_hash?, reason?, expires_in_minutes?, idempotency_key?}` | `approvals.request` |
@@ -147,7 +165,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 
 ## 실시간 갱신 (SSE, c0019)
 
-시스템 화면은 실행·승인 상태를 `GET /core/live`(Server-Sent Events)로 받는다. 구현: `interfaces/http/live.py`.
+시스템 화면은 실행·승인 상태를 `GET /core/live`(Server-Sent Events)로 받는다. 구현: `interfaces/http/live.py`. 웹의 일괄 실행 진행 카드와 오늘 화면 "승인 요청" 카드도 같은 스트림을 쓴다 (`web.md`).
 
 ```text
 runs·approvals 변경 ─▶ trigger notify_state (문장마다) ─▶ NOTIFY career_state, 'runs' | 'approvals'
@@ -190,7 +208,7 @@ dispatcher(worker의 job kind 'outbox'): claim (SKIP LOCKED) → 바깥에 보�
 
 - 문서 화면 "일괄 수정안" → `suggest_document_batch` (저장한 revision 기준, 문단 고르기 최대 50, 요청 500자). 편집이 저장되지 않았으면 시작하지 않는다.
 - 브레인 화면 "일괄 인터뷰" → `interview_question_batch` (경험 최대 20, 경험마다 질문 1–5개).
-- 둘 다 시작 전 예상 비용을 보이고, 시작 뒤에는 실행을 2초마다 다시 읽어 진행(`position`의 대상 목록·`next`)·비용·대기/실패 이유를 보이며 시스템 화면 `/system?run=`으로 잇는다 (멈춤·취소·사건은 거기서).
+- 둘 다 시작 전 예상 비용(시작할 입력으로 `POST …/estimate`)을 보이고, 시작 뒤에는 진행(`position`의 대상 목록·`next`)·비용·대기/실패 이유를 보이며 시스템 화면 `/system?run=`으로 잇는다 (멈춤·취소·사건은 거기서). 진행은 실행 상태 알림(SSE `/core/live`)을 받으면 다시 읽고, 알림이 끊긴 동안만 5초마다 다시 읽는다.
 - 멱등 키는 `web:<종류>:<창마다 무작위>:<입력 해시>` — 같은 창에서 응답을 못 받고 다시 눌러도 같은 실행이고, 입력을 바꾸면 새 실행이다.
 - 결과 글은 실행 기록에 없다. 수정안은 문서의 AI 수정안 탭, 질문은 각 경험의 인터뷰 탭에서 본다 (`GET /core/interviews?run_id=`로 이 실행의 세션을 찾는다).
 

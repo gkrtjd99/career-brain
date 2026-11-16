@@ -43,7 +43,11 @@ export interface Workflow {
   description: string;
 }
 
-/** c0023 시작 전 참고 비용: 같은 workflow 지난 실행의 호출 1회 평균 × 계획한 호출 수. 지난 실행이 없으면 null */
+/**
+ * c0023 시작 전 참고 비용 (지난 실행이 없으면 estimate_usd = null). 근거(basis):
+ * - `input_chars`: 입력을 보냈고(POST) 지난 실행들로 "호출당 고정분 + 글자당" 비용을 맞출 수 있었다.
+ * - `past_runs`: 같은 workflow 지난 실행의 호출 1회 평균 × 계획한 호출 수.
+ */
 export interface RunEstimate {
   workflow: string;
   units: number;
@@ -52,9 +56,15 @@ export interface RunEstimate {
   estimate_usd: string | null;
   based_on_runs: number;
   based_on_calls: number;
-  /** 지난 실행에 단가 미상 호출이 있었다 (예상은 아는 비용만으로, 하한) */
+  /** 근거 실행에 단가 미상 호출이 있었다 (예상은 아는 비용만으로, 하한) */
   cost_unknown: boolean;
-  basis: "past_runs" | string;
+  basis: "past_runs" | "input_chars" | string;
+  /** 이번 입력 글자 수 (입력을 보냈을 때) */
+  chars: number | null;
+  /** basis = input_chars일 때: 맞춘 호출당 고정분, 1천 자당 비용, 근거 실행들이 처리한 글자 수 */
+  fixed_per_call_usd: string | null;
+  per_1k_chars_usd: string | null;
+  based_on_chars: number;
 }
 
 export interface RunEvent {
@@ -283,6 +293,9 @@ export function systemEndpoints({ request, get, post }: SystemDeps) {
       post<Run>("/core/runs", { workflow, input, idempotency_key: idempotencyKey ?? null }),
     runEstimate: (workflow: string, units: number) =>
       get<RunEstimate>(`/core/runs/workflows/${id(workflow)}/estimate`, { units }),
+    /** 시작할 입력 그대로 보내 입력 크기(글자 수)로 잰 예상. 아무것도 만들지 않는다 */
+    runEstimateFor: (workflow: string, input: Record<string, unknown>) =>
+      post<RunEstimate>(`/core/runs/workflows/${id(workflow)}/estimate`, { input }),
     runs: (opts: { status?: RunStatus; limit?: number } = {}) =>
       get<Run[]>("/core/runs", { status: opts.status, limit: opts.limit }),
     run: (runId: string) => get<Run>(`/core/runs/${id(runId)}`),

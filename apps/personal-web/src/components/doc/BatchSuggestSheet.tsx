@@ -71,17 +71,20 @@ function BatchSuggestSheet({
   const [key] = useState(() => newRunKey(`suggest:${doc.id}:r${doc.revision_no}`));
   const chosen = useMemo(() => blocks.filter((b) => picked.has(b.id)).map((b) => b.id), [blocks, picked]);
 
+  // 시작할 입력 그대로 (예상 비용도 같은 입력으로 글자 수를 센다)
+  const input = useMemo(
+    () => ({
+      application_id: appId,
+      document_id: doc.id,
+      base_revision: doc.revision_no,
+      block_ids: chosen,
+      instruction: instruction.trim() || null,
+    }),
+    [appId, doc.id, doc.revision_no, chosen, instruction],
+  );
+
   const start = useMutation({
-    mutationFn: () => {
-      const input = {
-        application_id: appId,
-        document_id: doc.id,
-        base_revision: doc.revision_no,
-        block_ids: chosen,
-        instruction: instruction.trim() || null,
-      };
-      return api.startRun(WORKFLOW, input, runKey(key, input));
-    },
+    mutationFn: () => api.startRun(WORKFLOW, input, runKey(key, input)),
     onSuccess: (run) => setRunId(run.id),
   });
   const onFinished = useCallback(
@@ -185,7 +188,7 @@ function BatchSuggestSheet({
               className="min-h-14"
             />
           </div>
-          <CostEstimate workflow={WORKFLOW} units={chosen.length} noun="문단" />
+          <CostEstimate workflow={WORKFLOW} units={chosen.length} noun="문단" input={input} />
           <ErrorText error={start.error} />
           <Button type="submit" variant="primary" disabled={!chosen.length || dirty || start.isPending}>
             {start.isPending ? "시작하는 중" : `${chosen.length}개 문단 시작`}

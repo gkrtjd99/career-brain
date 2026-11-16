@@ -3,6 +3,10 @@
 순서: 로컬 추출 → 텍스트 없는 쪽이 있으면 외부 파서 후보 → EgressPolicy 검사 → 제출
 → provider_job_id 저장 → 이후 실행은 상태 조회만 한다 (재시작해도 다시 제출하지 않음).
 네트워크 호출 동안 DB 트랜잭션을 열어 두지 않는다.
+
+lease 확인(``jobs.lease.guard_lease``): 블록 교체·끝 기록·제공자 작업 ID 저장은 같은 트랜잭션에서 먼저
+작업 행을 잠그고 이 worker가 아직 lease를 쥐고 있는지 본다. 큰 PDF를 오래 읽다 lease를 잃은 옛 worker가
+새 worker의 결과(제공자 대기·끝난 상태)를 되돌리지 않는다. 외부 제출 직전에도 한 번 본다 (중복 제출 줄이기).
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from sqlalchemy import delete, func, select
 from career_core.db.models import DocumentBlock, ParseRun, Source, SourceVersion
 from career_core.db.session import Database
 from career_core.domain.sources import TERMINAL_PARSE_STATUSES, ParseStatus
+from career_core.jobs.lease import guard_lease
 from career_core.ports import (
     ActorContext,
     BlobStore,
@@ -82,6 +87,7 @@ async def _replace_blocks(
     db: Database, ws: UUID, run_id: UUID, origin: str, blocks: Iterable[ParsedBlock], *, start: int
 ) -> None:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)
         await s.execute(
             delete(DocumentBlock).where(
                 DocumentBlock.parse_run_id == run_id, DocumentBlock.origin == origin
@@ -110,6 +116,7 @@ async def _finish(
     pages_total: int | None = None,
 ) -> StepOutcome:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)
         run = await s.get(ParseRun, run_id)
         has_blocks = bool(
             await s.scalar(
@@ -192,11 +199,15 @@ async def process_parse_run(deps: ParsingDeps, workspace_id: UUID, run_id: UUID)
             pages_total=result.pages_total,
         )
 
+    # lease를 잃은 worker는 제출하지 않는다 (새 worker가 이미 제출했을 수 있다)
+    async with deps.db.workspace_session(workspace_id) as s:
+        await guard_lease(s, run_id)
     # 제출과 ID 저장 사이에 worker가 죽으면 다시 제출될 수 있다. idempotency_key로 제공자 쪽 중복을 줄인다.
     provider_job_id = await provider.submit(
         data, view.mime_type, missing, idempotency_key=str(run_id)
     )
     async with deps.db.workspace_session(workspace_id) as s:
+        await guard_lease(s, run_id)
         run = await s.get(ParseRun, run_id)
         run.provider = provider.name
         run.provider_job_id = provider_job_id

@@ -5,12 +5,29 @@ import { ChevronRight, ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
 import { ACTION_LABEL } from "../lib/systemLabels";
+import { LiveProvider, useLiveConnected } from "./system/live";
 
-/** 오늘 화면의 "승인 요청" 카드. 대기 중인 요청이 있을 때만 보인다. */
+// 실시간 알림(SSE)이 끊겼을 때만 다시 읽는 간격
+const FALLBACK_POLL_MS = 30_000;
+
+/**
+ * 오늘 화면의 "승인 요청" 카드. 대기 중인 요청이 있을 때만 보인다. 승인 상태 알림(SSE ``/core/live``)을 받으면
+ * 다시 읽고, 알림이 끊겼으면 30초마다 다시 읽는다.
+ */
 export function ApprovalRequestsCard({ className }: { className?: string }) {
+  return (
+    <LiveProvider>
+      <PendingApprovals className={className} />
+    </LiveProvider>
+  );
+}
+
+function PendingApprovals({ className }: { className?: string }) {
+  const live = useLiveConnected();
   const q = useQuery({
     queryKey: ["approvals", "pending"],
     queryFn: () => api.approvals({ status: "pending", limit: 20 }),
+    refetchInterval: live ? false : FALLBACK_POLL_MS,
   });
   const list = q.data ?? [];
   if (!list.length) return null;
