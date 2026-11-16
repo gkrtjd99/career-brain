@@ -22,6 +22,8 @@
 - 기존 공간에 합치기(``merge_workspace``): 모든 ID를 새로 만들고, 겹치는 행(같은 ID·DB 유일 키·내용 키)은
   정책(``skip``/``fail``)대로 처리한다. 기존 행은 고치지 않는다 (INSERT만, 앞뒤 논리 해시로 확인).
 - 옛 형식 묶음: ``UPGRADES``(형식 버전 → 다음 버전 단계)를 차례로 적용한 뒤 같은 검사를 한다.
+- 옛 migration head 묶음: ``SCHEMA_STEPS``(revision마다 표 변환 단계 또는 바뀜 없음 표시)를 묶음 head 다음부터
+  이 설치 head까지 차례로 적용한다 (``convert_schema``).
 """
 
 from __future__ import annotations
@@ -69,6 +71,7 @@ EXCLUDED_TABLES: dict[str, str] = {
     "core.oauth_identities": "외부 로그인 연결: 설치마다 다시 연결한다 (personal-api oauth-link)",
     "core.oauth_tokens": "본 외부 토큰·폐기 목록: 수명이 짧은 설치별 기록이고 연결(oauth_identities)을 따른다",
     "core.maintenance_results": "이 설치의 주기 유지보수 기록 (c0020). 복원한 설치에서 다시 쌓인다",
+    "core.restore_jobs": "웹 복원 작업 상태 (c0024). 이 설치의 임시 파일을 가리키는 일시 상태",
 }
 # 복원 후 다시 큐에 넣는 작업 종류 → 대상 표. 내보낼 때 대기·실행 중이던 것만 manifest에 적는다.
 REQUEUE_KINDS: dict[str, str] = {
@@ -797,22 +800,34 @@ class _Archive:
     bytes: int
     # 옛 형식에서 바꿔 읽었으면 원래 형식 버전
     upgraded_from: int | None = None
+    # 옛 migration head에서 바꿔 읽었으면 원래 head (``convert_schema``)
+    schema_from: list[str] | None = None
+    # 변환 단계가 만들거나 고친 표. 칸 이름은 행마다 대상 DB와 비교한다 (``_check_schema``).
+    touched: set[str] = field(default_factory=set)
 
     def path(self, name: str) -> Path:
         return self.table_dir / f"{name}.jsonl"
+
+    def has(self, name: str) -> bool:
+        return any(e["name"] == name for e in self.manifest["tables"])
 
     def iter_lines(self, name: str) -> Iterator[str]:
         with open(self.path(name), encoding="utf-8") as f:
             for line in f:
                 yield line.rstrip("\n")
 
+    def iter_rows(self, name: str) -> Iterator[dict]:
+        """변환 단계용: 행을 dict로 (소수는 ``Decimal`` 그대로)."""
+        for line in self.iter_lines(name):
+            yield json.loads(line, parse_float=Decimal)
+
     def read_lines(self, name: str) -> list[str]:
         return list(self.iter_lines(name))
 
     def rewrite(self, name: str, change: Callable[[dict], dict | None]) -> None:
-        """형식 변환 단계용: 표 파일의 행을 하나씩 바꿔 다시 쓴다 (``None``이면 그 행을 뺀다).
+        """변환 단계용: 표 파일의 행을 하나씩 바꿔 다시 쓴다 (``None``이면 그 행을 뺀다).
 
-        해시·행 수는 모든 단계가 끝난 뒤 ``upgrade_archive``가 다시 계산한다.
+        해시·행 수는 모든 단계가 끝난 뒤 다시 계산한다 (``upgrade_archive``·``convert_schema``).
         """
         src = self.path(name)
         tmp = src.with_name(f".{src.name}.{uuid4().hex}")
@@ -822,6 +837,41 @@ class _Archive:
                 if row is not None:
                     out.write(_json_text(row) + "\n")
         os.replace(tmp, src)
+        self.touched.add(name)
+
+    def _entry(self, name: str) -> dict:
+        for e in self.manifest["tables"]:
+            if e["name"] == name:
+                return e
+        raise ArchiveError("upgrade_failed", f"no table {name} in the archive")
+
+    def rename_table(self, old: str, new: str) -> None:
+        """변환 단계용: 표 이름 바꾸기 (파일·manifest). 행은 그대로 (칸은 ``rewrite``로)."""
+        if self.has(new) or not _TABLE_FILE.fullmatch(_table_file(new)):
+            raise ArchiveError("upgrade_failed", f"cannot rename {old} to {new}")
+        entry = self._entry(old)
+        os.replace(self.path(old), self.path(new))
+        entry.update(name=new, file=_table_file(new))
+        self.touched.discard(old)
+        self.touched.add(new)
+
+    def add_table(self, name: str, rows: Iterable[dict] = ()) -> None:
+        """변환 단계용: 새 표 (옛 묶음에 없던 표는 보통 빈 표). 표를 나눌 때는 행을 같이 준다."""
+        if self.has(name) or not _TABLE_FILE.fullmatch(_table_file(name)):
+            raise ArchiveError("upgrade_failed", f"cannot add table {name}")
+        with open(self.path(name), "w", encoding="utf-8") as out:
+            out.writelines(_json_text(row) + "\n" for row in rows)
+        self.manifest["tables"].append(
+            {"name": name, "file": _table_file(name), "rows": 0, "sha256": "", "columns": []}
+        )
+        self.touched.add(name)
+
+    def drop_table(self, name: str) -> None:
+        """변환 단계용: 표 지우기 (지금 설치에 없는 표, 또는 다른 표로 합친 뒤)."""
+        entry = self._entry(name)
+        self.manifest["tables"].remove(entry)
+        self.path(name).unlink()
+        self.touched.discard(name)
 
 
 def _json_text(value: Any) -> str:
@@ -1048,8 +1098,16 @@ def upgrade_archive(arc: _Archive) -> int | None:
     for v in range(start, FORMAT_VERSION):
         UPGRADES[v].apply(m, arc)
         m["format_version"] = v + 1
+    _restat(arc)
+    m["upgraded_from"] = start
+    arc.upgraded_from = start
+    return start
+
+
+def _restat(arc: _Archive) -> None:
+    """변환 뒤 표 파일마다 sha256·행 수를 다시 잰다. manifest와 파일 목록이 어긋나면 ``upgrade_failed``."""
     listed = set()
-    for entry in m["tables"]:
+    for entry in arc.manifest["tables"]:
         name = entry["name"]
         if not _TABLE_FILE.fullmatch(_table_file(name)) or not arc.path(name).is_file():
             raise ArchiveError("upgrade_failed", f"table file missing after upgrade: {name}")
@@ -1057,9 +1115,132 @@ def upgrade_archive(arc: _Archive) -> int | None:
         listed.add(name)
     if extra := {p.name.removesuffix(".jsonl") for p in arc.table_dir.iterdir()} - listed:
         raise ArchiveError("upgrade_failed", f"unlisted table files: {', '.join(sorted(extra))}")
-    m["upgraded_from"] = start
-    arc.upgraded_from = start
-    return start
+
+
+# ---------------------------------------------------------------- 옛 migration head 변환
+#
+# migration이 내보내는 표의 모양(표·칸 이름·타입)을 바꾸면 그 revision에 단계를 하나 등록한다.
+# 옛 head에서 만든 묶음은 그 head 다음 revision부터 이 설치의 head까지 차례로 단계를 적용해 읽는다.
+#
+# - ``@schema_step("c00NN", "요약")``: 행을 바꾸는 함수 ``(arc) -> None``. 도구는 ``arc.rename_table``,
+#   ``arc.add_table``(빈 표·나눈 표), ``arc.drop_table``, ``arc.rewrite``(행마다 dict → dict/None),
+#   ``arc.iter_rows``. 값은 PostgreSQL ``to_jsonb`` 출력 모양으로 쓴다 (복원 확인이 그 모양으로 비교한다).
+#   칸 값이 null인 행에서도 깨지지 않아야 한다 (``test_schema_steps_cover_every_migration``이
+#   모든 칸이 null인 합성 행으로 돌려 본다).
+# - ``no_data_change("c00NN", "이유")``: 내보내는 표의 모양이 그대로인 revision (함수·trigger·색인,
+#   내보내지 않는 표). 시험이 migration 앞뒤 카탈로그를 비교해 정말 그대로인지 확인한다.
+# - 등록이 없는 revision을 지나야 하는 묶음은 ``version_mismatch``. ``SCHEMA_FLOOR``보다 옛 head는 받지 않는다.
+
+SchemaStepFn = Callable[[_Archive], None]
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaStep:
+    revision: str
+    summary: str
+    apply: SchemaStepFn | None  # None = 내보내는 표 모양이 바뀌지 않는다 (no data change)
+
+
+# migration revision → 그 revision으로 올리는 단계 (또는 바뀜 없음 표시)
+SCHEMA_STEPS: dict[str, SchemaStep] = {}
+# 이 head(포함)부터 만든 묶음을 바꿔 읽는다. 이 다음 revision마다 SCHEMA_STEPS에 하나씩 있어야 한다.
+SCHEMA_FLOOR = "c0018"
+
+
+def schema_step(revision: str, summary: str) -> Callable[[SchemaStepFn], SchemaStepFn]:
+    def register(fn: SchemaStepFn) -> SchemaStepFn:
+        _register_step(SchemaStep(revision, summary, fn))
+        return fn
+
+    return register
+
+
+def no_data_change(revision: str, summary: str) -> None:
+    _register_step(SchemaStep(revision, summary, None))
+
+
+def _register_step(step: SchemaStep) -> None:
+    if step.revision in SCHEMA_STEPS:
+        raise ValueError(f"schema step {step.revision} registered twice")
+    SCHEMA_STEPS[step.revision] = step
+
+
+no_data_change(
+    "c0019", "승인 대상 버전 함수·trigger, oauth_tokens(내보내지 않음), 감사 보존 함수, 알림"
+)
+no_data_change("c0020", "다음 작업 시각·유지보수 함수, maintenance_schedule·results(내보내지 않음)")
+
+
+@schema_step("c0021", "study_settings → workspace_settings (timezone 그대로, tech_aliases = [])")
+def _schema_c0021(arc: _Archive) -> None:
+    if not arc.has("core.study_settings"):
+        return
+    arc.rename_table("core.study_settings", "core.workspace_settings")
+    arc.rewrite("core.workspace_settings", lambda row: {**row, "tech_aliases": []})
+
+
+no_data_change("c0024", "웹 복원 작업 표 restore_jobs (내보내지 않음)")
+
+
+def _parents() -> dict[str, str | None]:
+    from alembic.script import ScriptDirectory
+
+    from career_core.db.migrate import CORE_CHAIN
+
+    script = ScriptDirectory(str(CORE_CHAIN.script_location))
+    out: dict[str, str | None] = {}
+    for rev in script.walk_revisions():
+        down = rev.down_revision
+        # core chain은 한 줄이다. 갈래·합침은 변환하지 않는다
+        out[rev.revision] = down if isinstance(down, str) or down is None else "<merge>"
+    return out
+
+
+def schema_path(from_heads: Sequence[str], to_heads: Sequence[str]) -> list[str]:
+    """``from_heads`` 다음 revision부터 ``to_heads``까지 (오래된 것 먼저). 이을 수 없으면 ``version_mismatch``."""
+    mismatch = ArchiveError(
+        "version_mismatch", f"archive migrations {list(from_heads)}, this install {list(to_heads)}"
+    )
+    if len(from_heads) != 1 or len(to_heads) != 1:
+        raise mismatch
+    parents = _parents()
+    path: list[str] = []
+    cur: str | None = to_heads[0]
+    while cur != from_heads[0]:
+        if cur is None or cur not in parents:
+            raise mismatch  # 묶음이 이 설치보다 새것이거나 모르는 revision
+        path.append(cur)
+        cur = parents[cur]
+    return path[::-1]
+
+
+def convert_schema(arc: _Archive, expected_heads: Sequence[str] | None = None) -> list[str] | None:
+    """묶음의 migration head가 이 설치와 다르면 단계를 차례로 적용한다. 원래 head(같으면 None).
+
+    단계가 없는 revision을 지나야 하면 ``version_mismatch``. 해시·행 수는 다시 재고, 고친 표의 칸 이름은
+    복원·합치기가 대상 DB 카탈로그와 행마다 비교한다 (``_check_schema``).
+    """
+    m = arc.manifest
+    heads = sorted(expected_heads) if expected_heads is not None else core_migration_heads()
+    have = sorted(m["migration_heads"])
+    if have == heads:
+        return None
+    path = schema_path(have, heads)
+    if missing := [rev for rev in path if rev not in SCHEMA_STEPS]:
+        raise ArchiveError(
+            "version_mismatch",
+            f"archive migrations {have}, this install {heads}: "
+            f"no conversion step for {', '.join(missing)}",
+        )
+    for rev in path:
+        step = SCHEMA_STEPS[rev]
+        if step.apply is not None:
+            step.apply(arc)
+    _restat(arc)
+    m["migration_heads"] = heads
+    m["converted_from_heads"] = have
+    arc.schema_from = have
+    return have
 
 
 async def _open_archive(
@@ -1094,15 +1275,6 @@ async def _open_archive(
     await asyncio.to_thread(upgrade_archive, arc)
     _check_manifest(arc.manifest)
     return arc, encrypted
-
-
-def _check_heads(manifest: dict, expected_heads: Sequence[str] | None) -> None:
-    heads = sorted(expected_heads) if expected_heads is not None else core_migration_heads()
-    if sorted(manifest["migration_heads"]) != heads:
-        raise ArchiveError(
-            "version_mismatch",
-            f"archive migrations {manifest['migration_heads']}, this install {heads}",
-        )
 
 
 async def _read_tombstones(
@@ -1205,6 +1377,10 @@ class RestoreReport:
     skipped_deletions: list[SkippedDeletion] = field(default_factory=list)
     encrypted: bool = False
     format_upgraded_from: int | None = None
+    # 옛 migration head에서 바꿔 읽었으면 그 head (``convert_schema``)
+    schema_converted_from: list[str] | None = None
+    # 넣은 뒤 대상 버전이 달라 닫은 열린 승인 수 (새 ID로 가져올 때만, ``_recheck_approvals``)
+    approvals_invalidated: int = 0
 
     @property
     def rows_total(self) -> int:
@@ -1245,7 +1421,7 @@ async def restore_workspace(
         staging = Path(tmp)
         arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
         m = arc.manifest
-        _check_heads(m, expected_heads)
+        await asyncio.to_thread(convert_schema, arc, expected_heads)
         source_ws = UUID(m["workspace"]["id"])
         tombstones = await _read_tombstones(deletion_logs, source_ws)
         async with db.engine.connect() as conn:
@@ -1253,7 +1429,7 @@ async def restore_workspace(
             try:
                 await _enter_workspace(conn, source_ws)
                 plan = build_plan(await read_catalog(conn))
-                _check_schema(plan, m)
+                await asyncio.to_thread(_check_schema, plan, arc)
                 ids: IdMap | None = None
                 ws = source_ws
                 if new_ids:
@@ -1275,12 +1451,15 @@ async def restore_workspace(
                 # 미뤄 둔 FK를 지금 검사한다 (commit 전에 실패를 알 수 있게).
                 await conn.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
                 tick("verify", 0, len(plan.tables))
-                if ids is None and arc.upgraded_from is None:
+                if ids is None and arc.upgraded_from is None and arc.schema_from is None:
                     reports = await _verify(conn, plan, m, ws)
                 else:
-                    # 새 ID, 또는 옛 형식에서 바꿔 쓴 표(줄 모양이 DB 출력과 다를 수 있다): 논리 해시로
+                    # 새 ID, 또는 옛 형식·옛 head에서 바꿔 쓴 표(줄 모양이 DB 출력과 다를 수 있다): 논리 해시로
                     reports = await _verify_logical(conn, plan, arc, ids or IdMap(), ws)
                 tick("verify", len(plan.tables), len(plan.tables))
+                # 새 ID: 승인의 대상 버전 해시에 ID가 들어 있어 다시 계산하면 다르다 → 지금 닫는다.
+                # ID 그대로면 묶음의 상태 그대로 둔다 (같은 행·같은 해시).
+                invalidated = await _recheck_approvals(conn, None) if ids is not None else 0
                 tick("deletions", 0, len(tombstones))
                 applied, skipped = await _apply_deletions(
                     conn, tombstones, lambda t, i: ("apply", ids.get(i) if ids else i)
@@ -1318,6 +1497,8 @@ async def restore_workspace(
     notes = _archive_notes(arc)
     if skipped:
         notes.append(f"{len(skipped)} deletion(s) could not be re-applied (see skipped_deletions)")
+    if invalidated:
+        notes.append(_APPROVALS_NOTE.format(n=invalidated))
     return RestoreReport(
         workspace_id=ws,
         workspace_name=m["workspace"]["name"],
@@ -1333,6 +1514,8 @@ async def restore_workspace(
         skipped_deletions=skipped,
         encrypted=encrypted,
         format_upgraded_from=arc.upgraded_from,
+        schema_converted_from=arc.schema_from,
+        approvals_invalidated=invalidated,
     )
 
 
@@ -1341,6 +1524,11 @@ def _archive_notes(arc: _Archive) -> list[str]:
     notes = []
     if arc.upgraded_from is not None:
         notes.append(f"archive format {arc.upgraded_from} was upgraded to {FORMAT_VERSION}")
+    if arc.schema_from is not None:
+        notes.append(
+            f"archive migrations {', '.join(arc.schema_from)} were converted to "
+            f"{', '.join(m['migration_heads'])}"
+        )
     if m.get("missing_blobs"):
         notes.append(f"{len(m['missing_blobs'])} blob(s) were missing at export time")
     return notes
@@ -1366,16 +1554,38 @@ def _is_encrypted(path: Path) -> bool:
     return is_encrypted(path)
 
 
-def _check_schema(plan: ExportPlan, manifest: dict) -> None:
-    """같은 migration head라도 표·칸 구성이 실제로 같은지 본다 (부분 migration 등)."""
-    archived = {t["name"]: t["columns"] for t in manifest["tables"]}
-    target = {t.name: _columns_signature(t) for t in plan.tables}
+def _check_schema(plan: ExportPlan, arc: _Archive) -> None:
+    """같은 migration head라도 표·칸 구성이 실제로 같은지 본다 (부분 migration 등).
+
+    변환 단계가 만들거나 고친 표(``arc.touched``)는 manifest의 칸 목록이 옛 것이므로, 대신 모든 행의 칸
+    이름이 대상 표의 칸과 정확히 같은지 본다. 맞으면 manifest의 칸 목록을 대상 것으로 바꾼다.
+    """
+    manifest = arc.manifest
+    archived = {t["name"]: t for t in manifest["tables"]}
+    target = {t.name: t for t in plan.tables}
     if set(archived) != set(target):
         diff = sorted(set(archived) ^ set(target))
         raise ArchiveError("schema_mismatch", f"tables differ: {', '.join(diff)}")
-    for name, cols in archived.items():
-        if cols != target[name]:
-            raise ArchiveError("schema_mismatch", f"columns differ: {name}")
+    for name, entry in archived.items():
+        want = _columns_signature(target[name])
+        if name in arc.touched:
+            _check_rows_fit(arc, name, [c for c, _ in want])
+            entry["columns"] = want
+        elif entry["columns"] != want:
+            hint = " (a migration changed it without a schema step)" if arc.schema_from else ""
+            raise ArchiveError("schema_mismatch", f"columns differ: {name}{hint}")
+
+
+def _check_rows_fit(arc: _Archive, name: str, columns: Sequence[str]) -> None:
+    want = set(columns)
+    for i, row in enumerate(arc.iter_rows(name), 1):
+        if set(row) != want:
+            missing = sorted(want - set(row))
+            extra = sorted(set(row) - want)
+            raise ArchiveError(
+                "schema_mismatch",
+                f"{name} row {i} after conversion: missing {missing}, unexpected {extra}"[:300],
+            )
 
 
 async def _check_empty(conn: AsyncConnection, plan: ExportPlan, ws: UUID) -> None:
@@ -1663,6 +1873,41 @@ async def _requeue(
     return out
 
 
+_APPROVALS_NOTE = "{n} open approval(s) were invalidated: the target changed (request them again)"
+_OPEN_APPROVALS = (
+    "FROM core.approvals a WHERE a.target_kind = 'application' "
+    "AND a.status IN ('pending', 'approved')"
+)
+
+
+async def _recheck_approvals(conn: AsyncConnection, applications: set[str] | None) -> int:
+    """열린 제출 승인을 대상 버전 함수(c0019 ``recheck_application_approvals``)로 다시 확인한다.
+
+    ``applications``가 None이면 공간의 모든 지원, 아니면 그 지원들만. 버전이 요청 때와 다르면
+    ``target_changed``(대상이 없으면 ``target_missing``)로 닫힌다. 닫은 수를 돌려준다.
+    복원이 행을 넣는 동안은 trigger가 꺼져 있으므로(``career.restoring``) 넣은 뒤에 부른다.
+    """
+    if applications is not None and not applications:
+        return 0
+    where = "" if applications is None else " AND a.target_id = ANY(CAST(:apps AS uuid[]))"
+    params = {} if applications is None else {"apps": sorted(applications)}
+    open_ids = list(await conn.scalars(text(f"SELECT a.id {_OPEN_APPROVALS}{where}"), params))
+    if not open_ids:
+        return 0
+    await conn.execute(
+        text(
+            "SELECT core.recheck_application_approvals(t.target_id) "
+            f"FROM (SELECT DISTINCT a.target_id {_OPEN_APPROVALS}{where}) t"
+        ),
+        params,
+    )
+    closed = await conn.scalar(
+        text("SELECT count(*) FROM core.approvals WHERE id = ANY(:ids) AND status = 'invalidated'"),
+        {"ids": open_ids},
+    )
+    return int(closed or 0)
+
+
 async def _referenced_blobs(conn: AsyncConnection, plan: ExportPlan, ws: UUID) -> set[str]:
     keys: set[str] = set()
     for t in plan.tables:
@@ -1701,10 +1946,173 @@ MERGE_SKIPPED_TABLES: dict[str, str] = {
 }
 # 겹침을 찾을 때 먼저 보는 칸 (내용 주소·정규화한 주소·멱등 키). 나머지 UNIQUE는 그다음.
 _STRONG_KEY_COLUMNS = ("sha256", "content_hash", "canonical_url", "idempotency_key")
-# DB UNIQUE가 없지만 같은 것으로 보는 내용 키 (표 → 칸 목록)
-EXTRA_MERGE_KEYS: dict[str, tuple[tuple[str, ...], ...]] = {
+
+
+@dataclass(frozen=True, slots=True)
+class SameExcept:
+    """내용 키: ``ignore`` 칸(상태·진행·바뀐 시각·메모처럼 나중에 고치는 칸)만 빼고 모든 칸이 같으면 같은 행.
+
+    ``created_at``과 정체를 정하는 칸(제목·문장·문제 등)은 남기므로, 만든 뒤 상태·메모만 바뀐 행을 같은
+    행으로 본다. 정체 칸을 고친 행은 다른 행으로 더해진다 (겹침을 놓쳐 행이 하나 늘 뿐, 다른 행을 잘못
+    합쳐 잃지는 않는 쪽으로). 같은 내용(``content``) 다음에 본다.
+    """
+
+    ignore: tuple[str, ...]
+
+    @property
+    def name(self) -> str:
+        return "same_except:" + "+".join(self.ignore)
+
+
+MergeKey = tuple[str, ...] | SameExcept
+
+# DB UNIQUE가 없거나(또는 NULL이 되는 칸뿐이거나) 행이 나중에 바뀌는 표의 내용 키.
+# 칸 목록 = 그 칸들이 같으면 같은 행 (NOT NULL 칸만). ``SameExcept`` = 고치는 칸을 뺀 나머지가 같으면.
+# ``test_merge_keys_cover_keyless_tables``가 합칠 표마다 키(UNIQUE·여기·CHILD_MERGE_KEYS) 또는
+# ``CONTENT_ONLY_TABLES``의 이유가 있는지 본다.
+EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
     # 같은 파싱 실행의 같은 순번 블록 = 같은 블록 (파싱 결과는 다시 만들 수 있는 파생 자료)
     "core.document_blocks": (("parse_run_id", "ordinal"),),
+    # 지원: 제목·상태·결과 메모·제출 시각은 진행하며 바뀐다. 공고·공고 버전·만든 시각·만든 사람이 같으면 같은 지원
+    "core.applications": (
+        SameExcept(("title", "status", "result_note", "submitted_at", "updated_at")),
+    ),
+    # 지원 문서: UNIQUE(지원, 문항 번호)는 문항이 없는 문서(NULL)에 안 걸린다. 제목·제한·현재 revision은 바뀐다
+    "core.application_documents": (
+        SameExcept(
+            (
+                "title",
+                "question_prompt",
+                "char_limit",
+                "byte_limit",
+                "count_rule",
+                "current_revision",
+                "updated_at",
+            )
+        ),
+    ),
+    # 전형 단계: 순서·이름·일정·결과·메모는 고친다. 지원·제출본·종류·만든 시각이 같으면 같은 단계
+    "core.application_stages": (
+        SameExcept(
+            ("position", "name", "scheduled_at", "outcome", "decided_at", "note", "updated_at")
+        ),
+    ),
+    # 추출 실행: 상태·결과 수·오류는 실행하며 채워진다
+    "core.extraction_runs": (
+        SameExcept(
+            (
+                "status",
+                "error_code",
+                "blocks_total",
+                "blocks_sent",
+                "experiences_created",
+                "claims_created",
+                "claims_dropped",
+                "updated_at",
+            )
+        ),
+    ),
+    # 경험: 확인 상태만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행 — 다른 경험을 합쳐 잃지 않게)
+    "core.experiences": (SameExcept(("status", "updated_at")),),
+    # 주장: 확인(상태·확인한 사람·시각). 문장·종류·기여는 정체 칸
+    "core.claims": (SameExcept(("status", "confirmed_by", "confirmed_at", "updated_at")),),
+    # 인터뷰 세션: 상태만 (멱등 키 UNIQUE는 NULL이면 안 걸린다)
+    "core.interview_sessions": (SameExcept(("status",)),),
+    # 공고 가져오기 기록: 결과 칸은 실행하며 채워진다
+    "core.job_fetch_runs": (
+        SameExcept(
+            (
+                "status",
+                "error_code",
+                "http_status",
+                "version_id",
+                "unchanged",
+                "candidates",
+                "notes",
+                "updated_at",
+            )
+        ),
+    ),
+    # 실행: 진행·결과·비용·대기 칸은 계속 바뀐다. workflow·입력·실행자·만든 시각이 정체
+    "core.runs": (
+        SameExcept(
+            (
+                "status",
+                "position",
+                "step",
+                "steps_total",
+                "result",
+                "stop_requested",
+                "wait_reason",
+                "waits",
+                "retry_at",
+                "approval_id",
+                "error_code",
+                "cost_usd",
+                "cost_unknown",
+                "model_calls",
+                "resumes",
+                "started_at",
+                "finished_at",
+                "updated_at",
+            )
+        ),
+    ),
+    # 승인: 결정·사용·무효 칸만 바뀐다. 행위·대상·대상 버전·내용 해시·요청 시각이 같으면 같은 요청
+    "core.approvals": (
+        SameExcept(
+            (
+                "status",
+                "decided_by",
+                "decided_via",
+                "decided_at",
+                "decision_note",
+                "used_by",
+                "used_at",
+                "used_result_id",
+                "invalid_reason",
+                "updated_at",
+            )
+        ),
+    ),
+    # 수정안: 검토(상태·거절 이유·적용한 revision)만 바뀐다 (멱등 키 UNIQUE는 NULL이면 안 걸린다)
+    "core.document_suggestions": (
+        SameExcept(("status", "reject_reasons", "applied_revision_id", "updated_at")),
+    ),
+    # 학습: 상태·메모·일정·완료 시각은 고친다. 제목·종류·요건·만든 시각이 정체
+    "core.study_assessments": (SameExcept(("status", "scheduled_at", "notes", "updated_at")),),
+    "core.study_items": (
+        SameExcept(("status", "notes", "assessment_id", "completed_at", "updated_at")),
+    ),
+    "core.study_attempts": (SameExcept(("notes",)),),
+    "core.study_sessions": (SameExcept(("notes", "resources")),),
+    # 오답: 복습이 간격·반복·마감·상태를 바꾼다. 문제·답·이유가 정체
+    "core.study_mistakes": (
+        SameExcept(
+            (
+                "status",
+                "repetitions",
+                "interval_days",
+                "ease",
+                "due_at",
+                "last_reviewed_at",
+                "reason_note",
+                "updated_at",
+            )
+        ),
+    ),
+}
+# 내용 키가 필요 없는 표와 이유: 한 번 쓰면 고치지 않는 기록(같은 행은 내용이 같다 → ``content``),
+# 또는 NULL이 되는 칸이 있어도 실제로는 늘 걸리는 UNIQUE가 있는 표.
+CONTENT_ONLY_TABLES: dict[str, str] = {
+    "core.audit_events": "추가만 되는 감사 기록 (고치지 않는다)",
+    "core.interview_answers": "추가만 되는 답 (앱 계정이 고치거나 지우지 않는다)",
+    "core.model_calls": "호출마다 한 번 쓰는 장부",
+    "core.study_reviews": "복습 한 번의 기록 (고치지 않는다)",
+    "core.document_suggestion_requests": "요청 기록 (c0016, 앱 계정은 추가·조회만)",
+    "core.interview_question_requests": "요청 기록 (c0016, 앱 계정은 추가·조회만)",
+    # CHECK(ck_claim_evidence_kind)로 범위·답 중 하나만 있으므로 UNIQUE(주장, 범위)·(주장, 답) 중 하나가 늘 걸린다
+    "core.claim_evidence": "UNIQUE(claim_id, source_span_id)·(claim_id, interview_answer_id) 중 하나",
 }
 # 자식 행의 키로 부모를 찾는 경우: 원본은 버전의 sha256(같은 파일)으로 겹친다 (업로드 중복 방지와 같은 규칙)
 CHILD_MERGE_KEYS: dict[str, tuple[str, str, str]] = {
@@ -1746,6 +2154,9 @@ class MergeReport:
     notes: list[str] = field(default_factory=list)
     encrypted: bool = False
     format_upgraded_from: int | None = None
+    schema_converted_from: list[str] | None = None
+    # 합친 지원(넣었거나 겹친)의 열린 승인 중 대상 버전이 바뀌어 닫은 수 (``_recheck_approvals``)
+    approvals_invalidated: int = 0
 
     @property
     def rows_added(self) -> int:
@@ -1808,7 +2219,8 @@ async def _match_all(
     """표마다 (FK 순서로) 묶음의 행이 대상 공간에 이미 있는지 정하고, 모든 ID의 새 값을 정한다.
 
     찾는 순서: 같은 ID(그리고 이미 정한 FK 칸이 같음) → DB UNIQUE 제약(내용 주소·주소·멱등 키 먼저) →
-    내용 키(``EXTRA_MERGE_KEYS``·``CHILD_MERGE_KEYS``) → 같은 내용(기본 키 밖 모든 칸, ``content``).
+    내용 키(``EXTRA_MERGE_KEYS``의 칸 목록·``CHILD_MERGE_KEYS``) → 같은 내용(기본 키 밖 모든 칸, ``content``)
+    → 고치는 칸을 뺀 같은 내용(``EXTRA_MERGE_KEYS``의 ``SameExcept``).
     찾으면 그 기존 행의 ID로, 못 찾으면 새 UUID로.
     키 칸은 부모 표의 결정이 끝난 뒤 바꾼 값으로 비교한다. 아직 정하지 않은 표(뒤 표·같은 표)를 가리키는
     FK 칸이 든 키는 쓰지 않는다. 이번에 넣기로 한 행의 키도 색인에 넣어 묶음 안의 겹침도 잡는다.
@@ -1878,8 +2290,9 @@ async def _match_table(
     keys: list[tuple[str, tuple[str, ...]]] = []
     if pk is None:
         keys.append(("primary_key", pk_cols))
+    extra = EXTRA_MERGE_KEYS.get(t.name, ())
     candidates = sorted(t.unique_keys, key=_key_order) + [
-        ("+".join(cols), cols) for cols in EXTRA_MERGE_KEYS.get(t.name, ())
+        ("+".join(k), k) for k in extra if not isinstance(k, SameExcept)
     ]
     for name, cols in candidates:
         if (pk is not None and pk in cols) or unsettled & set(cols):
@@ -1889,9 +2302,12 @@ async def _match_table(
     # 마지막 키: 기본 키·아직 정하지 않은 FK 칸을 뺀 모든 칸이 같은 행 (UNIQUE가 없는 표에서도,
     # 앞서 합쳐 새 ID로 들어간 행을 같은 묶음으로 다시 합칠 때 또 넣지 않게)
     content_skip = set(pk_cols) | unsettled
+    # 그다음: 고치는 칸을 뺀 내용 (``SameExcept``)
+    loose = [(k.name, content_skip | set(k.ignore)) for k in extra if isinstance(k, SameExcept)]
     by_id: dict[str, dict] = {}
     index: dict[str, dict[tuple[str, ...], str]] = {name: {} for name, _ in keys}
     content: dict[str, str] = {}
+    loose_index: dict[str, dict[str, str]] = {name: {} for name, _ in loose}
     result = await conn.stream(text(_rows_sql(t)), {"ws": str(ws)})
     async for r in result:
         row = json.loads(r.j, parse_float=Decimal)
@@ -1903,6 +2319,8 @@ async def _match_table(
             if k is not None:
                 index[name].setdefault(k, ref)
         content.setdefault(_content_key(row, content_skip), ref)
+        for name, skip in loose:
+            loose_index[name].setdefault(_content_key(row, skip), ref)
     child = CHILD_MERGE_KEYS.get(t.name)
     child_hits: dict[str, str] = {}
     if child is not None and pk is not None:
@@ -1941,6 +2359,12 @@ async def _match_table(
         digest = _content_key(row, content_skip)
         if hit is None and digest in content:
             hit, by = content[digest], "content"
+        loose_keys = [(name, _content_key(row, skip)) for name, skip in loose]
+        if hit is None:
+            for name, k in loose_keys:
+                if k in loose_index[name]:
+                    hit, by = loose_index[name][k], name
+                    break
         if hit is not None:
             skipped_by[by] = skipped_by.get(by, 0) + 1
             if pk is not None:
@@ -1957,6 +2381,8 @@ async def _match_table(
             if k is not None:
                 index[name].setdefault(k, new)
         content.setdefault(digest, new)
+        for name, k in loose_keys:
+            loose_index[name].setdefault(k, new)
 
 
 def _content_key(row: dict, skip: set[str]) -> str:
@@ -2014,7 +2440,7 @@ async def merge_workspace(
         staging = Path(tmp)
         arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
         m = arc.manifest
-        _check_heads(m, expected_heads)
+        await asyncio.to_thread(convert_schema, arc, expected_heads)
         source_ws = UUID(m["workspace"]["id"])
         tombstones = await _read_tombstones(deletion_logs, source_ws)
         async with db.engine.connect() as conn:
@@ -2024,7 +2450,7 @@ async def merge_workspace(
             try:
                 await _enter_workspace(conn, ws)
                 plan = build_plan(await read_catalog(conn))
-                _check_schema(plan, m)
+                await asyncio.to_thread(_check_schema, plan, arc)
                 name = await conn.scalar(
                     text('SELECT name FROM "core"."workspaces" WHERE id = CAST(:ws AS uuid)'),
                     {"ws": str(ws)},
@@ -2095,6 +2521,12 @@ async def merge_workspace(
                         )
                     )
                 tick("verify", len(plan.tables), len(plan.tables))
+                # 넣는 동안 꺼 둔 즉시 무효화(career.restoring)를 대신한다: 넣었거나 겹친 지원의 열린
+                # 승인을 같은 트랜잭션에서 c0019 함수로 다시 계산해 바뀐 것만 닫는다 (확인 뒤라 전후 해시와 무관).
+                touched_apps = state.inserted.get("core.applications", set()) | state.matched.get(
+                    "core.applications", set()
+                )
+                invalidated = await _recheck_approvals(conn, touched_apps)
 
                 def decide(table: str, target: str) -> tuple[str, str]:
                     new = state.ids.get(target)
@@ -2147,6 +2579,8 @@ async def merge_workspace(
         notes.append(f"{len(missing)} referenced blob(s) are not in the archive")
     if skipped:
         notes.append(f"{len(skipped)} deletion(s) were not re-applied (see skipped_deletions)")
+    if invalidated:
+        notes.append(_APPROVALS_NOTE.format(n=invalidated))
     not_merged = {
         t: reason
         for t, reason in MERGE_SKIPPED_TABLES.items()
@@ -2170,18 +2604,24 @@ async def merge_workspace(
         notes=notes,
         encrypted=encrypted,
         format_upgraded_from=arc.upgraded_from,
+        schema_converted_from=arc.schema_from,
+        approvals_invalidated=invalidated,
     )
 
 
 __all__ = [
     "BLOB_COLUMNS",
+    "CONTENT_ONLY_TABLES",
     "DELETIONS_FORMAT",
     "DUPLICATE_POLICIES",
     "EXCLUDED_TABLES",
+    "EXTRA_MERGE_KEYS",
     "FORMAT",
     "FORMAT_VERSION",
     "MERGE_SKIPPED_TABLES",
     "REQUEUE_KINDS",
+    "SCHEMA_FLOOR",
+    "SCHEMA_STEPS",
     "TOMBSTONE_TABLES",
     "UPGRADES",
     "ArchiveError",
@@ -2195,19 +2635,25 @@ __all__ = [
     "PlanError",
     "Progress",
     "RestoreReport",
+    "SameExcept",
+    "SchemaStep",
     "SkippedDeletion",
     "TableReport",
     "Tombstone",
     "build_plan",
+    "convert_schema",
     "core_migration_heads",
     "export_deletions",
     "export_workspace",
     "format_upgrade",
     "merge_workspace",
+    "no_data_change",
     "read_archive",
     "read_catalog",
     "read_deletions",
     "readable_versions",
     "restore_workspace",
+    "schema_path",
+    "schema_step",
     "upgrade_archive",
 ]

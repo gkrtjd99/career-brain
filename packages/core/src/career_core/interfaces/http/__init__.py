@@ -73,6 +73,8 @@ class CoreDeps:
     live: Any = None
     # API 토큰 관리 (ports.ApiTokenAdmin). 없으면 /core/tokens 경로를 등록하지 않는다.
     tokens: Any = None
+    # 웹 복원 업로드를 받는 공유 폴더 (여러 프로세스면 모두 보는 곳). 없으면 CAREER_RESTORE_DIR → 시스템 임시.
+    restore_dir: str | None = None
 
 
 class WorkspaceOut(BaseModel):
