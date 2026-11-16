@@ -8,7 +8,8 @@ worker가 죽은 것으로 보고 다시 집는다.
 도중에 다른 worker에게 넘어가 두 번 돌지 않게). heartbeat가 멈추는 것은 worker가 죽었을 때뿐이다.
 lease를 잃은 뒤(다른 worker가 다시 집음) 끝난 처리는 결과를 덮어쓰지 않는다 (``attempts``와
 c0023 ``lease_token``으로 구분). 처리하는 동안 lease는 문맥 변수(``career_core.jobs.lease``)에 있어
-핸들러가 자기 트랜잭션 안에서 같은 확인을 할 수 있다 (실행 단계의 위치·결과 저장).
+핸들러가 자기 트랜잭션 안에서 같은 확인을 할 수 있다. 모든 처리기(실행·파싱·추출·색인·공고 가져오기)가
+결과를 저장하는 트랜잭션에서 ``guard_lease``를 부른다 (``docs/architecture/runs.md`` 처리기 표).
 """
 
 from __future__ import annotations
@@ -89,7 +90,13 @@ async def run_once(
                 job.status = "queued"
                 job.available_at = utcnow() + timedelta(seconds=2**row.attempts)
         if give_up and handler.give_up is not None:
-            await handler.give_up(row.workspace_id, row.target_id)
+            # 위에서 이 worker가 작업을 ``failed``로 닫았다 (lease 확인을 이미 통과). 핸들러의 저장 함수가
+            # 부르는 ``guard_lease``는 이제 ``running``이 아닌 행을 보고 거부하므로 lease 문맥을 비운다.
+            cleared = set_lease(None)
+            try:
+                await handler.give_up(row.workspace_id, row.target_id)
+            finally:
+                reset_lease(cleared)
         return True
     finally:
         reset_lease(lease)

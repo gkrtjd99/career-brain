@@ -41,11 +41,11 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
   const [key] = useState(() => newRunKey("interviews"));
   const chosen = useMemo(() => experiences.filter((e) => picked.has(e.id)).map((e) => e.id), [experiences, picked]);
 
+  // 시작할 입력 그대로 (예상 비용도 같은 입력으로 글자 수를 센다)
+  const input = useMemo(() => ({ experience_ids: chosen, count }), [chosen, count]);
+
   const start = useMutation({
-    mutationFn: () => {
-      const input = { experience_ids: chosen, count };
-      return api.startRun(WORKFLOW, input, runKey(key, input));
-    },
+    mutationFn: () => api.startRun(WORKFLOW, input, runKey(key, input)),
     onSuccess: (run) => setRunId(run.id),
   });
   const onFinished = useCallback(
@@ -134,7 +134,7 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
               ))}
             </Select>
           </div>
-          <CostEstimate workflow={WORKFLOW} units={chosen.length} noun="경험" />
+          <CostEstimate workflow={WORKFLOW} units={chosen.length} noun="경험" input={input} />
           <ErrorText error={start.error} />
           <Button type="submit" variant="primary" disabled={!chosen.length || start.isPending}>
             {start.isPending ? "시작하는 중" : `${chosen.length}개 경험 시작`}

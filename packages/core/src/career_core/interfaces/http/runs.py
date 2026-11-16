@@ -49,6 +49,10 @@ def approval_error(exc: ApprovalError) -> HTTPException:
     return HTTPException(status_code=code or 422, detail=exc.code)
 
 
+async def _validated(wf: run_uc.Workflow, raw: dict[str, Any]) -> dict[str, Any]:
+    return wf.validate(raw)
+
+
 def _not_found() -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
 
@@ -111,6 +115,16 @@ class RunEstimateOut(BaseModel):
     based_on_calls: int
     cost_unknown: bool
     basis: str
+    chars: int | None = None
+    fixed_per_call_usd: str | None = None
+    per_1k_chars_usd: str | None = None
+    based_on_chars: int = 0
+
+
+class EstimateIn(BaseModel):
+    """시작할 때 보낼 입력 그대로 (``POST /core/runs``의 ``input``). 글자 수만 세고 아무것도 만들지 않는다."""
+
+    input: dict[str, Any]
 
 
 class ApprovalIn(BaseModel):
@@ -208,6 +222,19 @@ def add_run_routes(router: APIRouter, deps, authorize) -> None:
         if workflow not in run_deps.registry():
             raise run_error(RunRuleError("unknown_workflow"))
         est = await call(estimate_uc.estimate_run, db, actor, workflow, units)
+        return RunEstimateOut.model_validate(est, from_attributes=True)
+
+    @router.post("/runs/workflows/{workflow}/estimate", response_model=RunEstimateOut)
+    async def estimate_for_input(actor: reader, workflow: str, body: EstimateIn) -> RunEstimateOut:
+        """입력 크기로 잰 참고 비용: 단위별 글자 수(workflow ``input_sizes``)와 지난 실행의 호출·글자·비용.
+        글자 수를 셀 수 없는 workflow나 근거가 모자라면 호출 1회 평균으로 (``basis``)."""
+        wf = run_deps.registry().get(workflow)
+        if wf is None or workflow not in estimate_uc.CALLS_PER_UNIT:
+            raise run_error(RunRuleError("unknown_workflow"))
+        clean = await call(_validated, wf, body.input)
+        sizes = await call(wf.input_sizes, db, actor, clean) if wf.input_sizes else None
+        units = len(sizes) if sizes is not None else 1
+        est = await call(estimate_uc.estimate_run, db, actor, workflow, units, sizes=sizes)
         return RunEstimateOut.model_validate(est, from_attributes=True)
 
     @router.post("/runs", response_model=RunOut, status_code=202)

@@ -8,6 +8,9 @@
 - 작업 하나는 공간(workspace) 단위다. 대기 중인 색인 작업이 있으면 새로 넣지 않는다.
 - 남은 대상이 없을 때까지 단계를 반복하고, 마지막 확인과 작업 종료를 lock 아래 한 트랜잭션으로 한다
   (`index_queue` 참고). 실행 중에 바뀐 자료도 같은 작업이나 바로 다음 작업에서 색인된다.
+- lease 확인(``jobs.lease.guard_lease``): 벡터 저장과 "남은 대상 없음" 종료는 먼저 작업 행을 잠그고 이
+  worker가 아직 lease를 쥐고 있는지 본다. 임베딩 호출 도중 lease를 잃은 옛 worker가 새 worker가 이미 넣은
+  새 본문 벡터를 옛 본문 벡터로 덮거나(다음 색인 요청까지 남는다), 새 worker의 작업을 대신 끝내지 않는다.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from career_core.db import Database, Embedding
 from career_core.domain.sources import DataClass
+from career_core.jobs.lease import guard_lease
 from career_core.llm import EMBED_PASSAGE, ModelCallError, ModelDenied
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
@@ -116,7 +120,9 @@ async def process_index(deps: IndexDeps, ws: UUID, _target: UUID) -> StepOutcome
     if not ranks:
         return StepOutcome(done=True)
     async with deps.db.workspace_session(ws) as s:
-        # 예약 트랜잭션(공유 lock)이 끝난 뒤에 남은 대상을 본다. 없으면 같은 트랜잭션에서 작업을 끝낸다.
+        # 작업 행을 먼저 잠근다 (lease 확인). 그 다음 예약 트랜잭션(공유 lock)이 끝난 뒤에 남은 대상을 본다.
+        # 없으면 같은 트랜잭션에서 작업을 끝낸다.
+        await guard_lease(s, ws)
         await lock_for_check(s, ws)
         rows = (
             await s.execute(
@@ -159,6 +165,7 @@ async def process_index(deps: IndexDeps, ws: UUID, _target: UUID) -> StepOutcome
 
 async def _store(db: Database, ws: UUID, result, chunk, bodies) -> None:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, ws)  # 색인 작업의 대상은 공간 ID
         for row, body, vector in zip(chunk, bodies, result.vectors, strict=True):
             stmt = insert(Embedding).values(
                 id=uuid4(),

@@ -6,6 +6,10 @@ AI는 "원문에서 고르기"만 한다. 주장마다 원문을 그대로 복�
 
 문서 내용은 데이터로만 다룬다. 문서 안의 지시문으로 다른 자료를 보내거나 확인 상태를 바꿀 수 없다
 (모델 출력은 후보 생성에만 쓰이고, 인용 검증을 통과해야 저장된다).
+
+lease 확인(``jobs.lease.guard_lease``): 후보 저장·실패 기록은 먼저 작업 행을 잠그고 이 worker가 아직
+lease를 쥐고 있는지 본다. 저장은 멱등이 아니다 (경험·주장 행을 새로 만든다). 모델 호출 도중 lease를 잃은
+옛 worker가 새 worker와 같이 ``pending``을 보고 후보를 두 번 만들거나, 끝난 추출을 실패로 덮지 않는다.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from career_core.domain.brain import (
     ExtractionStatus,
 )
 from career_core.domain.sources import ParseStatus
+from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
@@ -184,6 +189,7 @@ def build_prompt(blocks: list[DocumentBlock]) -> tuple[str, int]:
 
 async def _fail(db: Database, ws: UUID, run_id: UUID, code: str, **fields: Any) -> StepOutcome:
     async with db.workspace_session(ws) as s:
+        await guard_lease(s, run_id)
         ext = await s.get(ExtractionRun, run_id)
         ext.status = ExtractionStatus.FAILED.value
         ext.error_code = code
@@ -253,7 +259,8 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
 
     by_ordinal = {b.ordinal: b for b in blocks[:sent]}
     async with db.workspace_session(ws) as s:
-        ext = await s.get(ExtractionRun, run_id)
+        await guard_lease(s, run_id)  # 작업 행을 먼저 잠근다 (lease를 잃었으면 LeaseLost로 되돌림)
+        ext = await s.get(ExtractionRun, run_id, with_for_update=True)
         if ext.status != ExtractionStatus.PENDING:  # 다른 worker가 먼저 끝냈다
             return StepOutcome(done=True)
         created_exp = created_claims = dropped = 0
