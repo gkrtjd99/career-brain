@@ -501,3 +501,162 @@ class ApplicationSubmission(Base):
     note: Mapped[str | None] = mapped_column(Text, default=None)
     submitted_by: Mapped[UUID]
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- O09: 학습 (Learning)
+# 학습 기록은 계획이다. 이 테이블들은 claims/experiences에 쓰지 않는다
+# (예외: 사용자가 직접 올린 경험 후보 → StudyClaimCandidate).
+
+
+class StudyRequirement(Base):
+    """저장 공고의 요건 한 줄 (확정 당시 문장 그대로). 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "study_requirements"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    field: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyRequirementClaim(Base):
+    __tablename__ = "study_requirement_claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    requirement_id: Mapped[UUID]
+    claim_id: Mapped[UUID]
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyAssessment(Base):
+    __tablename__ = "study_assessments"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    title: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="planned")
+    requirement_id: Mapped[UUID | None] = mapped_column(default=None)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class StudyItem(Base):
+    __tablename__ = "study_items"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    title: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="planned")
+    requirement_id: Mapped[UUID | None] = mapped_column(default=None)
+    assessment_id: Mapped[UUID | None] = mapped_column(default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class StudySession(Base):
+    __tablename__ = "study_sessions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    study_item_id: Mapped[UUID]
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    minutes: Mapped[int] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    resources: Mapped[list] = mapped_column(JSONB, default=list)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyAttempt(Base):
+    """시험·연습 응시 1회. 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "study_attempts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    assessment_id: Mapped[UUID | None] = mapped_column(default=None)
+    study_item_id: Mapped[UUID | None] = mapped_column(default=None)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    result: Mapped[str] = mapped_column(Text)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    max_score: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
+    minutes: Mapped[int | None] = mapped_column(Integer, default=None)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyMistake(Base):
+    """오답과 그 복습 상태 (SM-2 축약: repetitions·interval_days·ease 천분율·due_at)."""
+
+    __tablename__ = "study_mistakes"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    attempt_id: Mapped[UUID | None] = mapped_column(default=None)
+    study_item_id: Mapped[UUID | None] = mapped_column(default=None)
+    question: Mapped[str] = mapped_column(Text)
+    wrong_answer: Mapped[str | None] = mapped_column(Text, default=None)
+    correct_answer: Mapped[str | None] = mapped_column(Text, default=None)
+    reason: Mapped[str] = mapped_column(Text)
+    reason_note: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text, default="open")
+    repetitions: Mapped[int] = mapped_column(Integer, default=0)
+    interval_days: Mapped[int] = mapped_column(Integer, default=0)
+    ease: Mapped[int] = mapped_column(Integer, default=2500)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class StudyReview(Base):
+    """복습 1회 기록. 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "study_reviews"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    mistake_id: Mapped[UUID]
+    grade: Mapped[str] = mapped_column(Text)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    interval_before: Mapped[int] = mapped_column(Integer)
+    interval_after: Mapped[int] = mapped_column(Integer)
+    ease_after: Mapped[int] = mapped_column(Integer)
+    due_at_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class StudyClaimCandidate(Base):
+    """사용자가 학습 결과를 경험 후보로 올린 기록. 주장은 항상 extracted로 시작한다."""
+
+    __tablename__ = "study_claim_candidates"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    study_item_id: Mapped[UUID]
+    attempt_id: Mapped[UUID | None] = mapped_column(default=None)
+    claim_id: Mapped[UUID]
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
