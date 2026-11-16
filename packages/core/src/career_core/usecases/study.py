@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -37,7 +37,6 @@ from career_core.db import (
     StudyRequirementClaim,
     StudyReview,
     StudySession,
-    StudySettings,
 )
 from career_core.db.base import utcnow
 from career_core.domain.brain import (
@@ -79,10 +78,19 @@ from career_core.domain.study import (
 )
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
+from career_core.usecases import judges
+from career_core.usecases import workspace_settings as ws_settings
 from career_core.usecases.brain import NotFound
+from career_core.usecases.data_classes import claim_data_classes, restricted_claims
 from career_core.usecases.index_queue import request_index
+from career_core.usecases.judges import JudgeRun, Verdict
 from career_core.usecases.search import STUDY_KINDS
 from career_core.usecases.search import search as search_records
+from career_core.usecases.workspace_settings import (
+    workspace_aliases,
+    workspace_timezone_name,
+    workspace_zone,
+)
 
 MAX_TITLE = 300
 MAX_TEXT = 4000
@@ -1523,11 +1531,8 @@ async def posting_coverage(db: Database, actor: ActorContext, posting_id: UUID) 
 
 
 async def _zone(s: AsyncSession, override: str | None = None) -> ZoneInfo:
-    """요청 값 → 공간 설정 → 기본값(Asia/Seoul) 순서."""
-    if override:
-        return zone(override)
-    name = await s.scalar(select(StudySettings.timezone))
-    return zone(name or DEFAULT_TIMEZONE)
+    """요청 값 → 공간 설정(c0021 공간 공용 표시 시간대) → 기본값(Asia/Seoul) 순서."""
+    return await workspace_zone(s, override)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1546,29 +1551,19 @@ def _settings_view(name: str, is_default: bool, now: datetime) -> SettingsView:
 async def get_settings(
     db: Database, actor: ActorContext, *, now: datetime | None = None
 ) -> SettingsView:
+    """학습 설정 = 공간 공용 표시 시간대 (예전 API 모양 그대로)."""
     async with db.workspace_session(actor.workspace_id) as s:
-        name = await s.scalar(select(StudySettings.timezone))
+        name = await workspace_timezone_name(s)
     return _settings_view(name or DEFAULT_TIMEZONE, name is None, now or utcnow())
 
 
 async def set_settings(
     db: Database, actor: ActorContext, *, timezone: str, now: datetime | None = None
 ) -> SettingsView:
+    """공간 공용 표시 시간대를 바꾼다 (`workspace_settings.update_settings`와 같은 값)."""
     name = timezone.strip() if isinstance(timezone, str) else ""
     zone(name)  # 모르는 시간대는 저장하지 않는다
-    async with db.workspace_session(actor.workspace_id) as s:
-        row = await s.scalar(select(StudySettings))
-        if row is None:
-            s.add(
-                StudySettings(
-                    id=uuid4(),
-                    workspace_id=actor.workspace_id,
-                    timezone=name,
-                    updated_by=actor.subject_id,
-                )
-            )
-        else:
-            row.timezone, row.updated_by = name, actor.subject_id
+    await ws_settings.update_settings(db, actor, timezone=name, now=now)
     return _settings_view(name, False, now or utcnow())
 
 
@@ -1877,6 +1872,9 @@ class ClaimSuggestion:
     score: float
     keyword_rank: int | None
     semantic_rank: int | None
+    # 판정 모델(c0021, judge=true일 때만)의 참고 의견. 연결·충족 판정이 아니다.
+    judge: Verdict | None = None
+    judge_note: str | None = None  # restricted_not_sent 등 판정하지 않은 이유
 
 
 @dataclass(frozen=True, slots=True)
@@ -1896,6 +1894,8 @@ class SuggestionsResult:
     semantic_note: str | None
     # 검색 제안일 뿐: 사용자가 하나씩 연결해야 반영되고, 충족 판정에 쓰지 않는다.
     basis: str = "search_suggestion"
+    # judge=true로 물었을 때 판정 모델 상태 (라우트가 없으면 unavailable/no_route)
+    judge: JudgeRun | None = None
 
 
 async def suggest_claims(
@@ -1907,11 +1907,16 @@ async def suggest_claims(
     field: str | None = None,
     text: str | None = None,
     limit: int = 5,
+    judge: bool = False,
+    call_model: judges.ModelCaller | None = None,
 ) -> SuggestionsResult:
     """저장 공고의 요건마다 연결할 만한 주장 후보를 검색으로 찾는다 (키워드 + 설정 시 의미 검색).
 
     아무것도 연결하지 않고 충족 여부도 바꾸지 않는다. 연결은 `link_claim`(사용자 확인)으로만.
     이미 연결된 주장과 이의 제기(disputed)·폐기된 주장은 빼고, 확인 대기 주장은 상태를 붙여 보여 준다.
+
+    `judge=True`: 라우트 `judge_claim`이 있으면 후보마다 "이 주장이 요건을 보여 주는가"와 이유를 붙인다
+    (참고용, 요건 줄마다 호출 1회). restricted 근거의 주장은 보내지 않는다. 라우트가 없으면 검색 결과만.
     """
     limit = max(1, min(limit, 20))
     async with db.workspace_session(actor.workspace_id) as s:
@@ -1972,7 +1977,64 @@ async def suggest_claims(
             if h.id not in skip and h.claim_status != ClaimStatus.DISPUTED
         ][:limit]
         lines.append(LineSuggestions(name, line, rid, query, found))
-    return SuggestionsResult(posting_id, lines, mode, note)
+    run = None
+    if judge:
+        lines, run = await _judge_lines(db, gateway, actor, lines, call_model)
+    return SuggestionsResult(posting_id, lines, mode, note, judge=run)
+
+
+async def _judge_lines(
+    db: Database,
+    gateway: ModelGateway | None,
+    actor: ActorContext,
+    lines: list[LineSuggestions],
+    call_model: judges.ModelCaller | None,
+) -> tuple[list[LineSuggestions], judges.JudgeRun]:
+    """후보 주장에 판정 모델 의견을 붙인다. 아무것도 저장·연결하지 않는다."""
+    if call_model is None:
+        if (why := judges.unavailable(gateway, actor, judges.JUDGE_CLAIM_PURPOSE)) is not None:
+            return lines, why
+        assert gateway is not None
+        call_model = judges.gateway_caller(gateway, actor)
+    ids = {c.claim_id for ln in lines for c in ln.candidates}
+    async with db.workspace_session(actor.workspace_id) as s:
+        blocked = await restricted_claims(s, ids)
+        texts = {
+            c.id: f"{c.statement}" + (f" ({e.title})" if e and e.title else "")
+            for c, e in (
+                await s.execute(
+                    select(Claim, Experience)
+                    .outerjoin(Experience, Experience.id == Claim.experience_id)
+                    .where(Claim.id.in_(list(ids) or [uuid4()]))
+                )
+            ).all()
+        }
+        classes = await claim_data_classes(s, ids - blocked)
+    tally = judges._Tally()
+    out: list[LineSuggestions] = []
+    for ln in lines:
+        send = [
+            (str(c.claim_id), texts[c.claim_id])
+            for c in ln.candidates
+            if c.claim_id not in blocked and c.claim_id in texts
+        ]
+        verdicts, _ = await judges.judge_claims(
+            call_model, ln.text, send, data_classes=classes, tally=tally
+        )
+        out.append(
+            replace(
+                ln,
+                candidates=[
+                    replace(
+                        c,
+                        judge=verdicts.get(str(c.claim_id)),
+                        judge_note="restricted_not_sent" if c.claim_id in blocked else None,
+                    )
+                    for c in ln.candidates
+                ],
+            )
+        )
+    return out, tally.run()
 
 
 # ---------------------------------------------------------------- 저장 공고 요건 빈도
@@ -2024,6 +2086,7 @@ async def requirement_frequency(
     if include_archived:
         statuses.append(PostingStatus.ARCHIVED.value)
     async with db.workspace_session(actor.workspace_id) as s:
+        aliases = await workspace_aliases(s)
         postings = (
             (
                 await s.execute(
@@ -2040,7 +2103,7 @@ async def requirement_frequency(
         for f in (RequirementField.REQUIREMENTS, RequirementField.PREFERRED):
             for raw in _posting_list(p, f):
                 line = " ".join(raw.split())
-                terms = requirement_terms(line)
+                terms = requirement_terms(line, aliases)
                 keys = [(t.key, t.label) for t in terms] or [("line:" + normalize_line(line), line)]
                 for key, label in keys:
                     g = groups.setdefault(key, _Group(label))

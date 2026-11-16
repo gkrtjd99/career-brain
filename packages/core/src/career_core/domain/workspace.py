@@ -67,6 +67,9 @@ ACTION_SCOPES: dict[str, str] = {
     # API 토큰 목록·발급·폐기 (personal-api 토큰, 원문·해시는 보이지 않는다). 소유자만.
     "tokens.read": "workspace-admin",
     "tokens.manage": "workspace-admin",
+    # c0021 공간 공용 설정 (표시 시간대·기술명 별칭). 학습 설정 PUT과 같은 범위.
+    "settings.read": "read",
+    "settings.write": "draft-write",
 }
 
 

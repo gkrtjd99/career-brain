@@ -1,5 +1,5 @@
 import { Badge } from "@career-brain/ui";
-import { daysLeft, ddayLabel } from "../lib/format";
+import { daysLeft, ddayLabel } from "../lib/dates";
 
 /** 마감까지 남은 날. 3일 이내는 강조, 지난 마감은 흐리게. 마감이 없으면 그리지 않는다. */
 export function DdayBadge({ deadline }: { deadline: string | null | undefined }) {

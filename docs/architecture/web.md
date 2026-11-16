@@ -30,10 +30,12 @@ apps/personal-web/src/
   lib/api.ts      토큰 저장, client, QueryClient (401 → 설정)
   lib/labels.ts   상태·오류·검사 코드 → 한국어 문구
   lib/diff.ts     단어 단위 비교 (AI 수정안 보기)
+  lib/dates.ts    날짜 표시 도우미: 공간 표시 시간대(설정 "작업 공간")로 날짜·시각·D-day·datetime-local 변환 (AppShell이 설정을 읽어 정한다)
   components/     AppShell(메뉴), ClaimItem, ClaimPicker(검색으로 주장 고르기), InterviewPanel, SpanSheet,
                   SourceSheet(검색 결과 → 원본 블록), UploadSheet, DdayBadge
   components/doc/ BlockEditor(문단 편집), ChecksPanel(품질 검사), SuggestionsPanel(AI 수정안)
   components/study/ parts(응시·오답 기록, 복습 카드)
+  components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전)
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
                   Study, StudyItem, Usage, Settings
 ```
@@ -52,7 +54,7 @@ apps/personal-web/src/
 | `/postings/:id` | 항목별 추출값과 근거(구조화 데이터 경로 / 원문 인용 → 원문 패널에서 강조 / 직접 입력), 고쳐서 저장(바뀐 값은 `overrides`, 비운 값은 `clear`), 다시 가져오기, 보관, 실패 사유, 목록 후보 고르기, 본문 직접 붙여넣기, 전체 버전 목록·가져오기 기록, 저장한 공고면 지원 만들기/열기·요건별 준비 상태 |
 | `/usage` | 기간·묶음별 호출·토큰·청구·환산 비용, 월 예산 |
 | `/system` | 탭: 실행(상태 필터, 상세 시트: 진행·비용·대기 이유·이벤트, 멈춤·다시 시작·취소) · 승인(상태 필터, 상세 시트: 요청한 문서·버전, **요청 이후 바뀐 것** 비교, 메모, 승인·거절 — 본 내용의 `payload_hash`를 같이 보냄) · 백업·유지보수(행 수, 원본 크기, 마지막 내보내기, 내려받기·age 암호화, 삭제 기록 내려받기, 초안 정리) · MCP 기록(지난 24시간 도구별 호출·오류, 결과·도구 필터, 보존 기간) · 원격 연결(OAuth 설정 요약, 연결 추가·끊기, 최근 토큰 `jti`·폐기, 소유자만). 실행·승인은 SSE(`/core/live`)로 바로 갱신하고 끊기면 몇 초 간격 다시 읽기로 돌아간다. `?tab=&approval=&run=`로 바로 열린다. 오늘 화면 맨 위 "승인 요청" 카드(대기 중일 때만)가 승인 시트로 연결 |
-| `/settings` | 토큰, 문서 검사(상투어 목록 편집·기본 목록으로 되돌리기, 본인 연락처), 테마 |
+| `/settings` | 토큰, 문서 검사(상투어 목록 편집·기본 목록으로 되돌리기, 본인 연락처), 작업 공간(표시 시간대, 기술명 별칭 사전), 테마 |
 | `/applications` | 칸반: 관심(지원 없는 저장 공고, 지원 만들기) → 준비 중 → 제출 → 결과. 카드에 D-day, 안 쓴 문항, 다음 할 일 |
 | `/applications/:id` | 문항·문서 목록(글자 수/제한, 안 씀·초과, 검사 요약), 문서 추가(새로 쓰기 / 공용 문서에서 복사, 복사 출처 표시), 요건 가시성 표(충족/누락/과장), 철회·결과 기록, 제출: 확인 창(문서별 r#·글자 수·경고, 빈 문서 제외, 민감 정보 경고가 있으면 확인 체크) → 제출본 고정 → 전형 단계 타임라인(추가·결과·일정) + 읽기 전용 제출본(해시·본문·근거·요건) |
 | `/applications/:id/documents/:docId` | 문단 편집기, 서버 계산 글자/바이트 수(입력 중 350ms 뒤 `/count`), 저장(`base_revision`, 멱등 키, Ctrl/Cmd+S), 409 충돌 창(비교 / 버리고 최신 받기 / 확인 후 내 글로 새 revision), 저장 안 한 채 떠나면 막음, 문단별 근거 연결(검색으로 확인된 주장 고르기), 검사 탭(제한·위험·조작·근거·참고 묶음, 문단으로 이동), AI 수정안 탭(요청 → 단어 비교 → 적용/거절, 사실 변경 거부 사유 표시), 기록 탭(이전 revision 읽기), 고른 문장에만 근거 붙이기(문장 근거 칩), 내보내기(형식 고르기 → 만든 파일 검사 경고 → 확인 후 받기, PDF는 인쇄 창), 공용 문서에서 복사한 문서면 출처·원본 변경 안내, 제출 뒤 읽기 전용 |

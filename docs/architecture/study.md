@@ -57,8 +57,20 @@
 - **아무것도 연결하지 않는다.** 충족 보기도 바뀌지 않는다. 사용자가 후보를 보고 "연결"을 눌러야 위의 연결 API가 불린다.
 - 검색어는 요건 문장에서 기술 낱말·연차 같은 핵심어를 뽑아 만든다 (`requirement_query`). 낱말이 없으면 문장 그대로.
 - 이미 연결된 주장, 이의 제기(`disputed`)·폐기 주장은 뺀다. 확인 대기 주장은 상태를 붙여 보여 준다.
-- 응답 `basis: search_suggestion`, `mode: keyword|hybrid`. 검색 점수는 "닮았다"는 뜻일 뿐 판정이 아니다. 판정 모델(게이트웨이 뒤)은 붙이지 않았다.
+- 응답 `basis: search_suggestion`, `mode: keyword|hybrid`. 검색 점수는 "닮았다"는 뜻일 뿐 판정이 아니다.
 - 웹: 충족 화면의 요건 줄마다 "후보 찾기" → 후보별 "연결".
+
+#### 판정 모델 의견 (`judge=true`, c0021)
+
+`GET …/claim-suggestions?judge=true` — 후보마다 판정 모델(게이트웨이 뒤 `ModelClient`)이 "이 주장이 이 요건을 보여 주는가"를 `yes|no|unclear`와 짧은 이유로 붙인다.
+
+- **참고 의견일 뿐이다.** 연결·충족·주장 상태를 바꾸지 않는다. 응답 `judge.basis: judge_advisory`, 후보 `judge: {verdict, reason}`.
+- 명시 라우트 `routes.judge_claim`이 있어야 돈다. `default`로 넘어가지 않는다. 없으면 `judge.status = unavailable`, `note = no_route`이고 결과는 기준선(검색 후보)과 같다.
+- 외부 전송이라 `egress` 범위가 필요하다 (없으면 `note = egress_scope_required`).
+- 제한(`restricted`) 등급 주장은 보내지 않는다: 후보에 `judge_note = restricted_not_sent`. 보내는 글은 주장 문장 + 경험 제목뿐이고 자료 등급은 주장·원본 등급(`claim_data_classes`)을 그대로 게이트웨이에 넘긴다.
+- 요건 한 줄 = 호출 한 번(후보 묶음). 모델이 모르는 후보 번호·잘못된 판정을 돌려주면 그 후보만 의견 없음.
+- 평가와 정확도·비용: `models.md` "판정 모델".
+- 웹: 후보 아래 "판정 모델로 확인" → 후보별 "판정 모델(참고): 보여 줌/보여 주지 않음/판단 어려움 — 이유".
 
 ### 빠진 요건 정리
 
@@ -75,6 +87,7 @@
 
 - 센 대상은 **내가 확정해 저장한 공고**(`saved`, 선택하면 `archived`도)의 자격·우대 요건뿐이다. 응답 `basis: saved_postings_only`. 채용 시장 통계가 아니다.
 - 묶기는 규칙이다 (`domain/study.py` `requirement_terms`): 영문 기술 낱말은 소문자·별칭(`k8s`→kubernetes, `postgres`→postgresql, `js`→javascript), 한글 기술명은 영문 키로(`도커`→docker, `쿠버네티스`→kubernetes), 연차(`3년 이상`→"경력 3년 이상"), 짧은 한글 기술·요건 낱말 목록(`자료구조`, `협업`, `영어` 등). 불용어는 뺀다. 형태소 분석은 없다.
+- 별칭 사전 (c0021): 공간 설정 `tech_aliases`(설정 화면 "작업 공간")가 기본 별칭 표 위에 합쳐진다. 사용자 항목은 대표 표기를 그대로 묶음 이름으로 쓰고(`FastAPI = 패스트API, fast api` → "FastAPI"), 여러 낱말 표기(`fast api`)도 묶는다. 같은 대표 표기는 기본 항목을 대신하고, 다른 표기는 기본 항목에서 빼앗아 온다. 문서 검사(요건 가시성·사실 바뀜)도 같은 사전을 쓴다 (`applications.md`).
 - 한 공고가 같은 낱말을 여러 줄에 써도 1개로 센다. 그룹마다 자격/우대 줄 수와 예시 문장(최대 3개).
 - 웹: 학습 화면 "요건 빈도" 탭.
 
@@ -107,10 +120,10 @@
 
 `GET /core/study/reviews/due?tz=&until=&limit=` — 오늘(표시 시간대 날짜)이 끝나기 전에 예정된 `open` 오답을 오래된 순으로.
 
-- 시간대: `tz` 파라미터 → 공간 설정(`study_settings.timezone`) → 기본 `Asia/Seoul`. IANA 이름만 (`invalid_timezone` 400).
+- 시간대: `tz` 파라미터 → 공간 표시 시간대(`workspace_settings.timezone`, c0021에서 `study_settings`를 옮김) → 기본 `Asia/Seoul`. IANA 이름만 (`invalid_timezone` 400).
 - 마감 = 그 시간대의 다음 자정(UTC로 바꿔 비교). 예: 서울 23:30에 내일 08:00(서울) 예정 오답은 아직 아니다, 오늘 22:00 예정은 포함.
 - `until`을 주면 그 시각까지(포함)로 덮어쓴다 (이전 동작).
-- 설정: `GET/PUT /core/study/settings {timezone}` → `{timezone, is_default, today}`. 웹 복습 탭에서 고른다 (브라우저 시간대 후보 표시).
+- 설정: `GET/PUT /core/study/settings {timezone}` → `{timezone, is_default, today}`. c0021부터 공간 공용 설정(`GET/PUT /core/workspace-settings`)의 같은 값을 읽고 쓴다 (이전 클라이언트 호환). 웹 복습 탭과 설정 화면 "작업 공간" 어느 쪽에서 바꿔도 모든 화면의 날짜 표시가 같이 바뀐다.
 
 ### 시험 D-day
 

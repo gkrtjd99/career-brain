@@ -15,6 +15,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from career_core.domain.korean import TechAliases
+
 
 class StudyRuleError(ValueError):
     def __init__(self, code: str) -> None:
@@ -477,9 +479,48 @@ def normalize_line(text: str) -> str:
     return " ".join((text or "").split()).strip(" .,;·").lower()
 
 
-def requirement_terms(text: str) -> list[RequirementTerm]:
-    """요건 한 줄의 기술 낱말 (중복 없음, 처음 나온 순서). 없으면 빈 목록."""
+@dataclass(frozen=True, slots=True)
+class _TermMaps:
+    latin: dict[str, str]  # 소문자 영문 낱말 → 대표 키
+    phrases: tuple[tuple[str, str], ...]  # (소문자 표기, 대표 키): 한글·여러 낱말 표기, 긴 것부터
+    labels: dict[str, str]
+
+
+_BUILTIN_MAPS = _TermMaps(
+    dict(_ALIASES),
+    tuple((ko, _KO_ALIASES[ko]) for ko in sorted(_KO_ALIASES, key=len, reverse=True)),
+    dict(_LABELS),
+)
+
+
+def _term_maps(aliases: TechAliases | None) -> _TermMaps:
+    """기본 묶기 표 + 공간 사용자 별칭(c0021). 사용자 항목은 대표 표기 그대로 화면 이름이 된다."""
+    entries = aliases.entries if aliases is not None else ()
+    if not entries:
+        return _BUILTIN_MAPS
+    latin = dict(_ALIASES)
+    phrases = dict(_KO_ALIASES)
+    labels = dict(_LABELS)
+    for e in entries:
+        key = e.key
+        labels[key] = e.term
+        for spelling in (e.term, *e.aliases):
+            low = " ".join(spelling.split()).lower()
+            if _LATIN.fullmatch(spelling.strip()):
+                latin[low] = key
+            else:
+                phrases[low] = key
+    ordered = tuple(sorted(phrases.items(), key=lambda kv: len(kv[0]), reverse=True))
+    return _TermMaps(latin, ordered, labels)
+
+
+def requirement_terms(text: str, aliases: TechAliases | None = None) -> list[RequirementTerm]:
+    """요건 한 줄의 기술 낱말 (중복 없음, 처음 나온 순서). 없으면 빈 목록.
+
+    `aliases`의 사용자 항목(공간 설정)을 기본 묶기 표 위에 합친다.
+    """
     text = text or ""
+    maps = _term_maps(aliases)
     found: list[RequirementTerm] = []
     seen: set[str] = set()
 
@@ -491,18 +532,23 @@ def requirement_terms(text: str) -> list[RequirementTerm]:
     for m in _YEARS.finditer(text):
         n = int(m.group(1))
         add(f"years:{n}", f"경력 {n}년 이상")
-    for raw in _LATIN.findall(text):
+    # 한글·여러 낱말 표기를 먼저 지운다 ("아마존 웹 서비스", "자바스크립트"가 "자바"보다 먼저)
+    rest = text
+    phrase_hits: list[tuple[int, str]] = []
+    for phrase, key in maps.phrases:
+        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        m = pattern.search(rest)
+        if m:
+            phrase_hits.append((m.start(), key))
+            rest = pattern.sub(" ", rest)
+    for raw in _LATIN.findall(rest):
         low = raw.lower()
         if low in _EN_STOP or (len(low) == 1 and low not in ("c", "r")):
             continue
-        key = _ALIASES.get(low, low)
-        add(key, _LABELS.get(key, raw))
-    rest = text
-    for ko in sorted(_KO_ALIASES, key=len, reverse=True):
-        if ko in rest:
-            key = _KO_ALIASES[ko]
-            add(key, _LABELS.get(key, ko))
-            rest = rest.replace(ko, " ")
+        key = maps.latin.get(low, low)
+        add(key, maps.labels.get(key, raw))
+    for _, key in sorted(phrase_hits):
+        add(key, maps.labels.get(key, key))
     for ko in _KO_TERMS:
         if ko in rest:
             add(ko, ko)

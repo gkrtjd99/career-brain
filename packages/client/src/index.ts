@@ -1,9 +1,11 @@
 import { liveEndpoints } from "./live";
+import { settingsEndpoints } from "./settings";
 import { systemEndpoints } from "./system";
 import { tokenEndpoints } from "./tokens";
 import type * as T from "./types";
 
 export * from "./live";
+export * from "./settings";
 export * from "./system";
 export * from "./tokens";
 export * from "./types";
@@ -498,8 +500,12 @@ export function createClient({
     ) => post<T.CleanupOut>(`/core/study/postings/${id(postingId)}/requirements/cleanup`, body),
     claimSuggestions: (
       postingId: string,
-      opts: { field?: T.RequirementField; text?: string; limit?: number } = {},
-    ) => get<T.ClaimSuggestions>(`/core/study/postings/${id(postingId)}/claim-suggestions`, opts),
+      opts: { field?: T.RequirementField; text?: string; limit?: number; judge?: boolean } = {},
+    ) =>
+      get<T.ClaimSuggestions>(`/core/study/postings/${id(postingId)}/claim-suggestions`, {
+        ...opts,
+        judge: opts.judge ? "true" : undefined,
+      }),
     requirementFrequency: (opts: { include_archived?: boolean; min_postings?: number } = {}) =>
       get<T.RequirementFrequency>("/core/study/requirements/frequency", {
         include_archived: opts.include_archived ? "true" : undefined,
@@ -509,6 +515,7 @@ export function createClient({
     ...systemEndpoints({ request, get, post }),
     ...liveEndpoints({ request, get, post }),
     ...tokenEndpoints({ get, post }),
+    ...settingsEndpoints({ get, json }),
   };
 }
 

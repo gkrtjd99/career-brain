@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/format";
+import { formatDate } from "../lib/dates";
 import { FOCUS_LABEL, KIND_LABEL } from "../lib/labels";
 import { ErrorText, Loaded } from "./common";
 

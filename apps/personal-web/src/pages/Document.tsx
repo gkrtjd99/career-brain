@@ -17,7 +17,8 @@ import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { ExportSheet } from "../components/doc/ExportSheet";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
 import { api, ApiError } from "../lib/api";
-import { formatDateTime, int } from "../lib/format";
+import { formatDateTime } from "../lib/dates";
+import { int } from "../lib/format";
 import { DOC_KIND, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
 
 const route = getRouteApi("/applications/$applicationId/documents/$documentId");

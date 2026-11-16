@@ -7,7 +7,7 @@ import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { HiddenTextCheck } from "../components/doc/ExportSheet";
 import { api } from "../lib/api";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime } from "../lib/dates";
 import { DOC_KIND } from "../lib/labels";
 import { countLine } from "./Application";
 

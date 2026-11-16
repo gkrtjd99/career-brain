@@ -17,7 +17,8 @@ import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, List, Loaded, PageHeader, Tabs } from "../components/common";
 import { AttemptForm, AttemptRow, MistakeForm, ReviewCard, useStudyInvalidate } from "../components/study/parts";
 import { api } from "../lib/api";
-import { formatDate, formatDateTime, hostOf } from "../lib/format";
+import { formatDate, formatDateTime, fromLocalInput } from "../lib/dates";
+import { hostOf } from "../lib/format";
 import {
   ASSESSMENT_KIND,
   ASSESSMENT_STATUS,
@@ -342,9 +343,10 @@ function SuggestionPanel({
   onLink: (claimId: string) => void;
   linking: boolean;
 }) {
+  const [judge, setJudge] = useState(false);
   const q = useQuery({
-    queryKey: ["claim-suggestions", postingId, r.field, r.text, r.claims.length],
-    queryFn: () => api.claimSuggestions(postingId, { field: r.field, text: r.text, limit: 5 }),
+    queryKey: ["claim-suggestions", postingId, r.field, r.text, r.claims.length, judge],
+    queryFn: () => api.claimSuggestions(postingId, { field: r.field, text: r.text, limit: 5, judge }),
   });
   return (
     <div className="mt-2 rounded-md border border-dashed border-line px-2.5 py-2">
@@ -365,6 +367,14 @@ function SuggestionPanel({
                       <span className="min-w-0 flex-1">
                         {c.statement}
                         {c.experience_title ? <span className="text-xs text-muted"> · {c.experience_title}</span> : null}
+                        {c.judge ? (
+                          <span className="block text-xs text-muted">
+                            판정 모델(참고): {JUDGE_VERDICT[c.judge.verdict]}
+                            {c.judge.reason ? ` — ${c.judge.reason}` : ""}
+                          </span>
+                        ) : c.judge_note === "restricted_not_sent" ? (
+                          <span className="block text-xs text-muted">제한 등급이라 판정 모델에 보내지 않았습니다.</span>
+                        ) : null}
                       </span>
                       <Button size="sm" variant="ghost" disabled={linking} onClick={() => onLink(c.claim_id)}>
                         <Link2 size={13} /> 연결
@@ -375,6 +385,17 @@ function SuggestionPanel({
               ) : (
                 <p className="text-[13px] text-muted">찾은 후보가 없습니다. “주장 연결”에서 직접 검색할 수 있습니다.</p>
               )}
+              {res.judge ? (
+                <p className="text-xs text-muted">
+                  판정 모델: {JUDGE_STATUS[res.judge.status] ?? res.judge.status}
+                  {res.judge.note ? ` (${res.judge.note})` : ""}
+                  {res.judge.model ? ` · ${res.judge.model}` : ""}. 참고 의견일 뿐 연결·충족을 바꾸지 않습니다.
+                </p>
+              ) : line?.candidates.length ? (
+                <Button size="sm" variant="ghost" onClick={() => setJudge(true)}>
+                  <Sparkles size={13} /> 판정 모델로 확인
+                </Button>
+              ) : null}
             </div>
           );
         }}
@@ -382,6 +403,15 @@ function SuggestionPanel({
     </div>
   );
 }
+
+const JUDGE_VERDICT = { yes: "보여 줌", no: "보여 주지 않음", unclear: "판단 어려움" } as const;
+const JUDGE_STATUS: Record<string, string> = {
+  ok: "확인함",
+  partial: "일부만 확인함",
+  unavailable: "쓸 수 없음",
+  denied: "거부됨",
+  error: "오류",
+};
 
 // ---------------------------------------------------------------- 요건 빈도
 
@@ -396,8 +426,8 @@ function FrequencyTab() {
       {(f) => (
         <div className="space-y-3">
           <p className="text-xs text-muted">
-            내가 저장한 공고{archived ? "(보관 포함)" : ""}만 센 숫자입니다. 채용 시장 전체 통계가 아닙니다. 기술 낱말은 간단한 규칙으로 묶습니다
-            (예: 도커·Docker, k8s·Kubernetes).
+            내가 저장한 공고{archived ? "(보관 포함)" : ""}만 센 숫자입니다. 채용 시장 전체 통계가 아닙니다. 기술 낱말은 간단한 규칙과 별칭 사전으로 묶습니다
+            (예: 도커·Docker, k8s·Kubernetes. 별칭은 설정에서 더할 수 있습니다).
           </p>
           <label className="flex items-center gap-1.5 text-[13px]">
             <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> 보관한 공고도 세기
@@ -451,7 +481,7 @@ function TimezoneLine() {
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted">
       <span>
-        복습 마감: {q.data.timezone} 기준 오늘({q.data.today}) 끝{q.data.is_default ? " (기본값)" : ""}
+        복습 마감: {q.data.timezone} 기준 오늘({q.data.today}) 끝{q.data.is_default ? " (기본값)" : ""} · 공간 표시 시간대(설정)와 같은 값
       </span>
       {editing ? (
         <Select
@@ -640,7 +670,7 @@ function CreateAssessmentSheet({ open, onClose }: { open: boolean; onClose: () =
       api.createAssessment({
         title: form.title.trim(),
         kind: form.kind,
-        scheduled_at: form.when ? new Date(form.when).toISOString() : null,
+        scheduled_at: fromLocalInput(form.when),
       }),
     onSuccess: () => {
       invalidate();

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@career-brain/client";
 import { ErrorText, PageHeader } from "../components/common";
 import { TokensSection } from "../components/TokensSection";
+import { WorkspaceSettingsSection } from "../components/settings/WorkspaceSettingsSection";
 import { api, setToken, useToken } from "../lib/api";
 import { useTheme, type ThemePref } from "../lib/theme";
 
@@ -118,6 +119,7 @@ export function SettingsPage() {
         {me.data?.scopes.includes("workspace-admin") ? <TokensSection /> : null}
 
         {me.isSuccess ? <DocumentSettingsSection /> : null}
+        {me.isSuccess ? <WorkspaceSettingsSection /> : null}
 
         <Section title="테마">
           <div className="inline-flex rounded-lg border border-line bg-surface p-0.5" role="radiogroup">

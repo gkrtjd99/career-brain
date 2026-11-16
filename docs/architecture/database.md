@@ -299,3 +299,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내기: `maintenance_results`는 `EXCLUDED_TABLES` — 이 설치의 운영 기록이고, 복원한 설치에서 다시 쌓인다. `maintenance_schedule`은 공간 범위가 없어 대상이 아니다.
 
 `personal` 체인 `p0002_token_expiry` (`apps/personal-api`, down_revision `p0001`): `personal.api_tokens`에 `expires_at`(CHECK `expires_at > created_at`), `last_used_at`. `personal.lookup_api_token(hash)`가 폐기·**만료** 토큰을 빼고 `token_id`·`last_used_at`도 돌려준다. 마지막 사용 시각은 인증 때 5분에 한 번만 쓴다 (그 공간 문맥, `last_used_at < now() - 5분`일 때만). 토큰은 여전히 내보내기 대상 밖(`personal.*`).
+
+## 공간 공용 설정 (c0021)
+
+`down_revision = c0020` (병렬 작업 때 c0017로 만들었다가 합칠 때 마지막으로 옮겼다. c0017 번호는 비어 있다). 표시 시간대를 학습 전용(`study_settings`)에서 공간 공용 설정으로 옮기고, 기술명 별칭 사전을 더한다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `workspace_settings` (새 표) | 공간당 1행(`uq_workspace_settings_workspace`). 표시 시간대 `timezone`(IANA 이름, NULL = 기본 `Asia/Seoul`, 1–64자, 값 검사는 앱 `zoneinfo`), 기술명 별칭 `tech_aliases` JSONB 배열 `[{term, aliases}]`(`ck_workspace_settings_tech_aliases`: 배열, 200개 이하, 항목 검사는 앱 `parse_alias_entries`), `updated_by` | `SELECT, INSERT, UPDATE` |
+| `study_settings` | 지움. 값은 `workspace_settings.timezone`으로 옮긴다 | – |
+
+- 옮기기: upgrade는 모든 공간의 행을 한 번에 복사해야 해서 그동안만 `study_settings`의 `FORCE ROW LEVEL SECURITY`를 끈다(`NO FORCE`, 같은 트랜잭션에서 표를 지움). 소유자가 superuser가 아닌 설치에서도 복사가 빠지지 않는다. downgrade는 시간대가 있는 행만 `study_settings`로 되돌린다 (별칭은 버린다).
+- RLS FORCE, `workspace_id` + 공간 복합 키. 내보내기·복원 대상이 자동으로 된다 (`test_export.py`).
+- API: `GET/PUT /core/workspace-settings` (`settings.read` = read, `settings.write` = draft-write). 준 칸만 바꾼다. `GET/PUT /core/study/settings`는 같은 시간대를 읽고 쓴다.
+- 키워드 검색용 SECURITY DEFINER 함수(trigram 색인 사용)는 시험했지만 넣지 않았다 (2글자 한국어 낱말은 색인 이득이 없고, 소유자가 superuser가 아니면 RLS가 그대로 적용된다. `search.md` "RLS 아래 trigram 색인").
+- 상세: `docs/architecture/study.md`(시간대·별칭), `docs/architecture/applications.md`(문서 검사의 별칭), `docs/architecture/models.md`(판정 모델).

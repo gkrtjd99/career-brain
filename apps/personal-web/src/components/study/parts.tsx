@@ -3,7 +3,7 @@ import { Badge, Button, Input, Label, Select, Textarea } from "@career-brain/ui"
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../../lib/api";
-import { formatDate, formatDateTime } from "../../lib/format";
+import { formatDate, formatDateTime } from "../../lib/dates";
 import { ATTEMPT_RESULT, GRADE, MISTAKE_REASON } from "../../lib/labels";
 import { ErrorText } from "../common";
 
@@ -11,7 +11,7 @@ import { ErrorText } from "../common";
 export function useStudyInvalidate() {
   const qc = useQueryClient();
   return () => {
-    for (const key of ["study-items", "study-item", "assessments", "assessment", "mistakes", "due-reviews", "coverage", "activity", "study-settings", "claim-suggestions", "requirement-frequency", "upcoming-assessments"])
+    for (const key of ["study-items", "study-item", "assessments", "assessment", "mistakes", "due-reviews", "coverage", "activity", "study-settings", "workspace-settings", "claim-suggestions", "requirement-frequency", "upcoming-assessments"])
       qc.invalidateQueries({ queryKey: [key] });
   };
 }

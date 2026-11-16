@@ -28,7 +28,8 @@ import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { useCreateApplication } from "./Applications";
 import { api } from "../lib/api";
-import { formatDateTime, formatDeadline, hostOf } from "../lib/format";
+import { formatDateTime, formatDeadline } from "../lib/dates";
+import { hostOf } from "../lib/format";
 import {
   ADAPTER_LABEL,
   FETCH_ERROR,

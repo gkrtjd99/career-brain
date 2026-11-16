@@ -4,6 +4,7 @@
   고유어 수(한·두·세…)와 한자어 수(일·이·삼…십·백·천)는 뒤에 단위 명사(명·배·개·번…)가 올 때만 수로 본다.
   "세계", "열정", "백엔드", "개발한 번역기"처럼 수 글자로 시작하는 낱말을 잘못 잡지 않기 위해서다.
 - 기술명 한영 병기: "파이썬/Python", "자바스크립트/JavaScript", "쿠버네티스/K8s"를 같은 기술로 본다.
+  기본 표(`TECH_ALIASES`) 위에 공간 설정의 사용자 별칭이 합쳐진다 (`merge_aliases`, `use_aliases`).
 
 일부러 작고 단순하다. 놓치는 표현이 있고("수백 명", "두어 번"), 그런 표현은 숫자로 세지 않는다.
 """
@@ -11,7 +12,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 # --- 수 표현 -------------------------------------------------------------------------
 
@@ -199,6 +205,7 @@ def korean_numbers(text: str) -> tuple[set[str], list[tuple[int, int]]]:
 # --- 기술명 한영 병기 ------------------------------------------------------------------
 
 # 대표 표기(소문자 영문) → 같은 기술로 보는 다른 표기. 한글 표기와 흔한 약어만.
+# 공간 설정(`workspace_settings.tech_aliases`, c0021)의 사용자 항목이 이 기본 표 위에 합쳐진다 (`merge_aliases`).
 TECH_ALIASES: dict[str, tuple[str, ...]] = {
     "python": ("파이썬",),
     "javascript": ("자바스크립트", "js"),
@@ -227,23 +234,163 @@ TECH_ALIASES: dict[str, tuple[str, ...]] = {
     "android": ("안드로이드",),
     "aws": ("아마존 웹 서비스",),
 }
-_ALIAS_TO_CANON: dict[str, str] = {}
-for _canon, _aliases in TECH_ALIASES.items():
-    _ALIAS_TO_CANON[_canon] = _canon
-    for _a in _aliases:
-        _ALIAS_TO_CANON[_a.lower()] = _canon
+
+# 사용자 항목 한도 (공간 설정 검사)
+MAX_ALIAS_ENTRIES = 200
+MAX_ALIASES_PER_ENTRY = 20
+MAX_ALIAS_CHARS = 40
 
 
-def canonical_tech(term: str) -> str:
+class AliasError(ValueError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def _spelling_key(value: str) -> str:
+    """비교용 표기: 공백 정리, 영문은 소문자. 한글은 그대로."""
+    return " ".join((value or "").split()).lower()
+
+
+@dataclass(frozen=True, slots=True)
+class AliasEntry:
+    """사용자 별칭 한 줄: 대표 표기(화면 이름 그대로) + 같은 기술로 볼 다른 표기들."""
+
+    term: str
+    aliases: tuple[str, ...]
+
+    @property
+    def key(self) -> str:
+        return _spelling_key(self.term)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"term": self.term, "aliases": list(self.aliases)}
+
+
+def parse_alias_entries(raw: Any) -> tuple[AliasEntry, ...]:
+    """설정 값(JSON 배열 [{term, aliases}]) 검사·정리. 잘못된 값은 `AliasError(code)`.
+
+    - 대표 표기·별칭은 1~40자, 줄 바꿈 없음. 항목 200개, 항목당 별칭 20개까지.
+    - 같은 표기가 두 항목에 나오면 `alias_conflict` (어느 기술인지 정할 수 없다).
+    - 별칭이 자기 대표 표기와 같으면 빼고, 중복 별칭은 하나로 합친다.
+    """
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise AliasError("invalid_aliases")
+    if len(raw) > MAX_ALIAS_ENTRIES:
+        raise AliasError("too_many_aliases")
+    out: list[AliasEntry] = []
+    owner: dict[str, str] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            raise AliasError("invalid_aliases")
+        term = " ".join(str(item.get("term") or "").split())
+        names = item.get("aliases") or []
+        if not term or len(term) > MAX_ALIAS_CHARS or not isinstance(names, list):
+            raise AliasError("invalid_alias_term")
+        if len(names) > MAX_ALIASES_PER_ENTRY:
+            raise AliasError("too_many_aliases")
+        key = _spelling_key(term)
+        aliases: list[str] = []
+        for n in names:
+            a = " ".join(str(n or "").split())
+            if not a or len(a) > MAX_ALIAS_CHARS:
+                raise AliasError("invalid_alias")
+            k = _spelling_key(a)
+            if k == key or k in (_spelling_key(x) for x in aliases):
+                continue
+            aliases.append(a)
+        for k in (key, *(_spelling_key(a) for a in aliases)):
+            if owner.setdefault(k, key) != key:
+                raise AliasError("alias_conflict")
+        out.append(AliasEntry(term, tuple(aliases)))
+    return tuple(out)
+
+
+class TechAliases:
+    """기술명 별칭 표: 대표 표기(소문자) → 다른 표기들. 기본 표에 사용자 항목을 합친 결과.
+
+    사용자 항목이 이긴다: 사용자가 쓴 표기는 그 항목의 기술로만 본다 (기본 표에서 다른 기술의
+    별칭이었으면 거기서 뺀다). 기본 표의 기술에 별칭을 더하려면 같은 대표 표기로 항목을 만든다.
+    """
+
+    __slots__ = ("_hangul_longer", "_to_canon", "entries", "table")
+
+    def __init__(
+        self, table: dict[str, tuple[str, ...]], entries: tuple[AliasEntry, ...] = ()
+    ) -> None:
+        self.table = table
+        self.entries = entries
+        self._to_canon: dict[str, str] = {}
+        for canon, aliases in table.items():
+            self._to_canon[canon] = canon
+            for a in aliases:
+                self._to_canon[_spelling_key(a)] = canon
+        # "자바"가 "자바스크립트" 안에만 있을 때를 거르는 데 쓰는 더 긴 한글 표기들
+        self._hangul_longer = tuple(k for k in self._to_canon if len(k) > 1 and not k.isascii())
+
+    def canonical(self, term: str) -> str:
+        low = _spelling_key(term)
+        return self._to_canon.get(low, low)
+
+    def spellings(self, term: str) -> tuple[str, ...]:
+        canon = self.canonical(term)
+        return (canon, *self.table.get(canon, ()))
+
+
+def merge_aliases(entries: tuple[AliasEntry, ...] | None) -> TechAliases:
+    """기본 표 + 사용자 항목. 항목이 없으면 기본 표 그대로."""
+    if not entries:
+        return BUILTIN_ALIASES
+    claimed = {_spelling_key(s) for e in entries for s in (e.term, *e.aliases)}
+    table: dict[str, tuple[str, ...]] = {}
+    for canon, aliases in TECH_ALIASES.items():
+        kept = tuple(a for a in aliases if _spelling_key(a) not in claimed)
+        if canon in claimed and canon not in {e.key for e in entries}:
+            # 사용자가 다른 기술의 별칭으로 쓴 대표 표기: 그 기술은 남기되 이 표기로는 찾지 않는다
+            continue
+        table[canon] = kept
+    for e in entries:
+        base = table.get(e.key, ())
+        extra = tuple(
+            a for a in e.aliases if _spelling_key(a) not in {_spelling_key(b) for b in base}
+        )
+        table[e.key] = (*base, *extra)
+    return TechAliases(table, entries)
+
+
+BUILTIN_ALIASES = TechAliases(dict(TECH_ALIASES))
+
+# 지금 검사에 쓰는 별칭 표. 공간 설정을 읽은 usecase가 `use_aliases`로 정한다 (기본: 기본 표).
+_ACTIVE: ContextVar[TechAliases] = ContextVar("career_tech_aliases", default=BUILTIN_ALIASES)
+
+
+def current_aliases() -> TechAliases:
+    return _ACTIVE.get()
+
+
+@contextmanager
+def use_aliases(aliases: TechAliases | None) -> Iterator[TechAliases]:
+    """이 블록 안의 기술명 비교에 `aliases`를 쓴다 (None이면 바꾸지 않는다)."""
+    if aliases is None:
+        yield _ACTIVE.get()
+        return
+    token = _ACTIVE.set(aliases)
+    try:
+        yield aliases
+    finally:
+        _ACTIVE.reset(token)
+
+
+def canonical_tech(term: str, aliases: TechAliases | None = None) -> str:
     """대표 표기. 사전에 없으면 소문자 그대로."""
-    low = (term or "").lower()
-    return _ALIAS_TO_CANON.get(low, low)
+    return (aliases or _ACTIVE.get()).canonical(term)
 
 
-def tech_spellings(term: str) -> tuple[str, ...]:
+def tech_spellings(term: str, aliases: TechAliases | None = None) -> tuple[str, ...]:
     """같은 기술의 모든 표기 (대표 표기 먼저)."""
-    canon = canonical_tech(term)
-    return (canon, *TECH_ALIASES.get(canon, ()))
+    return (aliases or _ACTIVE.get()).spellings(term)
 
 
 def _has_spelling(text: str, spelling: str) -> bool:
@@ -251,7 +398,7 @@ def _has_spelling(text: str, spelling: str) -> bool:
         pattern = rf"(?<![A-Za-z0-9]){re.escape(spelling)}(?![A-Za-z0-9])"
         return re.search(pattern, text, re.IGNORECASE) is not None
     # 한글 표기: 앞에 다른 한글이 붙지 않아야 한다 ("자바스크립트" 안의 "자바"는 별도로 거른다)
-    for m in re.finditer(re.escape(spelling), text):
+    for m in re.finditer(re.escape(spelling), text, re.IGNORECASE):
         before = text[m.start() - 1] if m.start() else ""
         if before and "가" <= before <= "힣":
             continue
@@ -259,20 +406,21 @@ def _has_spelling(text: str, spelling: str) -> bool:
     return False
 
 
-def found_spellings(text: str, term: str) -> list[str]:
+def found_spellings(text: str, term: str, aliases: TechAliases | None = None) -> list[str]:
     """본문에서 찾은 이 기술의 표기들 (원문 그대로). 없으면 빈 목록."""
+    table = aliases or _ACTIVE.get()
     out = []
     t = text or ""
-    longer = [a for a in _ALIAS_TO_CANON if len(a) > 1]
-    for spelling in tech_spellings(term):
+    for spelling in table.spellings(term):
         if not _has_spelling(t, spelling):
             continue
         # "자바"가 "자바스크립트"의 일부일 때만 있으면 자바로 보지 않는다
         if not spelling.isascii():
-            covering = [a for a in longer if a != spelling and spelling in a and not a.isascii()]
+            low = _spelling_key(spelling)
+            covering = [a for a in table._hangul_longer if a != low and low in a]
             rest = t
             for a in covering:
-                rest = rest.replace(a, " ")
+                rest = re.sub(re.escape(a), " ", rest, flags=re.IGNORECASE)
             if not _has_spelling(rest, spelling):
                 continue
         m = re.search(re.escape(spelling), t, re.IGNORECASE)
@@ -280,21 +428,30 @@ def found_spellings(text: str, term: str) -> list[str]:
     return out
 
 
-def korean_tech_terms(text: str) -> list[str]:
-    """한글로 쓴 기술명을 대표 표기로. ("파이썬으로 이전" → ["python"])"""
+def korean_tech_terms(text: str, aliases: TechAliases | None = None) -> list[str]:
+    """한글(영문이 아닌 글자)로 쓴 기술명을 대표 표기로. ("파이썬으로 이전" → ["python"])"""
+    table = aliases or _ACTIVE.get()
     return [
         canon
-        for canon in TECH_ALIASES
-        if any(not s.isascii() for s in found_spellings(text, canon))
+        for canon in table.table
+        if any(not s.isascii() for s in found_spellings(text, canon, table))
     ]
 
 
 __all__ = [
+    "BUILTIN_ALIASES",
     "COUNTERS",
     "TECH_ALIASES",
+    "AliasEntry",
+    "AliasError",
+    "TechAliases",
     "canonical_tech",
+    "current_aliases",
     "found_spellings",
     "korean_numbers",
     "korean_tech_terms",
+    "merge_aliases",
+    "parse_alias_entries",
     "tech_spellings",
+    "use_aliases",
 ]

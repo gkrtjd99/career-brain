@@ -829,22 +829,10 @@ class ApplicationStage(Base):
     )
 
 
-# ---------------------------------------------------------------- c0013: 학습 설정
+# ---------------------------------------------------------------- c0013: 학습 항목 병합
 
 
-class StudySettings(Base):
-    """공간의 학습 설정 (한 공간에 한 행). 표시 시간대: 복습 마감·D-day 기준."""
-
-    __tablename__ = "study_settings"
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    workspace_id: Mapped[UUID]
-    timezone: Mapped[str] = mapped_column(Text)
-    updated_by: Mapped[UUID]
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow
-    )
+# 학습 설정(study_settings)은 c0021에서 공간 공용 설정(WorkspaceSettings)으로 옮겼다.
 
 
 class StudyItemMerge(Base):
@@ -974,3 +962,26 @@ class OAuthToken(Base):
     uses: Mapped[int] = mapped_column(Integer, default=1)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     revoked_by: Mapped[UUID | None] = mapped_column(default=None)
+
+
+# ---------------------------------------------------------------- c0021: 공간 공용 설정
+
+
+class WorkspaceSettings(Base):
+    """공간 공용 설정 (한 공간에 한 행).
+
+    - timezone: 표시 시간대 (날짜 표시·복습 마감·D-day). NULL이면 기본값(Asia/Seoul).
+    - tech_aliases: 사용자 기술명 별칭 ``[{term, aliases}]``. 기본 표(domain.korean) 위에 합쳐진다.
+    """
+
+    __tablename__ = "workspace_settings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    timezone: Mapped[str | None] = mapped_column(Text, default=None)
+    tech_aliases: Mapped[list] = mapped_column(JSONB, default=list)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
