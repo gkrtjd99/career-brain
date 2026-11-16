@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from career_core.ports import ActorContext
-from career_core.usecases.audit import list_audit_events
+from career_core.usecases.audit import list_audit_events, retention_days
 
 
 class AuditEventOut(BaseModel):
@@ -38,6 +38,8 @@ class AuditOut(BaseModel):
     events: list[AuditEventOut]
     # 지난 24시간 도구별 호출·오류 수
     last_24h: list[ToolStatOut]
+    # 보존 기간 (일, 0 = 계속 보관). 주기 유지보수가 더 오래된 기록을 지운다 (c0019)
+    retention_days: int = 0
 
 
 def add_audit_routes(router: APIRouter, deps, authorize) -> None:
@@ -65,6 +67,7 @@ def add_audit_routes(router: APIRouter, deps, authorize) -> None:
                 ToolStatOut(tool=t, calls=n, errors=e)
                 for t, (n, e) in sorted(page.recent.items(), key=lambda kv: -kv[1][0])
             ],
+            retention_days=retention_days(),
         )
 
 

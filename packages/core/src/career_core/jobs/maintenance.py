@@ -46,9 +46,14 @@ class MaintenanceReport:
 
 
 def default_tasks() -> tuple[MaintenanceTask, ...]:
+    from career_core.usecases.audit import prune_security_records
     from career_core.usecases.postings import purge_unconfirmed
 
-    return (MaintenanceTask("purge_unconfirmed_postings", purge_unconfirmed),)
+    return (
+        MaintenanceTask("purge_unconfirmed_postings", purge_unconfirmed),
+        # 감사 기록 보존 기간(CAREER_AUDIT_RETENTION_DAYS) + 만료된 OAuth 토큰 기록 (c0019)
+        MaintenanceTask("prune_audit_and_tokens", prune_security_records),
+    )
 
 
 async def workspace_ids(db: Database) -> list[UUID]:

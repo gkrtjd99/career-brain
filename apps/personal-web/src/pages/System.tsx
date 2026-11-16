@@ -5,6 +5,8 @@ import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ChevronRight, Download } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ErrorText, errorText, List, Loaded, PageHeader, Tabs } from "../components/common";
+import { LiveProvider, useLiveConnected } from "../components/system/live";
+import { OAuthTab } from "../components/system/OAuthTab";
 import { api } from "../lib/api";
 import { formatDateTime, int, usd } from "../lib/format";
 import {
@@ -23,7 +25,7 @@ import {
 } from "../lib/systemLabels";
 
 const route = getRouteApi("/system");
-export type SystemTab = "runs" | "approvals" | "maintenance" | "audit";
+export type SystemTab = "runs" | "approvals" | "maintenance" | "audit" | "oauth";
 
 
 const ACTIVE: RunStatus[] = ["queued", "running", "waiting_approval", "interrupted"];
@@ -66,6 +68,15 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
 }
 
 export function SystemPage() {
+  // 실행·승인 상태는 SSE(/core/live)로 받고, 끊기면 각 목록이 몇 초 간격으로 다시 읽는다
+  return (
+    <LiveProvider>
+      <SystemScreen />
+    </LiveProvider>
+  );
+}
+
+function SystemScreen() {
   const { tab = "runs", approval, run } = route.useSearch();
   const navigate = useNavigate();
   const pending = useQuery({
@@ -93,12 +104,14 @@ export function SystemPage() {
           { value: "approvals", label: `승인${pending.data?.length ? ` ${pending.data.length}` : ""}` },
           { value: "maintenance", label: "백업·유지보수" },
           { value: "audit", label: "MCP 기록" },
+          { value: "oauth", label: "원격 연결" },
         ]}
       />
       {tab === "runs" ? <RunsTab onOpen={(id) => go({ tab, run: id })} /> : null}
       {tab === "approvals" ? <ApprovalsTab onOpen={(id) => go({ tab, approval: id })} /> : null}
       {tab === "maintenance" ? <MaintenanceTab /> : null}
       {tab === "audit" ? <AuditTab /> : null}
+      {tab === "oauth" ? <OAuthTab /> : null}
       <RunSheet
         runId={run ?? null}
         onClose={() => go({ tab })}
@@ -117,11 +130,12 @@ export function SystemPage() {
 
 function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
   const [status, setStatus] = useState<RunStatus | "">("");
+  const live = useLiveConnected();
   const q = useQuery({
     queryKey: ["runs", status],
     queryFn: () => api.runs({ status: status || undefined, limit: 50 }),
     placeholderData: keepPreviousData,
-    refetchInterval: (query) => (query.state.data?.some((r) => ACTIVE.includes(r.status)) ? 5000 : false),
+    refetchInterval: (query) => (!live && query.state.data?.some((r) => ACTIVE.includes(r.status)) ? 5000 : false),
   });
   return (
     <div className="space-y-3">
@@ -165,11 +179,12 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
 
 function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClose: () => void; onApproval: (id: string) => void }) {
   const qc = useQueryClient();
+  const live = useLiveConnected();
   const run = useQuery({
     queryKey: ["run", runId],
     queryFn: () => api.run(runId!),
     enabled: !!runId,
-    refetchInterval: (query) => (query.state.data && ACTIVE.includes(query.state.data.status) ? 4000 : false),
+    refetchInterval: (query) => (!live && query.state.data && ACTIVE.includes(query.state.data.status) ? 4000 : false),
   });
   const events = useQuery({
     queryKey: ["run-events", runId, run.data?.updated_at],
@@ -619,6 +634,11 @@ function AuditTab() {
       <Loaded query={q}>
         {(page) => (
           <div className={q.isFetching ? "space-y-4 opacity-70" : "space-y-4"}>
+            <p className="text-xs text-muted">
+              {page.retention_days
+                ? `보존 기간 ${page.retention_days}일: 더 오래된 기록은 주기 유지보수가 지웁니다 (CAREER_AUDIT_RETENTION_DAYS).`
+                : "보존 기간 없음: 기록을 지우지 않습니다 (CAREER_AUDIT_RETENTION_DAYS=0)."}
+            </p>
             {page.last_24h.length ? (
               <Section title="지난 24시간">
                 <div className="flex flex-wrap gap-1.5">

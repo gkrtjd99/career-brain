@@ -63,6 +63,7 @@ EXCLUDED_TABLES: dict[str, str] = {
     "core.jobs": "작업 큐(일시 상태, 대상 ID뿐). 복원 후 필요한 작업은 다시 만든다",
     "core.embeddings": "검색 벡터. 모델·차원에 따라 다르고 원문에서 다시 만든다 (복원 후 re-index)",
     "core.oauth_identities": "외부 로그인 연결: 설치마다 다시 연결한다 (personal-api oauth-link)",
+    "core.oauth_tokens": "본 외부 토큰·폐기 목록: 수명이 짧은 설치별 기록이고 연결(oauth_identities)을 따른다",
 }
 # 복원 후 다시 큐에 넣는 작업 종류 → 대상 표. 내보낼 때 대기·실행 중이던 것만 manifest에 적는다.
 REQUEUE_KINDS: dict[str, str] = {

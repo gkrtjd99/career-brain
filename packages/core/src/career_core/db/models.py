@@ -902,3 +902,27 @@ class OAuthIdentity(Base):
     label: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+
+# ---------------------------------------------------------------- c0019: 원격 MCP 토큰 기록·폐기
+
+
+class OAuthToken(Base):
+    """원격 MCP에서 본 외부 액세스 토큰 1개 (``jti`` 또는 토큰 sha256). 폐기하면 다음 요청부터 401."""
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    identity_id: Mapped[UUID]
+    issuer: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    token_ref: Mapped[str] = mapped_column(Text)
+    ref_kind: Mapped[str] = mapped_column(Text)  # jti | sha256
+    via: Mapped[str] = mapped_column(Text)  # jwt | introspection
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    uses: Mapped[int] = mapped_column(Integer, default=1)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_by: Mapped[UUID | None] = mapped_column(default=None)

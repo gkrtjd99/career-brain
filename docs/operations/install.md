@@ -174,6 +174,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_WORKER_LISTEN` | `1` | 새 작업을 `LISTEN/NOTIFY`로 깨우기. `0`이면 간격 확인만 |
 | `CAREER_WORKER_POLL_SECONDS` | `30` (LISTEN 끄면 `1`) | 대기 작업 확인 간격 (LISTEN일 때는 놓친 알림 대비) |
 | `CAREER_MAINTENANCE_INTERVAL_SECONDS` | `21600` | 주기 유지보수(초안 정리) 간격, `0`이면 끔 |
+| `CAREER_AUDIT_RETENTION_DAYS` | `180` | MCP 감사 기록 보존 일수 (주기 유지보수가 지움). `0`이면 계속 보관, 최소 7 |
 | `CAREER_WEB_DIR` | `apps/personal-web/dist` (있을 때) | 웹 정적 파일. 빈 값이면 끔 |
 | `CAREER_BLOB_DIR` | `data/blobs` (이미지: `/data/blobs`) | 업로드 원본 |
 | `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |

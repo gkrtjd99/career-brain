@@ -1485,13 +1485,21 @@ def _approval_error(code: str):
 
 
 async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str, dict[str, Any]]:
-    """제출 승인의 대상 버전: 지원 상태, 문서별 현재 revision·본문 해시·글자 규칙, 공고 확정 값.
+    """제출 승인의 (대상 버전, 승인 화면용 요약).
 
-    이 중 하나라도 바뀌면 해시가 달라져 기존 승인을 쓸 수 없다 (§17.10).
+    대상 버전은 DB 함수 ``core.application_target_version``(c0019)이 계산한다: 지원 상태, 문서별 현재
+    revision·본문 해시·글자 규칙·문항, 공고 확정 버전·확정 값·변경 대기. 하나라도 바뀌면 해시가 달라져
+    기존 승인을 쓸 수 없다 (§17.10). 즉시 무효화 trigger도 같은 함수를 부르므로 칸 목록은 그 함수 한 곳에만
+    있다. 여기서 만드는 요약은 비교 화면용이고 승인 판정에 쓰지 않는다.
     """
+    from sqlalchemy import func
+
     from career_core.domain.runs import content_hash
 
     app = await _get_app(s, application_id)
+    version = await s.scalar(select(func.core.application_target_version(application_id)))
+    if version is None:  # 지원·공고가 방금 사라졌다
+        raise NotFound("application")
     posting = await s.get(JobPosting, app.posting_id)
     docs = (
         (
@@ -1504,21 +1512,9 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
         .scalars()
         .all()
     )
-    doc_state = []
     summary_docs = []
     for d in docs:
         rev = await _revision(s, d.id, d.current_revision)
-        doc_state.append(
-            [
-                str(d.id),
-                d.current_revision,
-                rev.content_hash if rev else None,
-                d.char_limit,
-                d.byte_limit,
-                d.count_rule,
-                d.question_prompt,
-            ]
-        )
         summary_docs.append(
             {
                 "document_id": str(d.id),
@@ -1530,30 +1526,21 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
                 "byte_limit": d.byte_limit,
             }
         )
-    state = {
-        "status": app.status,
-        "posting_id": str(posting.id),
-        "posting_version_id": str(posting.confirmed_version_id)
-        if posting.confirmed_version_id
-        else None,
-        "posting_fields": content_hash(posting.fields or {}),
-        "posting_pending_changes": sorted(posting.pending_changes or []),
-        "documents": doc_state,
-    }
+    posting_version_id = str(posting.confirmed_version_id) if posting.confirmed_version_id else None
     sensitive_digest, sensitive = await _sensitive(s, docs)
     summary = {
         "application_id": str(app.id),
         "title": app.title,
-        "posting_version_id": state["posting_version_id"],
+        "posting_version_id": posting_version_id,
         "documents": summary_docs,
         # 승인하는 사람이 보도록: 민감 정보 경고 수와 확인에 쓸 지문
         "sensitive": {"hash": sensitive_digest, "count": len(sensitive)},
         # 승인 변경 비교용 (O08 백로그): 지원 상태, 공고 확정 값 해시, 공고 변경 대기 항목
         "status": app.status,
-        "posting_fields": state["posting_fields"],
-        "posting_pending_changes": state["posting_pending_changes"],
+        "posting_fields": content_hash(posting.fields or {}),
+        "posting_pending_changes": sorted(posting.pending_changes or []),
     }
-    return content_hash(state), summary
+    return version, summary
 
 
 async def submit_application(
