@@ -2,7 +2,7 @@
 
 - `CAREER_WEB_DIR`가 없으면 `apps/personal-web/dist`(현재 폴더 기준)가 있을 때만 쓴다.
   빈 값(`CAREER_WEB_DIR=`)이면 끈다. 폴더가 없으면 아무것도 붙이지 않는다 (API만).
-- `/api/...`는 가리지 않는다. 없는 API 경로는 index.html이 아니라 404다.
+- `/api/...`·`/.well-known/...`는 가리지 않는다. 없는 경로는 index.html이 아니라 404다.
 - 클라이언트 라우팅: 파일이 없는 경로는 index.html (SPA fallback).
 - 해시가 붙은 `assets/`는 오래 캐시하고, index.html은 매번 확인하게 한다.
 """
@@ -36,7 +36,8 @@ def web_dir_from_env() -> Path | None:
 class SpaStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope: Scope) -> Response:
         first = path.split("/", 1)[0]
-        if first == API_PREFIX:
+        # API와 `.well-known`(OAuth 메타데이터 등, 꺼져 있으면 없음)은 앱 화면으로 바꾸지 않는다
+        if first in (API_PREFIX, ".well-known"):
             raise HTTPException(status_code=404)
         try:
             response = await super().get_response(path, scope)

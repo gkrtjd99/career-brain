@@ -216,6 +216,8 @@ def test_web_app_is_served_without_shadowing_api(monkeypatch, web_dir):
     assert missing_api.status_code == 404
     assert "root" not in missing_api.text
     assert client.get("/api").status_code == 404
+    # OAuth가 꺼져 있으면 메타데이터 경로도 앱 화면이 아니라 404
+    assert client.get("/.well-known/oauth-protected-resource").status_code == 404
 
 
 def test_web_is_off_when_dir_missing_or_disabled(monkeypatch, tmp_path, web_dir):
