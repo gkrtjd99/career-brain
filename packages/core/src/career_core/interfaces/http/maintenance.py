@@ -1,4 +1,4 @@
-"""유지보수·내보내기 경로 (O11). 모두 소유자(workspace-admin)만.
+"""유지보수·내보내기·웹 복원 경로 (O11, c0018). 모두 소유자(workspace-admin)만.
 
 NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
 """
@@ -45,6 +45,9 @@ class MaintenanceOut(BaseModel):
     drafts_purgeable: int
     draft_retention_days: int
     export_available: bool
+    # 웹에서 묶음을 올려 이 공간에 합치기 (c0018). 원본 저장소가 있을 때만.
+    restore_available: bool = False
+    max_restore_bytes: int = 0
 
 
 class PurgeOut(BaseModel):
@@ -73,6 +76,8 @@ def add_maintenance_routes(router: APIRouter, deps, authorize) -> None:
             drafts_purgeable=info.drafts_purgeable,
             draft_retention_days=info.draft_retention_days,
             export_available=deps.blobs is not None,
+            restore_available=deps.blobs is not None,
+            max_restore_bytes=getattr(deps, "max_restore_bytes", 0),
         )
 
     @router.post("/maintenance/purge-drafts", response_model=PurgeOut)
@@ -139,3 +144,7 @@ def add_maintenance_routes(router: APIRouter, deps, authorize) -> None:
             headers={"X-Archive-SHA256": report.sha256, "Cache-Control": "no-store"},
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
         )
+
+    from career_core.interfaces.http.restore import add_restore_routes
+
+    add_restore_routes(router, deps, authorize)

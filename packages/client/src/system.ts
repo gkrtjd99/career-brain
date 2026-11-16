@@ -92,7 +92,8 @@ export interface ApprovalDiff {
 }
 
 export interface MaintenanceRun {
-  kind: "export" | "restore";
+  /** merge: 묶음을 이 공간에 합침 (c0018, 웹 복원) */
+  kind: "export" | "restore" | "merge";
   via: string;
   created_at: IsoDateTime;
   archive_sha256: string;
@@ -111,6 +112,74 @@ export interface Maintenance {
   drafts_purgeable: number;
   draft_retention_days: number;
   export_available: boolean;
+  /** 웹에서 묶음을 올려 합치기 (c0018) */
+  restore_available: boolean;
+  max_restore_bytes: number;
+}
+
+export type DuplicatePolicy = "skip" | "fail";
+
+export interface MergeTable {
+  name: string;
+  archive_rows: number;
+  added: number;
+  skipped: number;
+  /** 겹친 행: 찾은 키 → 수 ("id", "content", UNIQUE 제약 이름…) */
+  skipped_by: Record<string, number>;
+  sha256: string;
+}
+
+export interface SkippedDeletion {
+  target_table: string;
+  target_id: Uuid;
+  /** still_referenced | not_permitted | rejected | kept_existing | error */
+  reason: string;
+  detail: string;
+}
+
+export interface MergeReport {
+  dry_run: boolean;
+  workspace_id: Uuid;
+  workspace_name: string;
+  source_workspace_id: Uuid;
+  source_workspace_name: string;
+  on_duplicate: DuplicatePolicy;
+  archive_sha256: string;
+  encrypted: boolean;
+  format_upgraded_from: number | null;
+  rows_added: number;
+  rows_skipped: number;
+  blobs: number;
+  actors_mapped: number;
+  tables: MergeTable[];
+  not_merged: Record<string, string>;
+  requeued: Record<string, number>;
+  deletions_applied: number;
+  deletions_skipped: number;
+  skipped_deletions: SkippedDeletion[];
+  notes: string[];
+}
+
+export type RestoreStatus = "uploaded" | "verifying" | "verified" | "applying" | "done" | "failed";
+
+export interface RestoreJob {
+  id: Uuid;
+  status: RestoreStatus;
+  /** read · decrypt · match · insert · verify · deletions · blobs · commit */
+  phase: string | null;
+  done: number;
+  total: number;
+  bytes: number;
+  sha256: string;
+  encrypted: boolean;
+  filename: string | null;
+  deletions: number;
+  on_duplicate: DuplicatePolicy | null;
+  report: MergeReport | null;
+  error: string | null;
+  error_detail: string | null;
+  created_at: IsoDateTime;
+  updated_at: IsoDateTime;
 }
 
 export interface AuditEvent {
@@ -141,7 +210,11 @@ export interface DownloadedFile {
 type SysQuery = Record<string, string | number | undefined | null>;
 
 export interface SystemDeps {
-  request: (method: string, path: string, opts?: { query?: SysQuery }) => Promise<Response>;
+  request: (
+    method: string,
+    path: string,
+    opts?: { query?: SysQuery; json?: unknown; blob?: Blob; headers?: Record<string, string> },
+  ) => Promise<Response>;
   get: <R>(path: string, query?: SysQuery) => Promise<R>;
   post: <R>(path: string, body?: unknown) => Promise<R>;
 }
@@ -192,6 +265,30 @@ export function systemEndpoints({ request, get, post }: SystemDeps) {
     downloadExport: (recipient?: string) =>
       download("/core/maintenance/export", "career-export.tar.gz", { recipient }),
     downloadDeletions: () => download("/core/maintenance/deletions", "career-deletions.jsonl"),
+
+    // 웹 복원: 묶음을 올려 이 공간에 합치기 (소유자만). 확인(dry-run) → 합치기, 둘 다 배경 작업.
+    uploadRestore: async (file: Blob, filename?: string) => {
+      const headers: Record<string, string> = {};
+      // 머리말은 ASCII만: 이름은 표시용이라 다른 글자는 뺀다
+      const ascii = filename?.replace(/[^\x20-\x7e]/g, "_");
+      if (ascii) headers["X-Filename"] = ascii;
+      const res = await request("POST", "/core/maintenance/restore", { blob: file, headers });
+      return (await res.json()) as RestoreJob;
+    },
+    uploadRestoreDeletions: async (jobId: string, file: Blob) => {
+      const res = await request("POST", `/core/maintenance/restore/${id(jobId)}/deletions`, { blob: file });
+      return (await res.json()) as RestoreJob;
+    },
+    restoreJob: (jobId: string) => get<RestoreJob>(`/core/maintenance/restore/${id(jobId)}`),
+    verifyRestore: (jobId: string, body: { on_duplicate: DuplicatePolicy; identity?: string }) =>
+      post<RestoreJob>(`/core/maintenance/restore/${id(jobId)}/verify`, body),
+    applyRestore: (
+      jobId: string,
+      body: { on_duplicate: DuplicatePolicy; archive_sha256: string; identity?: string },
+    ) => post<RestoreJob>(`/core/maintenance/restore/${id(jobId)}/apply`, body),
+    discardRestore: async (jobId: string) => {
+      await request("DELETE", `/core/maintenance/restore/${id(jobId)}`);
+    },
 
     // MCP 도구 호출 기록 (원문 인자 없음)
     audit: (opts: { limit?: number; before?: string; tool?: string; status?: "ok" | "error" } = {}) =>

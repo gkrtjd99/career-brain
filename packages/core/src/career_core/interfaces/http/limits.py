@@ -12,14 +12,22 @@ MULTIPART_OVERHEAD = 256 * 1024  # 폼 경계·필드 몫
 
 
 class BodySizeLimit:
-    def __init__(self, app: Any, max_bytes: int) -> None:
+    """``overrides``: (메서드, 전체 경로) → 그 경로만의 상한. 정확히 같은 경로만 (예: 웹 복원 업로드
+    ``("POST", "/api/core/maintenance/restore")``). 나머지는 모두 ``max_bytes``.
+    """
+
+    def __init__(
+        self, app: Any, max_bytes: int, overrides: dict[tuple[str, str], int] | None = None
+    ) -> None:
         self.app = app
         self.max_bytes = max_bytes
+        self.overrides = {(m.upper(), p): n for (m, p), n in (overrides or {}).items()}
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        limit = self.overrides.get((scope.get("method", ""), scope.get("path", "")), self.max_bytes)
         for name, value in scope.get("headers", []):
             if name == b"content-length":
                 try:
@@ -27,7 +35,7 @@ class BodySizeLimit:
                 except ValueError:
                     await _reply_413(send)
                     return
-                if declared > self.max_bytes:
+                if declared > limit:
                     await _reply_413(send)
                     return
         seen = 0
@@ -41,7 +49,7 @@ class BodySizeLimit:
             message = await receive()
             if message["type"] == "http.request":
                 seen += len(message.get("body", b""))
-                if seen > self.max_bytes:
+                if seen > limit:
                     # 길이 없이(chunked) 넘치면 413을 바로 보내고, 앱에는 연결이 끊긴 것으로 알린다.
                     rejected = True
                     if not started:

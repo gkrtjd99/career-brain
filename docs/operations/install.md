@@ -81,8 +81,14 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/api/core/me
 ```caddy
 career.example.com {
     encode zstd gzip
-    request_body {
+    # 웹 복원(백업 묶음 올리기) 경로만 크게: CAREER_MAX_RESTORE_MB(기본 2048). 두 상한이 겹치지 않게 나눈다
+    @restore path /api/core/maintenance/restore
+    @other not path /api/core/maintenance/restore
+    request_body @other {
         max_size 25MB          # CAREER_MAX_UPLOAD_MB(기본 20)보다 조금 크게
+    }
+    request_body @restore {
+        max_size 2GB
     }
     header {
         Strict-Transport-Security "max-age=31536000"
@@ -160,7 +166,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 - PostgreSQL: `deploy/docker/compose.yaml`의 `command`. 기본은 1GB 서버용(`shared_buffers=128MB`, `max_connections=40`, 병렬 질의·JIT 끔). RAM이 넉넉하면 `.env`의 `CAREER_PG_SHARED_BUFFERS`(RAM 25%)와 `CAREER_PG_EFFECTIVE_CACHE`(RAM 50%)를 올린다.
 - 작업 깨우기: worker는 `LISTEN career_jobs`로 새 작업을 바로 알아채고, 알림을 놓쳤을 때를 위해 `CAREER_WORKER_POLL_SECONDS`(기본 30초)마다 한 번 확인한다. DB 연결이 끊겨도 다시 연결하며, 그동안은 이 간격 확인으로 일한다. PgBouncer transaction 모드처럼 LISTEN이 안 되는 경로면 `CAREER_WORKER_LISTEN=0` (간격 기본 1초).
 - 주기 유지보수: `serve`(내장 worker)와 `worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 21600 = 6시간, `0`이면 끔)마다 모든 공간의 미확정 공고 초안(7일 지난 것)을 정리한다. 시작 60초 뒤 첫 실행. worker가 여럿이면 advisory lock으로 한 번에 하나만 하고, 정리는 멱등이다. 지금 바로: `personal-api maintenance`. `serve --no-worker`는 하지 않는다 (따로 띄운 `worker`가 한다). `pg_dump`는 앱이 하지 않는다: [backup.md](backup.md#4-일정-제안)의 cron/systemd timer.
-- 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20).
+- 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20). 웹 복원 업로드(`POST /api/core/maintenance/restore`) 하나만 `CAREER_MAX_RESTORE_MB`(기본 2048)을 쓴다 — 받는 파일은 임시 디렉터리(`TMPDIR`)에 두므로 그만큼 여유가 있어야 한다 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)).
 - 앱 프로세스는 하나로 둔다 (`--workers` 없음). 개인 자료 규모에서는 DB가 먼저 일하고 앱 CPU는 거의 쓰지 않는다. 판단 근거: [rust.md](../architecture/rust.md).
 
 ## 환경변수 요약
@@ -179,6 +185,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |
 | `CAREER_MODEL_DIR` | – (이미지: `/data/models`) | 로컬 임베딩 모델 파일 |
 | `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
+| `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |
 | `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
 | `CAREER_LOG_LEVEL` / `CAREER_ACCESS_LOG` | `info` / `1` | 로그 |
 | `CAREER_ENV_FILE` | `.env` | 로컬 실행 때 읽는 키 파일 (셸 변수가 우선) |

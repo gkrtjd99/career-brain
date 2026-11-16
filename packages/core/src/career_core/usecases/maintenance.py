@@ -88,10 +88,11 @@ async def maintenance_info(
                     text(f"SELECT count(*) FROM {t.sql} AS t WHERE {scope_sql(t)}"), params
                 )
         last = {}
-        for kind in ("export", "restore"):
+        # 합치기(merge, c0018)도 복원으로 보여 준다 (kind는 그대로 남는다)
+        for kind, kinds in (("export", ("export",)), ("restore", ("restore", "merge"))):
             last[kind] = await s.scalar(
                 select(ExportRun)
-                .where(ExportRun.kind == kind)
+                .where(ExportRun.kind.in_(kinds))
                 .order_by(ExportRun.created_at.desc())
                 .limit(1)
             )

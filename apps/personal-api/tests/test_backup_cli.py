@@ -1,5 +1,8 @@
 """personal-api export / restore: 빈 설치에 복원하고 새 토큰으로 같은 공간에 들어간다 (합성 자료)."""
 
+import json
+from datetime import UTC, datetime
+
 import pytest
 from career_core.adapters.blobstore import LocalBlobStore
 from career_core.db import Database
@@ -61,3 +64,43 @@ async def test_export_then_restore_into_empty_install(pg, db, tmp_path, monkeypa
             await tdb.dispose()
         assert await cli._restore(target, str(out), dry_run=False) == 1
         assert "target_not_empty" in capsys.readouterr().out
+
+
+async def test_restore_merge_into_the_token_workspace(pg, db, tmp_path, monkeypatch, capsys):
+    """restore --merge: 자료가 있는 공간에 합친다. 건너뛴 삭제 기록은 이유와 함께 출력한다."""
+    settings = Settings(database_url=pg.app.render_as_string(False), blob_dir=str(tmp_path / "a"))
+    token = await cli._bootstrap(settings, "합칠 공간 (합성)", "me")
+    actor = await PersonalTokenResolver(db).resolve(token)
+    exp = await brain.create_experience(db, actor, title="지웠다가 되살릴 경험 (합성)")
+    kept = await brain.create_experience(db, actor, title="남아 있는 경험 (합성)")
+    monkeypatch.setenv(cli.TOKEN_ENV, token)
+    out = tmp_path / "backup.tar.gz"
+    assert await cli._export(settings, str(out)) == 0
+    async with db.workspace_session(actor.workspace_id) as s:
+        await s.execute(text("DELETE FROM core.experiences WHERE id = :e"), {"e": exp})
+    capsys.readouterr()
+
+    assert await cli._merge(settings, str(out), dry_run=True, on_duplicate="skip") == 0
+    printed = capsys.readouterr().out
+    assert "checked archive" in printed and "1 row(s) added" in printed
+    assert "core.experiences" in printed and "dry run" in printed
+    assert await cli._merge(settings, str(out), dry_run=True, on_duplicate="fail") == 1
+    assert "duplicates_found" in capsys.readouterr().out
+
+    # 삭제 기록: 되살린 경험에는 다시 적용, 원래 있던 경험(합성 기록)은 이유와 함께 건너뜀
+    log = tmp_path / "deletions.jsonl"
+    assert await cli._export_deletions(settings, str(log)) == 0
+    at = datetime.now(UTC).isoformat()
+    row = {"target_table": "core.experiences", "target_id": str(kept), "deleted_at": at}
+    with log.open("a") as f:
+        f.write(json.dumps(row) + "\n")
+    capsys.readouterr()
+    merged = await cli._merge(
+        settings, str(out), dry_run=False, on_duplicate="skip", deletions=[str(log)]
+    )
+    assert merged == 0
+    printed = capsys.readouterr().out
+    assert "merged archive" in printed and "re-applied 1 deletion(s), skipped 1" in printed
+    assert f"skipped core.experiences {kept} — kept_existing" in printed
+    titles = {e.title for e in await brain.list_experiences(db, actor)}
+    assert titles == {"남아 있는 경험 (합성)"}

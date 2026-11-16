@@ -9,6 +9,7 @@ from career_core.adapters.blobstore import LocalBlobStore
 from career_core.db import Database
 from career_core.interfaces.http import CoreDeps, build_router
 from career_core.interfaces.http.limits import MULTIPART_OVERHEAD, BodySizeLimit
+from career_core.interfaces.http.restore import RESTORE_UPLOAD_PATH
 from career_core.llm.gateway import ModelGateway
 from fastapi import FastAPI
 
@@ -30,12 +31,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="career-brain (personal)", lifespan=lifespan)
     # 업로드가 처리 함수에 닿기 전에 크기를 막는다 (Starlette는 본문을 먼저 다 받아 둔다).
-    app.add_middleware(BodySizeLimit, max_bytes=settings.max_upload_bytes + MULTIPART_OVERHEAD)
+    # 웹 복원 업로드 경로만 상한을 넓힌다 (본문 = 묶음 파일 그대로, 임시 폴더에 흘려 쓴다).
+    app.add_middleware(
+        BodySizeLimit,
+        max_bytes=settings.max_upload_bytes + MULTIPART_OVERHEAD,
+        overrides={("POST", f"/api{RESTORE_UPLOAD_PATH}"): settings.max_restore_bytes},
+    )
     deps = CoreDeps(
         identity=PersonalTokenResolver(db),
         db=db,
         blobs=LocalBlobStore(settings.blob_dir),
         max_upload_bytes=settings.max_upload_bytes,
+        max_restore_bytes=settings.max_restore_bytes,
         monthly_budget_usd=models.budget.monthly_usd,
         models=ModelGateway(db, models, load_prices(models), client_factory=shared_client_factory),
         mcp_oauth=mcp_oauth_from_settings(settings, db),
