@@ -154,9 +154,11 @@ export function createClient({
     // 인터뷰
     startInterview: (experienceId: string | null) =>
       post<T.Interview>("/core/interviews", { experience_id: experienceId }),
-    interviews: (opts: { experienceId?: string; limit?: number } = {}) =>
+    /** runId(c0023): 그 일괄 실행이 질문을 만든 세션만 */
+    interviews: (opts: { experienceId?: string; runId?: string; limit?: number } = {}) =>
       get<T.InterviewSummary[]>("/core/interviews", {
         experience_id: opts.experienceId,
+        run_id: opts.runId,
         limit: opts.limit,
       }),
     interview: (sessionId: string) => get<T.Interview>(`/core/interviews/${id(sessionId)}`),

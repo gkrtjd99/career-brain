@@ -12,6 +12,7 @@ import { AlertTriangle, Copy, Download, History, Lock, Save, Settings2 } from "l
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
+import { BatchSuggestButton } from "../components/doc/BatchSuggestSheet";
 import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "../components/doc/BlockEditor";
 import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { ExportSheet } from "../components/doc/ExportSheet";
@@ -271,6 +272,7 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
         }
         actions={
           <>
+            <BatchSuggestButton appId={appId} doc={doc} dirty={dirty} onShowSuggestions={() => setPanel("ai")} />
             <Button size="sm" onClick={() => setExporting(true)} disabled={!doc.current_revision}>
               <Download size={14} /> 내보내기
             </Button>

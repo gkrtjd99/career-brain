@@ -134,6 +134,8 @@ class Job(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     last_error: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # c0023: 집을 때마다 새로 정하는 lease 값 (``claim_job``). 결과 저장 때 이 worker의 lease인지 확인한다
+    lease_token: Mapped[UUID | None] = mapped_column(default=None)
 
 
 class ModelCall(Base):

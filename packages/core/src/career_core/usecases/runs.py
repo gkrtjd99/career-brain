@@ -12,6 +12,9 @@
 - 비용(c0016): ``StepContext.model``은 장부(``model_calls``) 행에 실행 ID·단계를 붙인다. 실행 비용은
   단계를 저장할 때마다 그 장부 행에서 다시 계산한다(``cost_from_ledger``). 단계 도중 worker가 죽어
   그 시도의 비용이 실행에 더해지지 못했어도, 재개 때(그리고 다음 저장 때) 장부에서 맞춰진다.
+- lease 소유 확인(c0023): worker가 실행 행에 쓰는 트랜잭션은 먼저 작업 행을 잠그고 이 worker가 아직
+  lease를 쥐고 있는지 본다(``jobs.lease.guard_lease``: 같은 ``attempts``·``lease_token``, 안 지난
+  ``locked_until``). lease를 잃은 옛 worker의 단계 결과(위치·결과·상태·사건)는 버려진다.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from career_core.domain.runs import (
     wait_seconds,
 )
 from career_core.domain.workspace import ScopePermissionPolicy, scopes_for_role
+from career_core.jobs.lease import guard_lease
 from career_core.llm.types import ModelCallError, ModelDenied, ModelRequest, ModelResult
 from career_core.ports import ActorContext, PermissionPolicy
 from career_core.usecases.brain import NotFound
@@ -509,6 +513,8 @@ async def process_run(deps: RunDeps, ws: UUID, run_id: UUID) -> StepOutcome:
     """작업 큐 handler. 끝·승인 대기·중단이면 done, 한도 대기면 retry_after."""
     db = deps.db
     async with db.workspace_session(ws) as s:
+        # 작업 행 → 실행 행 순서로 잠근다 (lease 확인, 모든 쓰기 트랜잭션에서 같은 순서)
+        await guard_lease(s, run_id)
         run = await _lock(s, run_id)
         if run is None or run.status not in (RunStatus.QUEUED, RunStatus.RUNNING):
             return StepOutcome(done=True)
@@ -537,6 +543,7 @@ async def process_run(deps: RunDeps, ws: UUID, run_id: UUID) -> StepOutcome:
     wf = deps.registry().get(workflow_name)
     while True:
         async with db.workspace_session(ws) as s:
+            await guard_lease(s, run_id)
             run = await s.get(Run, run_id)
             if run.status != RunStatus.RUNNING:
                 return StepOutcome(done=True)
@@ -574,12 +581,15 @@ async def process_run(deps: RunDeps, ws: UUID, run_id: UUID) -> StepOutcome:
         except Exception as exc:
             # 예상 못 한 오류: 사유를 남기고 작업 큐의 재시도에 맡긴다 (같은 위치부터 다시)
             async with db.workspace_session(ws) as s:
+                await guard_lease(s, run_id)
                 run = await _lock(s, run_id)
                 await _add_cost(s, run, ctx)
                 await add_event(s, run, RunEventKind.ERROR, code=type(exc).__name__)
             raise
 
         async with db.workspace_session(ws) as s:
+            # lease를 잃은 worker(오래 멈췄던 프로세스 등)의 단계 결과는 여기서 버려진다 (LeaseLost → 되돌림)
+            await guard_lease(s, run_id)
             run = await _lock(s, run_id)
             await _add_cost(s, run, ctx)
             if failure is not None:

@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { ErrorText } from "./common";
 
-const ACCEPT = ".pdf,.png,.jpg,.jpeg,.txt,.md,.html,application/pdf,image/png,image/jpeg,text/plain,text/markdown,text/html";
+const ACCEPT =
+  ".pdf,.docx,.png,.jpg,.jpeg,.txt,.md,.html,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg,text/plain,text/markdown,text/html";
 const PARSE_DONE = new Set(["complete", "partial", "failed"]);
 const EXTRACT_DONE = new Set(["complete", "partial", "failed"]);
 
@@ -19,7 +20,7 @@ const PARSE_LABEL: Record<string, string> = {
 };
 
 const UPLOAD_ERROR: Record<string, string> = {
-  unsupported_type: "PDF·PNG·JPEG·텍스트·Markdown·HTML만 올릴 수 있습니다.",
+  unsupported_type: "PDF·DOCX·PNG·JPEG·텍스트·Markdown·HTML만 올릴 수 있습니다.",
   mime_mismatch: "파일 내용과 확장자가 맞지 않습니다.",
   empty: "빈 파일입니다.",
   too_large: "파일이 너무 큽니다.",
@@ -108,7 +109,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
               className="h-auto py-1.5"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-            <p className="mt-1 text-xs text-muted">PDF, PNG, JPEG, 텍스트, Markdown, HTML</p>
+            <p className="mt-1 text-xs text-muted">PDF, DOCX, PNG, JPEG, 텍스트, Markdown, HTML</p>
           </div>
           <div>
             <Label htmlFor="up-title">제목 (선택)</Label>

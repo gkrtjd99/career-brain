@@ -40,7 +40,14 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 
   회귀 시험 `test_jobs.py::test_heartbeat_keeps_the_lease_during_a_cpu_heavy_parse`: lease 1초·heartbeat 0.25초로 2.5초 걸리는 동기 파서(파싱 작업)를 돌리는 사이, 다른 worker가 0.2초마다 `claim_job`을 해도 집지 못한다. 대조 시험은 같은 파서를 루프에서 바로 돌리면 lease를 잃는 것을 확인한다.
 - worker가 단계 도중에 죽으면(heartbeat도 멈춤) lease가 지난 뒤 다른 worker가 다시 집는다. 실행이 `running`인 채로 집히면 `resumes`를 하나 올리고 `resumed` 사건을 남긴 뒤 **그 단계부터** 다시 한다. 끝난 단계는 다시 하지 않는다.
-- 늦게 끝난 옛 worker(lease를 잃은 뒤, 예: 오래 멈춰 있던 프로세스)는 작업 행의 `attempts`가 자기가 집을 때와 다르면 결과를 기록하지 않는다 (새 주인의 상태를 덮지 않음).
+- 늦게 끝난 옛 worker(lease를 잃은 뒤, 예: 오래 멈춰 있던 프로세스)는 결과를 기록하지 않는다 (새 주인의 상태를 덮지 않음). c0023부터 **실행 단계 저장 자체**도 막는다:
+  - `claim_job`이 집을 때마다 새 `jobs.lease_token`(uuid)을 준다. worker는 집은 행(`job_id`·`target_id`·`attempts`·`lease_token`)을 문맥 변수 `Lease`(`jobs/lease.py`)에 둔다.
+  - `usecases/runs.py`는 실행 행을 잠그기 전에 **언제나** `guard_lease`를 부른다 (첫 세션·단계 루프·예외 기록·단계 저장). 작업 행을 `FOR UPDATE`로 잡고 `status = 'running'`, 같은 `attempts`, 같은 `lease_token`, `locked_until > now()`인지 본다. 아니면 `LeaseLost` → 그 트랜잭션은 롤백되고 worker는 작업 행을 건드리지 않고 끝낸다.
+  - `attempts`만으로는 부족하다: 대기(`wait`)는 `attempts`를 0으로 되돌리므로 잃은 worker와 다음 주인의 `attempts`가 같을 수 있다 (ABA). `lease_token`은 집을 때마다 새로 만든다.
+  - lease가 **지났지만 아무도 다시 집지 않은** 경우도 저장하지 않는다. 작업은 `running`으로 남아 다음 worker가 다시 집고 그 단계부터 한다 (그 사이 장부의 비용은 c0016 방식으로 다시 센다).
+  - 잠금 순서는 어디서나 작업 행 → 실행 행이다 (heartbeat는 작업 행만). worker 밖(시험·도구가 usecase를 바로 부를 때)에는 문맥 변수가 없어 검사하지 않는다.
+  - heartbeat·끝 기록(`_owned`)도 같은 `lease_token`일 때만 쓴다.
+  - 시험 `test_documents_runs_web.py`: 두 worker — 옛 worker가 단계 도중 lease를 잃고 새 worker가 집어 끝낸 뒤 옛 worker가 깨어나도 실행·위치·비용·사건이 그대로다. `attempts`가 같고 토큰만 다른 경우, lease가 지나기만 한 경우도 본다.
 - 따라서 단계의 부수효과는 멱등이어야 한다. 쓰는 방법:
   - usecase 자체의 중복 방지 (공고 정규화 URL, 지원마다 제출본 1건)
   - 멱등 키 `ctx.effect_key(name)` = `run:{run_id}:{name}` (승인 요청 등)
@@ -60,6 +67,15 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
   그래서 단계 도중 죽은 시도가 장부에 남긴 호출도 run 비용에 들어가고, lease를 잃은 옛 worker가 늦게 저장해도 두 번 더해지지 않는다.
 - 재개 때(`resumed` 사건) 먼저 장부와 맞추고 바뀐 만큼을 사건 데이터 `{"step", "reconciled": {"model_calls", "cost_usd"}}`에 남긴다(죽은 시도가 쓴 비용).
 - c0016 전 실행(`cost_from_ledger = false`, migration 기본값)은 예전처럼 이번 시도 값을 더한다. 장부 행에 실행 표시가 없으므로 다시 세지 않는다.
+  **그대로 둔다 (c0023에서 결정).** 옛 실행의 장부 행에는 `run_id`가 없어 다시 셀 근거가 없고, 두 번 더하던 경로(lease를 잃은 옛 worker의 늦은 저장)는 이제 lease 검사가 막는다. 남는 차이는 옛 실행에서 단계 도중 죽은 시도의 비용이 빠지는 것뿐이고, 공간 월 합계는 장부 기준이라 영향이 없다.
+
+### 시작 전 예상 비용 (c0023)
+
+`GET /core/runs/workflows/{workflow}/estimate?units=` (`runs.read`, `usecases/run_estimates.py`). 모델을 부르는 일괄 workflow(`suggest_document_batch`·`interview_question_batch`)만, 없거나 모델을 안 쓰는 workflow는 404.
+
+- 가격표로 미리 계산하지 않는다 (글·응답 길이를 모른다). **이 공간에서 같은 workflow를 돌린 지난 실행** 20개(호출이 있었던 것)의 `cost_usd` 합 ÷ `model_calls` 합 = 호출 1회 평균, × 이번 호출 수(단위 하나당 1회).
+- 지난 실행이 없으면 `estimate_usd = null` — 화면은 호출 수만 보인다. 단가 미상 호출이 섞였으면 `cost_unknown = true`(평균은 아는 비용만, 하한).
+- 구독 프록시 정가 환산액은 `runs.cost_usd`에 없으므로 들어가지 않는다. 예상은 약속이 아니다: 월 예산·단가 미상 거부는 실행 때 게이트웨이가 그대로 지킨다.
 
 ## 외부 한도 (§17.14)
 
@@ -118,6 +134,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 |---|---|
 | `GET /core/runs/workflows` | `runs.read` |
 | `POST /core/runs` `{workflow, input, idempotency_key?}` → 202 | `runs.start` + workflow의 `action` |
+| `GET /core/runs/workflows/{workflow}/estimate?units=` (c0023, 위 "시작 전 예상 비용") | `runs.read` |
 | `GET /core/runs?status=&limit=` · `GET /core/runs/{id}` · `GET /core/runs/{id}/events?after=` | `runs.read` |
 | `POST /core/runs/{id}/cancel` · `/interrupt` · `/resume` | `runs.control` |
 | `POST /core/approvals` `{action, target_id, payload, payload_hash?, reason?, expires_in_minutes?, idempotency_key?}` | `approvals.request` |
@@ -167,6 +184,14 @@ dispatcher(worker의 job kind 'outbox'): claim (SKIP LOCKED) → 바깥에 보�
 - 바깥 쪽 멱등: 받는 쪽이 멱등 키를 받으면 `dedupe_key`를 넘긴다. 못 받으면 "최소 한 번"이 한계이므로 화면에 그 사실을 적는다.
 - 승인과의 관계: 바깥 전송이 승인 대상이면 `consume_approval`과 outbox INSERT가 같은 트랜잭션이어야 한다 (승인을 쓰고 안 보내거나, 안 쓰고 보내는 경우 없음).
 - 내보내기: 보낸 기록은 내보내고, 대기 중인 것은 복원 때 다시 보내지 않도록 `pending_work`처럼 따로 다룬다.
+
+## 웹에서 시작 (c0023)
+
+- 문서 화면 "일괄 수정안" → `suggest_document_batch` (저장한 revision 기준, 문단 고르기 최대 50, 요청 500자). 편집이 저장되지 않았으면 시작하지 않는다.
+- 브레인 화면 "일괄 인터뷰" → `interview_question_batch` (경험 최대 20, 경험마다 질문 1–5개).
+- 둘 다 시작 전 예상 비용을 보이고, 시작 뒤에는 실행을 2초마다 다시 읽어 진행(`position`의 대상 목록·`next`)·비용·대기/실패 이유를 보이며 시스템 화면 `/system?run=`으로 잇는다 (멈춤·취소·사건은 거기서).
+- 멱등 키는 `web:<종류>:<창마다 무작위>:<입력 해시>` — 같은 창에서 응답을 못 받고 다시 눌러도 같은 실행이고, 입력을 바꾸면 새 실행이다.
+- 결과 글은 실행 기록에 없다. 수정안은 문서의 AI 수정안 탭, 질문은 각 경험의 인터뷰 탭에서 본다 (`GET /core/interviews?run_id=`로 이 실행의 세션을 찾는다).
 
 ## 하지 않은 것
 

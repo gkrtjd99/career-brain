@@ -33,7 +33,8 @@ apps/personal-web/src/
   lib/dates.ts    날짜 표시 도우미: 공간 표시 시간대(설정 "작업 공간")로 날짜·시각·D-day·datetime-local 변환 (AppShell이 설정을 읽어 정한다)
   components/     AppShell(메뉴), ClaimItem, ClaimPicker(검색으로 주장 고르기), InterviewPanel, SpanSheet,
                   SourceSheet(검색 결과 → 원본 블록), UploadSheet, DdayBadge
-  components/doc/ BlockEditor(문단 편집), ChecksPanel(품질 검사), SuggestionsPanel(AI 수정안)
+  components/doc/ BlockEditor(문단 편집), ChecksPanel(품질 검사), SuggestionsPanel(AI 수정안), BatchSuggestSheet(문단별 일괄 수정안, c0023)
+  components/runs/ RunParts(예상 비용·실행 진행·멱등 키), InterviewBatchSheet(경험별 일괄 인터뷰 질문, c0023)
   components/study/ parts(응시·오답 기록, 복습 카드)
   components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전)
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
@@ -47,7 +48,7 @@ apps/personal-web/src/
 | 경로 | 내용 |
 |---|---|
 | `/` 오늘 | 마감 임박(저장 공고, 14일 이내 D-day)과 지원별 안 쓴 문항 → 오늘 복습(오답) → 확인 대기(추출 경험, 공고 변경, 미확정 공고, 가져오기 실패·목록 페이지, 진행 중) → 최근 활동(주장·공고·가져오기·문서 저장·응시, 시간순). 모델 비용은 예산 80% 이상·오류가 있을 때만 |
-| `/brain` | 경험 목록(확인 필요/확인됨 수), 경험 추가, 자료 올리기(업로드 → 읽기 상태 → 경험 추출 요청 → 결과), 올린 자료 목록(읽기·추출 상태, 추출 요청) |
+| `/brain` | 경험 목록(확인 필요/확인됨 수), 경험 추가, 일괄 인터뷰(c0023), 자료 올리기(업로드 → 읽기 상태 → 경험 추출 요청 → 결과), 올린 자료 목록(읽기·추출 상태, 추출 요청) |
 | `/brain/:id` | 주장 탭: 확인 대기/확인함/이견/보관, 맞아요(기여 미상이면 본인·팀 선택)·고치기·사실과 달라요·보관, 원문 근거 패널. 위키 탭: Markdown 보기·복사·내려받기. 인터뷰 탭: 서버의 세션 목록(최근 세션 기본, 여러 개면 고르기)·질문·답변·AI 보충 질문 |
 | `/search` | 검색어, 종류(주장·원문·인터뷰 답변) 필터, 키워드/의미 모드와 이유, 원문 결과 → 원본 보기(앞뒤 2블록, 일치 범위 강조) |
 | `/postings` | URL 여러 개 붙여넣기(최대 20), 요청 결과, 상태별 목록, 가져오는 중이면 자동 새로고침 |
@@ -102,7 +103,21 @@ O10에서 비어 있던 것을 작은 읽기 경로로 더했다 (migration 없�
 | `POST /core/applications/{id}/documents/{doc}/count` | `applications.read` | 저장 전 글자/바이트 수(저장과 같은 정규화) |
 | `GET /core/study/mistakes?status=` | `study.read` | 오답 목록(다음 복습순) |
 
+c0023에서 더한 것: `GET /core/runs/workflows/{workflow}/estimate?units=`(`runs.read`, 일괄 실행 예상 비용 — `runs.md`), `GET /core/interviews?run_id=`(이 일괄 실행이 질문을 만든 세션).
+인터뷰 질문에 `run_id`(그 질문을 만든 일괄 실행, 직접 요청·정해진 질문은 `null`), 인터뷰 세션 목록에 `run_ids`(질문을 만든 실행들, 오래된 것부터). 숨김 글 검사 코드 `hidden_text_same_color`·`hidden_text_annotation`·`annotation_text`.
+
 함께 바뀐 응답: 공고 목록에 `created_at`·`saved_at`, 지원 목록에 `questions`·`unwritten`, 검색의 원문 결과에 `block_id`·`parse_run_id`·`ordinal`·`match_start`·`match_end`.
+
+## 웹에서 일괄 실행 시작 (c0023)
+
+- 문서 화면(지원 문서, 편집 가능할 때) 머리의 "일괄 수정안" → 시트: 문단 체크(기본 전부, 최대 50), 요청(선택, 500자), 예상 비용, 시작. 저장하지 않은 편집이 있으면 시작 버튼이 꺼지고 먼저 저장하라고 알린다
+  (실행은 저장한 revision 기준이고, 실행 중에 저장하면 남은 문단은 멈춘다). 끝나면 수정안 목록을 다시 읽고 "AI 수정안 탭에서 보기"로 넘어간다. 수정안 적용은 여전히 하나씩 사람이 고른다.
+- 브레인 화면 머리의 "일괄 인터뷰" → 시트: 경험 체크(확인 필요가 있는 경험이 기본, 최대 20), 경험마다 질문 수 1–5(기본 3), 예상 비용, 시작. 끝나면 이 실행의 세션 목록(답 수)을 보이고 각 경험의 인터뷰 탭으로 잇는다.
+- 진행 카드(`RunProgress`): 상태 배지, 대상 n/전체, 진행 막대, 비용·호출 수, 대기·실패 이유, 시스템 화면 실행 상세 링크. 끝날 때까지 2초마다 다시 읽는다 (SSE는 쓰지 않음).
+- 예상 비용(`CostEstimate`): 호출 수와, 지난 실행이 있으면 평균 단가 × 호출 수. 없으면 "예상 없음"과 실행 뒤 시스템 화면에서 실제 비용을 보라는 안내.
+- 인터뷰 탭: 일괄 실행이 만든 세션 칩에 "일괄", 그 질문 카드에 "일괄 <실행 앞 8자>" 배지(시스템 화면 링크). 실행이 만든 질문이 있으면 "실행별로 묶기" — 정해진 질문 / 직접 요청한 AI 질문 / 실행별로 나눠 보인다.
+- 자료 올리기는 DOCX도 받는다 (`UploadSheet` 의 accept·안내).
+- 375px에서 두 시트·진행·인터뷰 묶기를 합성 데이터로 확인했다 (가로 넘침 없음).
 
 ## 알려진 한계
 
