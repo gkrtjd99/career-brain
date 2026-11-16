@@ -74,11 +74,14 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 |---|---|---|
 | `search_brain` | `search.read` | `GET /core/search` |
 | `list_experiences` · `get_experience` · `list_pending_claims` · `get_evidence` | `brain.read` | `GET /core/experiences…`, `/source-spans/{id}` |
+| `start_interview` | `brain.write` | `POST /core/interviews` |
+| `get_interview` (`session_id` 또는 경험의 최근 인터뷰) | `brain.read` | `GET /core/interviews…` |
 | `add_interview_answer` | `brain.write` | `POST /core/interview-questions/{id}/answers` |
 | `save_job_urls` (최대 10개, URL 500자 이하) | `jobs.write` | `POST /core/job-postings` |
 | `get_posting` (`include_text`로 최신 본문) | `jobs.read` | `GET /core/job-postings/{id}` |
 | `coverage` | `study.read` | `GET /core/study/postings/{id}/coverage` |
 | `get_application` | `applications.read` | `GET /core/applications/{id}` |
+| `check_application` (글자·바이트 수와 검사 결과는 이것만 쓴다) | `applications.read` | `GET /core/applications/{id}/checks` |
 | `propose_document_suggestion` | `documents.ai` (egress) | `POST …/documents/{id}/suggestions` |
 | `study_record_attempt` | `study.write` | `POST /core/study/attempts` |
 | `approval_request` · `approval_status` | `approvals.request` · `approvals.read` | `POST/GET /core/approvals` |

@@ -7,9 +7,21 @@
 1. **바로 설치해서 쓰는 개인용 제품** — `apps/personal-web`(React) + `apps/personal-api`(FastAPI) + PostgreSQL + worker
 2. **공통 엔진** — `packages/core`(Python `career-core`), `packages/ui`, `packages/client`, `skills/`
 
-> 상태: 개발 중 (O01–O06 + 설치 패키징). 설계는 [docs/architecture/plan.md](docs/architecture/plan.md).
+> 상태: 1차 범위(O01–O12) 구현 완료, 아직 정식 릴리스 전. 설계는 [docs/architecture/plan.md](docs/architecture/plan.md).
 
-*A self-hosted career "second brain": sources, experiences/claims with evidence, search, job postings. Runs as one Python process + PostgreSQL. Install from this GitHub repo (no registry packages). Docs are in Korean; commands below are the quick path.*
+*A self-hosted career "second brain": sources with evidence, experiences and claims, interviews, search, job postings, applications with quality checks, study tracking, runs/approvals and an MCP server for AI clients. Runs as one Python process + PostgreSQL. Install from this GitHub repo (no registry packages). Docs are in Korean; commands below are the quick path.*
+
+## 무엇을 하나
+
+| 영역 | 하는 일 |
+|---|---|
+| 브레인 | 이력서·문서를 올리면 파싱해 원문 위치까지 남긴다. 경험·주장(claim)은 원문 인용 근거와 함께 저장되고, 사람이 확인해야 사실이 된다. 인터뷰형 질문으로 경험을 정리한다. |
+| 검색 | 키워드(pg_trgm) 기본, 선택으로 의미 검색(OpenAI 또는 로컬 임베딩). 공간 밖 결과 0건. |
+| 공고 | 붙여넣은 URL만 가져온다 (내부 주소 차단, 쿠키 없음). 구조화 데이터 → 채용 시스템 어댑터 → 인용 검증 LLM 순으로 추출. 무변경 재수집은 버전을 만들지 않고, 실패는 마감으로 처리하지 않는다. |
+| 지원·문서 | 문항별 문서, 버전 충돌 409, 근거 연결, 코드가 센 글자·바이트 수, 범용·다른 회사 문장·근거 없는 서술·요건 가시성·조작 의심 검사, 사실을 바꾸지 못하는 AI 수정안, 불변 제출본. |
+| 학습 | 공고 요건 → 학습 항목·시험 → 시도·오답 → 복습 일정. 학습은 경력으로 바뀌지 않는다. |
+| 실행·승인·MCP | 재시작 후 재개되는 작업, 사람만 하는 승인(대상이 바뀌면 무효), AI 클라이언트용 MCP 도구 20개 (웹과 같은 권한 검사). [mcp.md](docs/architecture/mcp.md) · 스킬: [skills/](skills/) |
+| 운영 | 한 프로세스 실행, 공간 내보내기·복원(개수·해시 검증), 모델 호출 장부·월 예산. |
 
 ## 설치 (Install)
 
@@ -38,7 +50,7 @@ npm ci && npm run build                                  # 선택: 웹 화면
 uv run --no-sync personal-api serve                      # http://127.0.0.1:8000
 ```
 
-**업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ... && personal-api migrate`. 그 전에 `pg_dump` 백업. 전체 내보내기·복원(O11)은 아직 없다.
+**업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ... && personal-api migrate`. 그 전에 `pg_dump` 백업 또는 `personal-api export` ([backup.md](docs/operations/backup.md)).
 
 **검색 임베딩**: 기본은 키워드 검색만(가장 가볍다). 작은 서버는 OpenAI `text-embedding-3-small`, 자료를 밖으로 보내지 않으려면 로컬 모델(이미지 `CAREER_EXTRAS=local-embed`, 사용 중 RAM ~1.6GB). [search.md](docs/architecture/search.md)
 
