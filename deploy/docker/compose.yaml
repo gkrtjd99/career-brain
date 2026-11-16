@@ -1,0 +1,113 @@
+# career-brain 서버 배포 (앱 1개 + PostgreSQL/pgvector 1개). 작은 서버(1~2GB RAM) 기준.
+#
+#   cd deploy/docker
+#   cp .env.example .env && cp app.env.example app.env     # 비밀번호·키를 채운다 (git 제외)
+#   mkdir -p config && cp ../../models.example.toml config/models.toml   # 선택: 모델 설정
+#   docker compose up -d --build                           # migrate가 먼저 한 번 돌고 app이 뜬다
+#   docker compose run --rm app bootstrap                  # 첫 설치 때 한 번: API 토큰 출력
+#
+# 문서: docs/operations/install.md. 인터넷에 열 때는 앞에 TLS 리버스 프록시(Caddy 등)를 둔다.
+name: career-brain
+
+x-app: &app
+  image: career-brain:local
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+    args:
+      EXTRAS: ${CAREER_EXTRAS:-}
+  init: true
+  read_only: true            # 쓰기는 /data 볼륨과 /tmp(tmpfs)만
+  tmpfs:
+    - /tmp:size=64m
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: career
+      POSTGRES_DB: career_brain
+      POSTGRES_PASSWORD: ${CAREER_DB_OWNER_PASSWORD:?set CAREER_DB_OWNER_PASSWORD in deploy/docker/.env}
+      # initdb/10-app-roles.sh 가 처음 한 번 앱 계정(career_api)을 이 비밀번호로 만든다.
+      CAREER_API_DB_PASSWORD: ${CAREER_API_DB_PASSWORD:?set CAREER_API_DB_PASSWORD in deploy/docker/.env}
+    # 작은 서버용 설정. 메모리가 넉넉하면 shared_buffers·effective_cache_size를 RAM의 25%·50%로.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${CAREER_PG_SHARED_BUFFERS:-128MB}
+      - -c
+      - effective_cache_size=${CAREER_PG_EFFECTIVE_CACHE:-384MB}
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - jit=off
+      - -c
+      - wal_buffers=4MB
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - random_page_cost=1.1
+    shm_size: 128mb
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    # DB 포트는 기본으로 호스트에 열지 않는다. 호스트에서 직접 붙어야 하면 localhost에만:
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+    healthcheck:
+      # -h 127.0.0.1: 첫 초기화 중의 임시 서버(유닉스 소켓만)를 준비 완료로 오인하지 않는다.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U career -d career_brain"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 배포 명령: 잠금을 잡고 core → personal 순서로 migration. API는 schema를 바꾸지 않는다.
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      CAREER_MIGRATION_DATABASE_URL: postgresql+psycopg://career:${CAREER_DB_OWNER_PASSWORD}@db:5432/career_brain
+
+  app:
+    <<: *app
+    command: ["serve"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    env_file:
+      - path: app.env
+        required: false
+    environment:
+      # 앱은 RLS가 걸리는 앱 계정으로만 접속한다 (소유자 비밀번호는 이 컨테이너에 없다).
+      CAREER_DATABASE_URL: postgresql+psycopg://career_api:${CAREER_API_DB_PASSWORD}@db:5432/career_brain
+    ports:
+      # 기본은 이 서버 안에서만 열린다. 리버스 프록시(TLS)를 같은 서버에 두고 여기로 넘긴다.
+      - "${CAREER_BIND:-127.0.0.1}:${CAREER_HTTP_PORT:-8000}:8000"
+    volumes:
+      - app-data:/data
+      - ./config:/config:ro
+
+volumes:
+  db-data:
+  app-data:

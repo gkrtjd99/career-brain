@@ -90,7 +90,7 @@ PC·모바일 → Caddy → personal-web 정적 파일
 외부 AI → 인증된 MCP → 동일한 core usecases
 ```
 
-상시 컨테이너는 Caddy·API·PostgreSQL·worker를 기본으로 한다. 스케줄러는 worker 계열의 가벼운 루프로 실행하고 동일 주기 작업을 중복 등록하지 않도록 잠근다. 브라우저는 필요 작업에만 켜며 기본 웹 서비스와 분리된 권한으로 실행한다.
+작은 서버에서는 `personal-api serve` 한 프로세스가 API·worker(별도 스레드)·웹 정적 파일을 함께 맡는다 (설치: `docs/operations/install.md`, 언어 선택 근거: `docs/architecture/rust.md`). 상시 컨테이너는 Caddy·API·PostgreSQL·worker를 기본으로 한다. 스케줄러는 worker 계열의 가벼운 루프로 실행하고 동일 주기 작업을 중복 등록하지 않도록 잠근다. 브라우저는 필요 작업에만 켜며 기본 웹 서비스와 분리된 권한으로 실행한다.
 
 ## 6. 공통 업무 모듈
 
@@ -431,6 +431,9 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터, 초안 정리 주기 실행.
 - 웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API 없음, 공고 목록 응답에 생성·저장 시각 없음, 블록 검색 결과에 block_id·위치 없음 (원본 보기 연결 불가).
 - 테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존).
+- 검색: 키워드 질의가 `word_similarity()`를 행마다 계산해 GIN trigram 색인을 못 쓴다. 블록 3.6천 개에서 p50 150ms, 이때 DB CPU 98% (O12 측정). `<%` 연산자로 후보를 색인에서 먼저 줄인다.
+- 운영: API 토큰 폐기·재발급 CLI (`revoke_token`은 있음, 명령 없음).
+- 운영: 유휴 worker의 1초 간격 확인 쿼리를 `LISTEN/NOTIFY` 깨우기로 바꾸기 (worker 수가 늘 때).
 
 ## 확인한 공식 근거
 

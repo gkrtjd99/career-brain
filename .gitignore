@@ -34,3 +34,7 @@ prices.local.toml
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# 배포 설정 (deploy/docker)
+*.env
+deploy/docker/config/

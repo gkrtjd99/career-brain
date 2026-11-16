@@ -12,8 +12,9 @@ from career_core.llm.gateway import ModelGateway
 from fastapi import FastAPI
 
 from personal_api.identity import PersonalTokenResolver
-from personal_api.models import load_config, load_prices
+from personal_api.models import load_config, load_prices, shared_client_factory
 from personal_api.settings import Settings
+from personal_api.web import mount_web, web_dir_from_env
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -33,9 +34,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blobs=LocalBlobStore(settings.blob_dir),
         max_upload_bytes=settings.max_upload_bytes,
         monthly_budget_usd=models.budget.monthly_usd,
-        models=ModelGateway(db, models, load_prices(models)),
+        models=ModelGateway(db, models, load_prices(models), client_factory=shared_client_factory),
     )
     app.include_router(build_router(deps), prefix="/api")
+    mount_web(app, web_dir_from_env())  # 마지막: /api 경로가 먼저 매칭된다
     return app
 
 

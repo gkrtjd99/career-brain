@@ -1,0 +1,169 @@
+# 설치·업데이트·운영 (O12)
+
+career-brain은 GitHub 레포를 받아 직접 실행한다. PyPI·npm·Docker Hub에 올린 패키지는 없다.
+
+```text
+브라우저 ─(TLS 리버스 프록시: Caddy 등)─→ personal-api serve ──→ PostgreSQL 17 + pgvector
+                                         ├ API (/api/...)
+                                         ├ 내장 worker 스레드 (파싱·추출·색인·공고 가져오기)
+                                         └ 웹 앱 정적 파일 (/, SPA)
+```
+
+상시 프로세스는 **앱 1개 + PostgreSQL 1개**다. worker를 따로 띄우고 싶으면 `serve --no-worker` + `worker`.
+
+## 자원 (2026-11-16, Apple Silicon, Docker Desktop arm64, 합성 자료)
+
+| 항목 | 값 |
+|---|---|
+| 이미지 (기본) | 308MB 풀린 크기 / 80MB 내려받기 (python:3.13-slim 자체가 147MB / 46MB) |
+| 이미지 (`EXTRAS=local-embed`) | 500MB / 146MB. 모델 파일(~0.5GB)은 처음 쓸 때 `/data/models`로 받는다 |
+| 이미지 (`EXTRAS=browser`) | 1080MB / 392MB (Chromium headless shell) |
+| 앱 유휴 RSS (`serve`, API+worker) | 약 85~100MB. 유휴 CPU 약 0.4% (1초 간격 작업 확인) |
+| 앱 2개로 나눴을 때 | API 약 93MB + worker 약 83MB |
+| PostgreSQL 유휴 | 약 30~45MB (컨테이너 메모리, shared_buffers 128MB 설정) |
+| 로컬 임베딩 사용 중 | 모델 단독 약 0.9~1.6GB 추가 ([search.md](../architecture/search.md)). API와 worker가 모델 하나를 같이 쓴다 |
+| `/api/core/health` | p50 0.5ms, p95 1.2ms |
+| 키워드 검색 (블록 3,613 + 주장 510) | p50 150ms, p95 225ms. 이때 CPU는 PostgreSQL 98%, 앱 2%. 블록 7,200개에서 p50 275ms (자료 수에 비례: 색인을 못 쓰는 질의, plan §18) |
+| 파싱 처리량 (텍스트 자료 300개) | 약 11초. 그동안 health p50 0.8ms / 최대 1.5ms (worker가 API를 막지 않음) |
+
+1GB RAM 서버에서 기본 구성(키워드 검색 또는 OpenAI 임베딩)이 넉넉히 돈다. 로컬 임베딩은 2~3GB 이상을 권한다.
+
+## 1. 로컬 (uv)
+
+필요한 것: Python 3.13, [uv](https://docs.astral.sh/uv/), Docker(개발용 DB) 또는 pgvector·pg_trgm이 있는 PostgreSQL 17. 웹 화면까지 쓰려면 Node 24.
+
+```bash
+git clone https://github.com/gkrtjd99/career-brain.git && cd career-brain
+uv sync --package personal-api --no-dev            # 실행에 필요한 것만 (로컬 임베딩: --extra local-embed)
+docker compose -f deploy/compose/compose.yaml up -d db   # 127.0.0.1:5432, 개발용 비밀번호
+uv run --no-sync personal-api migrate
+uv run --no-sync personal-api bootstrap            # API 토큰을 한 번만 출력한다. 안전한 곳에 보관
+npm ci && npm run build                            # 선택: apps/personal-web/dist
+uv run --no-sync personal-api serve                # http://127.0.0.1:8000 (API + worker + 웹)
+```
+
+- 레포 루트에서 실행하면 `apps/personal-web/dist`가 있을 때 웹 앱을 같이 내준다. 다른 폴더는 `CAREER_WEB_DIR`.
+- 개발(`uv sync`, `uv run pytest`, `npm run dev`)은 [README](../../README.md#개발).
+- 개발용 DB(`deploy/compose`)의 비밀번호는 공개된 값이다. 이 기계 밖으로 포트를 열지 않는다.
+
+## 2. Docker (서버)
+
+필요한 것: Docker Engine + Compose v2. 레포만 받으면 이미지는 서버에서 빌드한다.
+
+```bash
+git clone https://github.com/gkrtjd99/career-brain.git && cd career-brain/deploy/docker
+cp .env.example .env              # CAREER_DB_OWNER_PASSWORD, CAREER_API_DB_PASSWORD (openssl rand -hex 24)
+cp app.env.example app.env        # 모델 키 등 (선택)
+mkdir -p config && cp ../../models.example.toml config/models.toml   # 선택: 모델 설정
+docker compose up -d --build      # db → migrate(한 번) → app
+docker compose run --rm app bootstrap   # 첫 설치 때 한 번: API 토큰 출력
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/api/core/me
+```
+
+- `.env`는 compose 값 채우기용(DB 비밀번호·포트·빌드 옵션), `app.env`는 앱 환경변수(모델 키)다. DB 소유자 비밀번호는 app 컨테이너에 들어가지 않는다.
+- 빌드 옵션: `.env`의 `CAREER_EXTRAS=local-embed` (로컬 임베딩), `browser` (동적 공고 렌더링, `app.env`에 `CAREER_BROWSER_FETCH=1`도). 쉼표로 둘 다.
+- 자료: 볼륨 `db-data`(PostgreSQL), `app-data`(`/data`: 업로드 원본, 로컬 모델 파일). 설정: `./config` → `/config` (읽기 전용).
+- 운영 명령: `docker compose run --rm app models`, `... app usage --by model` (`app.env`에 `CAREER_API_TOKEN`), `... app reindex`.
+- 로그: `docker compose logs -f app`. 접근 로그를 끄려면 `CAREER_ACCESS_LOG=0`.
+
+### 컨테이너 보안 기본값
+
+- 이미지: 비root 사용자(uid 10001), 코드·의존성은 root 소유(읽기 전용), 쓰기는 `/data`만. `.dockerignore`가 허용 목록이라 `.env`·`models.toml`·`data/`·`.git`은 build context에 들어가지 않는다.
+- compose: `read_only` 루트 파일시스템, `cap_drop: [ALL]`, `no-new-privileges`, `init`.
+- 앱 포트는 기본 `127.0.0.1:8000`(서버 안에서만), DB 포트는 호스트에 열지 않는다.
+- 앱은 RLS가 걸리는 `career_api` 계정으로만 접속하고, migration만 소유자 계정을 쓴다.
+
+### 인터넷에 열기: TLS 리버스 프록시
+
+앱은 HTTPS를 직접 하지 않는다. 같은 서버에 Caddy·nginx 등을 두고 `127.0.0.1:8000`으로 넘긴다. Caddy 예시 (`/etc/caddy/Caddyfile`):
+
+```caddy
+career.example.com {
+    encode zstd gzip
+    request_body {
+        max_size 25MB          # CAREER_MAX_UPLOAD_MB(기본 20)보다 조금 크게
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+    }
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+- 프록시를 컨테이너로 같은 compose 네트워크에 두면 `CAREER_BIND`는 그대로 두고 프록시에서 `app:8000`으로 보낸다.
+- 공개 주소에서 쓰는 API 토큰은 비밀번호처럼 다룬다. 토큰 폐기·재발급 명령은 아직 없다 (plan §18 백로그). 세션 로그인·CSRF는 웹 로그인 작업에서 다룬다 (plan §14).
+- 방화벽에서 80/443만 연다.
+
+## 3. 모델 설정
+
+`models.toml`(로컬: 레포 루트, Docker: `deploy/docker/config/models.toml`)에서 엔드포인트·라우트·월 예산을 정한다. 키는 파일에 넣지 않고 환경변수(`.env` / `app.env`)에 둔다. 예시: [models.example.toml](../../models.example.toml), 자세히: [models.md](../architecture/models.md).
+
+검색 임베딩(`routes.embed`)은 셋 중 하나:
+
+| 선택 | 설정 | 자원 | 언제 |
+|---|---|---|---|
+| 없음 (기본) | `embed` 줄을 두지 않음 | 추가 없음 | 가장 가볍다. 키워드 검색만 |
+| OpenAI API | `embed = "openai/text-embedding-3-small"` + `OPENAI_API_KEY` | 로컬 메모리 거의 없음, $0.02/1M 토큰 | **작은 서버 권장** |
+| 로컬 (fastembed) | `[endpoints.embed-local] preset = "local"` + `embed = "embed-local/minishlab/potion-multilingual-128M"` | 이미지 +190MB, 사용 중 RAM ~1.6GB | 자료를 밖으로 보내지 않을 때 |
+
+- 바꾼 뒤에는 `personal-api reindex` (Docker: `docker compose run --rm app reindex`)로 다시 색인한다.
+- 로컬 모델은 `CAREER_EMBED_IDLE_SECONDS`(기본 300초) 동안 안 쓰면 메모리에서 내린다. 스레드 수는 `CAREER_EMBED_THREADS`(기본 2).
+- `personal-api models`로 설정 상태를 보고(키 값은 출력하지 않음), `personal-api ping`으로 연결을 확인한다(과금됨).
+
+## 4. 업데이트
+
+```bash
+git pull                                  # 태그를 쓰면: git fetch --tags && git checkout vX.Y.Z
+# 로컬
+uv sync --package personal-api --no-dev && uv run --no-sync personal-api migrate && npm ci && npm run build
+# Docker (migrate 서비스가 app보다 먼저 한 번 돈다)
+cd deploy/docker && docker compose up -d --build
+docker image prune -f                     # 옛 이미지 정리
+```
+
+- migration은 배포 명령(`personal-api migrate`)으로만 실행한다. API는 시작할 때 schema를 바꾸지 않는다. 여러 번 실행해도 잠금 아래 순서대로 한 번만 적용된다.
+- 업데이트 전에 백업한다 (아래).
+
+## 5. 백업·복원
+
+전체 내보내기·복원 기능(O11)은 아직 없다. 그때까지는 DB 덤프 + 원본 파일 볼륨을 같이 보관한다.
+
+```bash
+cd deploy/docker
+docker compose exec -T db pg_dump -U career -d career_brain -Fc > career-$(date +%F).dump
+docker run --rm -v career-brain_app-data:/data:ro -v "$PWD":/backup busybox \
+  tar czf /backup/career-data-$(date +%F).tar.gz -C /data blobs
+```
+
+- 실행 중인 DB 데이터 폴더를 그대로 복사하지 않는다 (plan §14). `pg_dump`를 쓴다.
+- 덤프와 원본은 서버 밖에 암호화해서 둔다. 덤프에는 API 토큰 해시와 개인 자료가 들어 있다.
+- 복원 예시: 빈 볼륨으로 `docker compose up -d db` → `docker compose exec -T db pg_restore -U career -d career_brain --clean --if-exists < career-YYYY-MM-DD.dump` → 원본 tar를 `app-data`에 풀기 → `docker compose up -d`.
+
+## 6. 작은 서버 조정
+
+- PostgreSQL: `deploy/docker/compose.yaml`의 `command`. 기본은 1GB 서버용(`shared_buffers=128MB`, `max_connections=40`, 병렬 질의·JIT 끔). RAM이 넉넉하면 `.env`의 `CAREER_PG_SHARED_BUFFERS`(RAM 25%)와 `CAREER_PG_EFFECTIVE_CACHE`(RAM 50%)를 올린다.
+- 작업 확인 간격: `CAREER_WORKER_POLL_SECONDS`(기본 1초). 늘리면 유휴 쿼리가 줄고 작업 시작이 늦어진다.
+- 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20).
+- 앱 프로세스는 하나로 둔다 (`--workers` 없음). 개인 자료 규모에서는 DB가 먼저 일하고 앱 CPU는 거의 쓰지 않는다. 판단 근거: [rust.md](../architecture/rust.md).
+
+## 환경변수 요약
+
+| 변수 | 기본 | 뜻 |
+|---|---|---|
+| `CAREER_DATABASE_URL` | 개발 DB (`career_api`) | 앱 접속 (RLS 적용 계정) |
+| `CAREER_MIGRATION_DATABASE_URL` | 개발 DB (`career`) | migration 전용 소유자 계정 |
+| `CAREER_HOST` / `CAREER_PORT` | `127.0.0.1` / `8000` (이미지: `0.0.0.0`) | `serve` 바인딩 |
+| `CAREER_EMBEDDED_WORKER` | `1` | `0`이면 `serve`는 API만 |
+| `CAREER_WORKER_POLL_SECONDS` | `1` | 대기 작업 확인 간격 |
+| `CAREER_WEB_DIR` | `apps/personal-web/dist` (있을 때) | 웹 정적 파일. 빈 값이면 끔 |
+| `CAREER_BLOB_DIR` | `data/blobs` (이미지: `/data/blobs`) | 업로드 원본 |
+| `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |
+| `CAREER_MODEL_DIR` | – (이미지: `/data/models`) | 로컬 임베딩 모델 파일 |
+| `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
+| `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
+| `CAREER_LOG_LEVEL` / `CAREER_ACCESS_LOG` | `info` / `1` | 로그 |
+| `CAREER_ENV_FILE` | `.env` | 로컬 실행 때 읽는 키 파일 (셸 변수가 우선) |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | `X-Forwarded-*`를 믿을 프록시 주소 (uvicorn) |
