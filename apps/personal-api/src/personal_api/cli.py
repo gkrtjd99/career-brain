@@ -23,12 +23,18 @@ from career_core.adapters.blobstore import LocalBlobStore
 from career_core.adapters.parsers import default_local_parsers
 from career_core.db import Database
 from career_core.db.migrate import upgrade
-from career_core.jobs.worker import parsing_handlers, run_once, run_until_idle
+from career_core.jobs.worker import (
+    extraction_handlers,
+    parsing_handlers,
+    run_once,
+    run_until_idle,
+)
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
 from career_core.llm.config import BILLING_METERED
 from career_core.llm.pricing_check import XAI_LANGUAGE_MODELS_URL, check_prices, compare_xai
 from career_core.policies import ProviderEgressPolicy
 from career_core.ports import ActorContext
+from career_core.usecases.extraction import ExtractionDeps
 from career_core.usecases.parsing import ParsingDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
@@ -49,7 +55,10 @@ async def _worker(settings: Settings, *, once: bool) -> None:
         egress=ProviderEgressPolicy({}),  # 외부 제공자 미설정 = 외부 전송 없음
         local_parsers=default_local_parsers(),
     )
-    handlers = parsing_handlers(deps)
+    handlers = {
+        **parsing_handlers(deps),
+        **extraction_handlers(ExtractionDeps(db, build_gateway(settings, db))),
+    }
     try:
         if once:
             print(f"processed {await run_until_idle(db, handlers)} job(s)")

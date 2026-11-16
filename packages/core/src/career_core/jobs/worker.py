@@ -95,3 +95,18 @@ def parsing_handlers(deps) -> dict[str, JobHandler]:
             give_up=lambda ws, target: give_up_parse_run(deps, ws, target),
         )
     }
+
+
+def extraction_handlers(deps) -> dict[str, JobHandler]:
+    from career_core.usecases.extraction import (
+        EXTRACT_JOB,
+        give_up_extraction,
+        process_extraction,
+    )
+
+    return {
+        EXTRACT_JOB: JobHandler(
+            run=lambda ws, target: process_extraction(deps, ws, target),
+            give_up=lambda ws, target: give_up_extraction(deps, ws, target),
+        )
+    }
