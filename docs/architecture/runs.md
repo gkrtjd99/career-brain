@@ -26,7 +26,9 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 ## 재시작 후 재개와 멱등
 
 - 단계가 끝날 때마다 `step`(다음 단계 번호)과 `position`(재개에 필요한 ID·번호)을 같은 트랜잭션에 저장한다.
-- worker가 단계 도중에 죽으면 작업 큐 lease(기본 300초)가 지난 뒤 다른 worker가 다시 집는다. 실행이 `running`인 채로 집히면 `resumes`를 하나 올리고 `resumed` 사건을 남긴 뒤 **그 단계부터** 다시 한다. 끝난 단계는 다시 하지 않는다.
+- 작업 큐 lease(기본 300초)는 worker가 처리하는 동안 **heartbeat**로 연장된다 (lease의 1/3마다 `locked_until`을 다시 300초 뒤로). 그래서 lease보다 긴 단계나 여러 단계를 합쳐 오래 걸리는 실행도 다른 worker에게 넘어가 두 번 돌지 않는다. heartbeat는 같은 이벤트 루프의 작업이므로, 단계 안에서 루프를 오래 막는 동기 CPU 작업은 `asyncio.to_thread` 등으로 넘긴다.
+- worker가 단계 도중에 죽으면(heartbeat도 멈춤) lease가 지난 뒤 다른 worker가 다시 집는다. 실행이 `running`인 채로 집히면 `resumes`를 하나 올리고 `resumed` 사건을 남긴 뒤 **그 단계부터** 다시 한다. 끝난 단계는 다시 하지 않는다.
+- 늦게 끝난 옛 worker(lease를 잃은 뒤, 예: 오래 멈춰 있던 프로세스)는 작업 행의 `attempts`가 자기가 집을 때와 다르면 결과를 기록하지 않는다 (새 주인의 상태를 덮지 않음).
 - 따라서 단계의 부수효과는 멱등이어야 한다. 쓰는 방법:
   - usecase 자체의 중복 방지 (공고 정규화 URL, 지원마다 제출본 1건)
   - 멱등 키 `ctx.effect_key(name)` = `run:{run_id}:{name}` (승인 요청 등)

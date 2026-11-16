@@ -437,10 +437,10 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 공고: Workday 등 Cloudflare 앞단 사이트가 httpx 요청에 429를 준다 (curl은 200, 봇 차단으로 보임). 우회하지 않는다. 봇 차단을 `rate_limited`와 구분해 안내하기.
 - 공고: 그리팅 `questionnairesInfo`(자기소개서 문항·글자 수) 구조화 — 실제 예시 확인 후.
 - ~~웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API, 공고 목록 시각, 블록 검색 위치~~ → 해결 (`web.md` "화면용 조회 API").
-- 테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존).
+- ~~테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존)~~ → 해결 (원인: `claim_job`은 공간을 가리지 않고 종류로만 집는데 시험들이 DB 하나를 같이 쓴다. 앞 시험이 남긴 `parse` 작업의 재시도 대기(2·4초…)가 부하로 느려진 이 시험 도중에 끝나 집혔다. 시험마다 남은 대기 작업을 닫고(`tests/conftest.py`), 백오프 건너뛰기를 앱 시계가 아닌 고정 과거 시각으로).
 - 검색: 키워드 질의가 trigram GIN 색인을 못 쓴다. 원인은 RLS: pg_trgm 연산자(`<%`, `ILIKE`)가 LEAKPROOF가 아니라 정책 조건보다 먼저 색인 조건으로 쓸 수 없다 (테이블별 필터로 바꿔 측정: 주장 2만 개 p50 104ms → 104ms, 변화 없음). 대신 `workspace_id` 색인으로 한 공간의 행만 훑으므로 비용은 서비스 전체가 아니라 사용자 한 명의 자료량에 비례한다. 공간당 수만 건을 넘으면 검토: 공간별 파티션, 검색 전용 요약 테이블, 또는 superuser가 만든 LEAKPROOF 래퍼.
-- 운영: API 토큰 폐기·재발급 CLI (`revoke_token`은 있음, 명령 없음).
-- 운영: 유휴 worker의 1초 간격 확인 쿼리를 `LISTEN/NOTIFY` 깨우기로 바꾸기 (worker 수가 늘 때).
+- ~~운영: API 토큰 폐기·재발급 CLI (`revoke_token`은 있음, 명령 없음)~~ → 해결 (`personal-api token list|issue|revoke`, 소유자만, `install.md` "API 토큰").
+- ~~운영: 유휴 worker의 1초 간격 확인 쿼리를 `LISTEN/NOTIFY` 깨우기로 바꾸기 (worker 수가 늘 때)~~ → 해결 (c0015 trigger + `career_core.jobs.wake`, fallback 30초. 유휴 `claim_job` 60초 60회 → 120초 5회).
 - ~~문서: 여러 지원이 같이 쓰는 공용 문서(포트폴리오·기본 이력서)와 지원 문서로 복사하기.~~ → 해결 (c0012, `applications.md` "공용 문서와 복사").
 - ~~문서: 문장 단위 근거 연결 (지금은 문단 단위).~~ → 해결 (문단 안 `spans`, 없으면 문단 단위로 검사. `applications.md` "문장 단위 근거").
 - ~~문서: 상투어 목록을 공간 설정으로 저장 (지금은 검사 요청마다 `extra_cliches`).~~ → 해결 (`document_settings.cliches`, `GET/PUT /document-settings`, 웹 설정 화면. `extra_cliches`도 계속 받음).
@@ -460,7 +460,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 실행(O08): `outbox` 테이블 — 알림·외부 전송처럼 DB 밖 부수효과가 생길 때 (지금은 모든 단계가 DB 안의 멱등 usecase).
 - ~~실행(O08): AI 장기 작업 workflow (문서별 수정안 일괄, 인터뷰 질문 묶음) — `StepContext.model()`로 비용이 실행에 쌓인다. 수정안은 재개 시 중복 생성을 막을 멱등 키(`document_suggestions`에 `idempotency_key`)가 먼저 필요하다.~~ → 수정안 부분 해결 (`document_suggestions.idempotency_key`, workflow `suggest_document_batch`, 재개 시 중복 없음 시험). 인터뷰 질문 묶음은 남음.
 - ~~실행(O08): 웹 화면 — 오늘 화면 "승인 요청", 시스템 화면 실행 목록·사건·취소/중단/재개 (API는 있음).~~ → 해결 (`/system` 실행·승인 탭, 오늘 화면 "승인 요청" 카드, `web.md`).
-- 실행(O08): 실행 중 단계 heartbeat로 lease 연장 (지금은 단계가 lease 300초 안에 끝난다고 가정).
+- ~~실행(O08): 실행 중 단계 heartbeat로 lease 연장 (지금은 단계가 lease 300초 안에 끝난다고 가정)~~ → 해결 (`run_once`가 처리 중 lease의 1/3마다 연장, lease를 잃은 worker는 결과를 덮지 않음, `runs.md`).
 - ~~승인(O08): 승인 화면의 변경 비교 (요청 때 `summary`와 현재 대상의 차이), 대상 변경 시 열린 승인을 즉시 무효로 표시 (지금은 조회·결정·사용 때 확인).~~ → 해결 (`GET /core/approvals/{id}/diff`, c0014 DB trigger로 즉시 무효·대기 실행 깨우기, 조회 때 해시 비교는 뒷받침으로 유지, `runs.md`).
 - ~~MCP(O08): 원격 연결용 OAuth 2.1 (보호 자원 메타데이터, 토큰 대상 검증) — 지금은 공간 범위 API 토큰 Bearer. 도구별 호출 감사 기록 (`AuditSink`).~~ → 해결 (자원 서버 부분만: RFC 9728 메타데이터, 외부 JWT의 iss·aud·exp·서명 검증, (issuer, sub) → 공간 연결, 범위 → 역할 교집합. 감사 기록 `core.audit_events`, `/system` MCP 기록 탭, `mcp.md`).
 - ~~MCP(O08): `list_pending_claims`가 경험마다 조회한다 (N+1). 확인 대기 주장 목록 usecase가 생기면 바꾼다.~~ → 해결 (`brain.list_pending_claims`, 경험 수와 무관하게 쿼리 하나).
@@ -473,7 +473,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 문서: 서버 PDF 생성 (한글 글꼴 포함) — 지금은 브라우저 인쇄. 사용자가 올린 DOCX·PDF의 숨김 텍스트 검사.
 - 지원: 제출본(스냅샷)을 파일로 내보내기 (지금은 문서 revision만).
 - 문서(웹): 문장 근거를 끊어도 그 주장이 문단 근거로 남는다 (span 주장을 문단 `claim_ids`에 합치므로). 끊을 때 함께 뺄지 묻기.
-- 내보내기(O11): 가져오기 — 다른 공간 ID로 ID 재매핑, 기존 공간에 합치기(중복 정책), 다른 버전 묶음의 변환 (§15). 지금은 같은 migration head의 빈 대상에만 ID 그대로 복원.
+- 내보내기(후속): 기존 공간에 합치기(중복 정책), 다른 버전 묶음의 변환 (§15). ID 재매핑은 `restore --new-ids`로 해결 (아래).
 - ~~내보내기: 웹 시스템 메뉴의 유지보수·내보내기 화면 (API `GET /core/maintenance`, `/maintenance/export`, `POST /maintenance/purge-drafts`는 있음).~~ → 해결 (`/system` 백업·유지보수 탭).
 - ~~내보내기: 큰 공간용 스트리밍 — 지금은 표 하나·묶음의 표 파일 전부를 메모리에 올린다 (개인 자료 규모 가정). 묶음 암호화(age 등)를 명령 옵션으로.~~ → 해결 (표·묶음을 임시 파일로 흘려 쓰고 읽기, `export --recipient` / `restore --identity` age 암호화).
 - ~~내보내기: 복원 시 작업 큐는 비어 있다 — 대기 중이던 파싱·추출·공고 가져오기는 다시 요청해야 한다 (재색인만 자동).~~ → 해결 (manifest `pending_work`, 복원 때 대상이 있는 것만 다시 큐에).
@@ -485,7 +485,11 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 승인(후속): 무효화 trigger의 칸 목록은 `submission_target`과 손으로 맞춘다. 새 승인 행위가 생기면 행위별 trigger 또는 대상 버전 칸(`target_version` 계산을 DB 함수로) 검토.
 - MCP(후속): OAuth 불투명 토큰 introspection(RFC 7662), 토큰 폐기 목록, `jti` 재사용 감지, 연결 관리 웹 화면 (지금은 `personal-api oauth-link`). 감사 기록 보존 기간·정리.
 - 실행(후속): 시스템 화면 실시간 갱신(SSE) — 지금은 활성 실행이 있을 때 몇 초마다 다시 읽는다.
-- 운영: 미확정 공고 초안 정리(`purge_unconfirmed`)·`pg_dump`를 주기 실행하는 내장 스케줄 (지금은 버튼·cron).
+- ~~운영: 미확정 공고 초안 정리(`purge_unconfirmed`)·`pg_dump`를 주기 실행하는 내장 스케줄 (지금은 버튼·cron)~~ → 해결 (`serve`·`worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`마다 모든 공간 정리, advisory lock. `pg_dump`는 앱 밖 cron/systemd timer: `backup.md`).
+- 운영: 알림이 없는 경우 — lease가 끝난 `running` 작업(죽은 worker), worker 시작 전에 예약된 미래 작업 — 는 fallback 확인(기본 30초) 때 집힌다. 더 빨라야 하면 시작 때 다음 예정 시각 조회 함수를 둔다.
+- 운영: 주기 유지보수는 worker마다 간격마다 한 번씩 돈다 (lock은 동시 실행만 막는다, 멱등이라 결과는 같음). worker가 많아지면 마지막 실행 시각을 DB에 두고 간격 안이면 건너뛰기. 유지보수 화면에 마지막 자동 정리 시각 표시.
+- 운영: API 토큰 만료일·마지막 사용 시각, 웹에서 토큰 목록·폐기.
+- 실행: heartbeat는 worker 이벤트 루프의 작업이다. 단계가 동기 CPU 작업으로 루프를 lease(300초) 넘게 막으면 연장하지 못한다 — 그런 단계는 `asyncio.to_thread`로.
 
 ## 확인한 공식 근거
 

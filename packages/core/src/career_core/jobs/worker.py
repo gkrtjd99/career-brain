@@ -3,17 +3,23 @@
 ``core.claim_job``(SECURITY DEFINER)이 공간 문맥 없이 다음 작업 하나를 잠그고,
 처리와 결과 기록은 그 작업의 공간 문맥 안에서 한다. lease가 지난 running 작업은
 worker가 죽은 것으로 보고 다시 집는다.
+
+처리하는 동안에는 heartbeat가 lease를 주기적으로 늘린다 (lease보다 오래 걸리는 단계·실행이
+도중에 다른 worker에게 넘어가 두 번 돌지 않게). heartbeat가 멈추는 것은 worker가 죽었을 때뿐이다.
+lease를 잃은 뒤(다른 worker가 다시 집음) 끝난 처리는 결과를 덮어쓰지 않는다 (``attempts``로 구분).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import func, text, update
 
 from career_core.db.base import utcnow
 from career_core.db.models import Job
@@ -32,9 +38,16 @@ class JobHandler:
 
 
 async def run_once(
-    db: Database, handlers: Mapping[str, JobHandler], *, lease_seconds: int = 300
+    db: Database,
+    handlers: Mapping[str, JobHandler],
+    *,
+    lease_seconds: int = 300,
+    heartbeat_seconds: float | None = None,
 ) -> bool:
-    """작업 하나를 처리했으면 True, 대기 중인 작업이 없으면 False."""
+    """작업 하나를 처리했으면 True, 대기 중인 작업이 없으면 False.
+
+    ``heartbeat_seconds``: lease 연장 간격 (기본 lease의 1/3, 0이면 끔 — 시험용).
+    """
     async with db.system_session() as s:
         row = (
             await s.execute(
@@ -45,13 +58,18 @@ async def run_once(
     if row is None:
         return False
     handler = handlers[row.kind]
+    every = lease_seconds / 3 if heartbeat_seconds is None else heartbeat_seconds
     try:
-        outcome = await handler.run(row.workspace_id, row.target_id)
+        outcome = await _with_heartbeat(
+            db, row, lease_seconds, every, handler.run(row.workspace_id, row.target_id)
+        )
     except Exception as exc:  # noqa: BLE001 - worker 경계: 어떤 실패든 기록하고 다음 작업으로 간다
         log.warning("job %s (%s) failed: %s", row.job_id, row.kind, type(exc).__name__)
         give_up = row.attempts >= MAX_ATTEMPTS
         async with db.workspace_session(row.workspace_id) as s:
-            job = await s.get(Job, row.job_id)
+            job = await _owned(s, row)
+            if job is None:
+                return True
             job.last_error = type(exc).__name__
             job.locked_until = None
             if give_up:
@@ -64,7 +82,9 @@ async def run_once(
         return True
 
     async with db.workspace_session(row.workspace_id) as s:
-        job = await s.get(Job, row.job_id)
+        job = await _owned(s, row)
+        if job is None:
+            return True
         job.locked_until = None
         if outcome.done:
             job.status = "done"
@@ -74,6 +94,50 @@ async def run_once(
             job.attempts = 0
             job.available_at = utcnow() + timedelta(seconds=outcome.retry_after or 0)
     return True
+
+
+async def _owned(s, row) -> Job | None:
+    """아직 이 worker가 집은 그 작업이면 잠근 행, lease를 잃었으면 None."""
+    job = await s.get(Job, row.job_id, with_for_update=True)
+    if job is None or job.status != "running" or job.attempts != row.attempts:
+        log.warning("job %s (%s): lease lost, result not recorded", row.job_id, row.kind)
+        return None
+    return job
+
+
+async def _with_heartbeat(db: Database, row, lease_seconds: int, every: float, work):
+    if every <= 0:
+        return await work
+    beat = asyncio.create_task(_heartbeat(db, row, lease_seconds, every))
+    try:
+        return await work
+    finally:
+        beat.cancel()
+        with suppress(asyncio.CancelledError):
+            await beat
+
+
+async def _heartbeat(db: Database, row, lease_seconds: int, every: float) -> None:
+    """``every``초마다 lease를 ``lease_seconds``초 뒤로 민다. 잃었으면(다른 worker가 집음) 멈춘다."""
+    while True:
+        await asyncio.sleep(every)
+        try:
+            async with db.workspace_session(row.workspace_id) as s:
+                res = await s.execute(
+                    update(Job)
+                    .where(
+                        Job.id == row.job_id,
+                        Job.status == "running",
+                        Job.attempts == row.attempts,
+                    )
+                    .values(locked_until=func.now() + timedelta(seconds=lease_seconds))
+                )
+        except Exception as exc:  # noqa: BLE001 - 잠깐의 DB 오류: 다음 박동에서 다시 (lease에 여유가 있다)
+            log.warning("job %s heartbeat failed (%s)", row.job_id, type(exc).__name__)
+            continue
+        if res.rowcount == 0:
+            log.warning("job %s (%s): lease lost to another worker", row.job_id, row.kind)
+            return
 
 
 async def run_until_idle(

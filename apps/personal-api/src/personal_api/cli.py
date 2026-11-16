@@ -12,6 +12,8 @@ personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구
 personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.gz)로 (소유자만)
 personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
 personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
+personal-api token list|issue|revoke ID  # CAREER_API_TOKEN 공간의 API 토큰 (소유자만, 새 토큰은 한 번만 출력)
+personal-api maintenance         # 모든 공간 주기 유지보수(초안 정리)를 지금 한 번 (serve·worker는 자동)
 """
 
 from __future__ import annotations
@@ -50,12 +52,23 @@ from career_core.usecases.runs import RunDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
-from personal_api.identity import PersonalTokenResolver, issue_token
+from personal_api.identity import (
+    PersonalTokenResolver,
+    issue_token,
+    list_tokens,
+    revoke_token,
+)
 from personal_api.models import build_gateway, load_config, load_prices
-from personal_api.runner import run_worker, worker_poll_seconds
+from personal_api.runner import (
+    maintenance_interval_seconds,
+    run_worker,
+    worker_listen,
+    worker_poll_seconds,
+)
 from personal_api.settings import Settings
 
 TOKEN_ENV = "CAREER_API_TOKEN"
+MAX_TOKEN_LABEL = 100
 
 
 def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
@@ -92,7 +105,14 @@ async def _worker(settings: Settings, *, once: bool) -> None:
         if once:
             print(f"processed {await run_until_idle(db, handlers)} job(s)")
             return
-        await run_worker(db, handlers, poll_seconds=worker_poll_seconds())
+        listen = worker_listen()
+        await run_worker(
+            db,
+            handlers,
+            poll_seconds=worker_poll_seconds(listen),
+            listen=listen,
+            maintenance_seconds=maintenance_interval_seconds(),
+        )
     finally:
         await db.dispose()
 
@@ -427,6 +447,77 @@ async def _oauth_link(
     return 0
 
 
+async def _token(
+    settings: Settings, action: str, *, token_id: str | None = None, label: str | None = None
+) -> int:
+    """토큰 관리. 원문은 새로 발급한 토큰만 한 번 출력하고, 목록에는 ID·이름·상태만 보인다."""
+    from uuid import UUID
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        if not actor.has_scope("workspace-admin"):
+            print("token commands need an owner token")
+            return 1
+        ws = actor.workspace_id
+        current = os.environ[TOKEN_ENV]
+        if action == "list":
+            rows = await list_tokens(db, workspace_id=ws, current_token=current)
+            print(f"  {'id':<36}  {'status':<18}  {'created':<16}  label")
+            for r in rows:
+                status = f"revoked {r.revoked_at:%Y-%m-%d}" if r.revoked_at else "active"
+                mark = "*" if r.current else " "
+                print(f"{mark} {r.id}  {status:<18}  {r.created_at:%Y-%m-%d %H:%M}  {r.label}")
+            print("* = the token in CAREER_API_TOKEN")
+            return 0
+        if action == "issue":
+            name = (label or "cli").strip()
+            if not name or len(name) > MAX_TOKEN_LABEL:
+                print(f"label must be 1..{MAX_TOKEN_LABEL} characters")
+                return 1
+            token = await issue_token(db, workspace_id=ws, actor_id=actor.subject_id, label=name)
+            print("new API token (shown once, store it safely):")
+            print(token)
+            return 0
+        # revoke
+        try:
+            target = UUID(token_id or "")
+        except ValueError:
+            print("revoke needs a token id from `personal-api token list`")
+            return 1
+        rows = await list_tokens(db, workspace_id=ws, current_token=current)
+        row = next((r for r in rows if r.id == target), None)
+        if row is not None and row.current:
+            print(
+                "refusing to revoke the token in CAREER_API_TOKEN: issue a new one, "
+                "switch to it, then revoke this one"
+            )
+            return 1
+        if row is None or not await revoke_token(db, workspace_id=ws, token_id=target):
+            print("no active token with that id in this workspace")
+            return 1
+        print(f"revoked {target} ({row.label})")
+        return 0
+    finally:
+        await db.dispose()
+
+
+async def _maintenance(settings: Settings) -> int:
+    from career_core.jobs.maintenance import run_maintenance
+
+    db = Database(settings.database_url)
+    try:
+        report = await run_maintenance(db)
+    finally:
+        await db.dispose()
+    if not report.ran:
+        print("another worker is running maintenance right now; skipped")
+        return 0
+    counts = " ".join(f"{k}={v}" for k, v in report.counts.items())
+    print(f"maintenance: {report.workspaces} workspace(s) {counts} errors={report.errors}")
+    return 1 if report.errors else 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="personal-api")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -479,6 +570,14 @@ def main(argv: list[str] | None = None) -> None:
     ol.add_argument("--subject", help="the 'sub' claim from your authorization server")
     ol.add_argument("--issuer", help="defaults to CAREER_OAUTH_ISSUER")
     ol.add_argument("--revoke", metavar="ID", help="revoke a link (id from the list)")
+    tk = sub.add_parser("token", help=f"list, issue or revoke API tokens ({TOKEN_ENV}, owner only)")
+    tk_sub = tk.add_subparsers(dest="token_cmd", required=True)
+    tk_sub.add_parser("list", help="token ids, labels and status (never the tokens)")
+    ti = tk_sub.add_parser("issue", help="issue a new owner token (printed once)")
+    ti.add_argument("--label", default="cli")
+    tr = tk_sub.add_parser("revoke", help="revoke a token by id")
+    tr.add_argument("id")
+    sub.add_parser("maintenance", help="run periodic maintenance (draft purge) for all workspaces")
     args = parser.parse_args(argv)
     settings = Settings.from_env()
 
@@ -533,6 +632,19 @@ def main(argv: list[str] | None = None) -> None:
         )
     elif args.cmd == "oauth-link":
         sys.exit(asyncio.run(_oauth_link(settings, args.subject, args.issuer, args.revoke)))
+    elif args.cmd == "token":
+        sys.exit(
+            asyncio.run(
+                _token(
+                    settings,
+                    args.token_cmd,
+                    token_id=getattr(args, "id", None),
+                    label=getattr(args, "label", None),
+                )
+            )
+        )
+    elif args.cmd == "maintenance":
+        sys.exit(asyncio.run(_maintenance(settings)))
 
 
 if __name__ == "__main__":

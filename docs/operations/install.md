@@ -18,7 +18,8 @@ career-brain은 GitHub 레포를 받아 직접 실행한다. PyPI·npm·Docker H
 | 이미지 (기본) | 308MB 풀린 크기 / 80MB 내려받기 (python:3.13-slim 자체가 147MB / 46MB) |
 | 이미지 (`EXTRAS=local-embed`) | 500MB / 146MB. 모델 파일(~0.5GB)은 처음 쓸 때 `/data/models`로 받는다 |
 | 이미지 (`EXTRAS=browser`) | 1080MB / 392MB (Chromium headless shell) |
-| 앱 유휴 RSS (`serve`, API+worker) | 약 85~100MB. 유휴 CPU 약 0.4% (1초 간격 작업 확인) |
+| 앱 유휴 RSS (`serve`, API+worker) | 약 85~100MB. 유휴 CPU 약 0.4% (1초 간격 작업 확인 때 측정) |
+| 유휴 worker의 DB 쿼리 (2026-11-17) | `LISTEN` + 30초 확인: 120초에 `claim_job` 5회 (시작·연결 직후 포함). 이전 1초 간격 확인: 60초에 60회 |
 | 앱 2개로 나눴을 때 | API 약 93MB + worker 약 83MB |
 | PostgreSQL 유휴 | 약 30~45MB (컨테이너 메모리, shared_buffers 128MB 설정) |
 | 로컬 임베딩 사용 중 | 모델 단독 약 0.9~1.6GB 추가 ([search.md](../architecture/search.md)). API와 worker가 모델 하나를 같이 쓴다 |
@@ -94,7 +95,7 @@ career.example.com {
 ```
 
 - 프록시를 컨테이너로 같은 compose 네트워크에 두면 `CAREER_BIND`는 그대로 두고 프록시에서 `app:8000`으로 보낸다.
-- 공개 주소에서 쓰는 API 토큰은 비밀번호처럼 다룬다. 토큰 폐기·재발급 명령은 아직 없다 (plan §18 백로그). 세션 로그인·CSRF는 웹 로그인 작업에서 다룬다 (plan §14).
+- 공개 주소에서 쓰는 API 토큰은 비밀번호처럼 다룬다. 새 토큰 발급·폐기는 `personal-api token` (아래 "API 토큰"). 세션 로그인·CSRF는 웹 로그인 작업에서 다룬다 (plan §14).
 - 방화벽에서 80/443만 연다.
 
 ## 3. 모델 설정
@@ -140,10 +141,25 @@ cd deploy/docker && docker compose exec -T db pg_dump -U career -d career_brain 
 - 서버는 매일 `pg_dump` + 원본 볼륨, 매주 공간 내보내기를 서버 밖에 암호화해서 둔다. 실행 중인 DB 데이터 폴더를 그대로 복사하지 않는다 (plan §14).
 - 묶음과 덤프에는 개인 자료가 들어 있다. 묶음에는 API 토큰·모델 키·검색 벡터가 없다 (복원 후 새 토큰, 재색인).
 
-## 6. 작은 서버 조정
+## 6. API 토큰
+
+`CAREER_API_TOKEN`에 **소유자** 토큰을 두고 그 공간의 토큰을 관리한다. 토큰 원문은 DB에 없고(SHA-256만), 목록은 ID·이름·상태만 보인다. 새 토큰은 발급할 때 한 번만 출력한다.
+
+```bash
+personal-api token list                    # * = 지금 CAREER_API_TOKEN 토큰
+personal-api token issue --label laptop    # 새 토큰 (한 번만 출력)
+personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MCP 모두 거부
+# Docker: docker compose run --rm app token list
+```
+
+- 토큰이 샜으면: `issue`로 새 토큰 → `CAREER_API_TOKEN`·MCP 설정을 새 토큰으로 → 옛 토큰 `revoke`.
+- 지금 쓰는 토큰은 폐기하지 않는다 (잠겨 나가지 않게). 다른 공간 토큰은 보이지도, 폐기되지도 않는다 (RLS).
+
+## 7. 작은 서버 조정
 
 - PostgreSQL: `deploy/docker/compose.yaml`의 `command`. 기본은 1GB 서버용(`shared_buffers=128MB`, `max_connections=40`, 병렬 질의·JIT 끔). RAM이 넉넉하면 `.env`의 `CAREER_PG_SHARED_BUFFERS`(RAM 25%)와 `CAREER_PG_EFFECTIVE_CACHE`(RAM 50%)를 올린다.
-- 작업 확인 간격: `CAREER_WORKER_POLL_SECONDS`(기본 1초). 늘리면 유휴 쿼리가 줄고 작업 시작이 늦어진다.
+- 작업 깨우기: worker는 `LISTEN career_jobs`로 새 작업을 바로 알아채고, 알림을 놓쳤을 때를 위해 `CAREER_WORKER_POLL_SECONDS`(기본 30초)마다 한 번 확인한다. DB 연결이 끊겨도 다시 연결하며, 그동안은 이 간격 확인으로 일한다. PgBouncer transaction 모드처럼 LISTEN이 안 되는 경로면 `CAREER_WORKER_LISTEN=0` (간격 기본 1초).
+- 주기 유지보수: `serve`(내장 worker)와 `worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 21600 = 6시간, `0`이면 끔)마다 모든 공간의 미확정 공고 초안(7일 지난 것)을 정리한다. 시작 60초 뒤 첫 실행. worker가 여럿이면 advisory lock으로 한 번에 하나만 하고, 정리는 멱등이다. 지금 바로: `personal-api maintenance`. `serve --no-worker`는 하지 않는다 (따로 띄운 `worker`가 한다). `pg_dump`는 앱이 하지 않는다: [backup.md](backup.md#4-일정-제안)의 cron/systemd timer.
 - 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20).
 - 앱 프로세스는 하나로 둔다 (`--workers` 없음). 개인 자료 규모에서는 DB가 먼저 일하고 앱 CPU는 거의 쓰지 않는다. 판단 근거: [rust.md](../architecture/rust.md).
 
@@ -155,7 +171,9 @@ cd deploy/docker && docker compose exec -T db pg_dump -U career -d career_brain 
 | `CAREER_MIGRATION_DATABASE_URL` | 개발 DB (`career`) | migration 전용 소유자 계정 |
 | `CAREER_HOST` / `CAREER_PORT` | `127.0.0.1` / `8000` (이미지: `0.0.0.0`) | `serve` 바인딩 |
 | `CAREER_EMBEDDED_WORKER` | `1` | `0`이면 `serve`는 API만 |
-| `CAREER_WORKER_POLL_SECONDS` | `1` | 대기 작업 확인 간격 |
+| `CAREER_WORKER_LISTEN` | `1` | 새 작업을 `LISTEN/NOTIFY`로 깨우기. `0`이면 간격 확인만 |
+| `CAREER_WORKER_POLL_SECONDS` | `30` (LISTEN 끄면 `1`) | 대기 작업 확인 간격 (LISTEN일 때는 놓친 알림 대비) |
+| `CAREER_MAINTENANCE_INTERVAL_SECONDS` | `21600` | 주기 유지보수(초안 정리) 간격, `0`이면 끔 |
 | `CAREER_WEB_DIR` | `apps/personal-web/dist` (있을 때) | 웹 정적 파일. 빈 값이면 끔 |
 | `CAREER_BLOB_DIR` | `data/blobs` (이미지: `/data/blobs`) | 업로드 원본 |
 | `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |

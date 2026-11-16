@@ -38,7 +38,7 @@
 
 1. **API 수평 확장**: API는 상태가 없다 (세션 문맥은 트랜잭션 로컬 `set_config`). 여러 복제본 + 로드밸런서. 복제본마다 연결 풀이 생기므로 PgBouncer(transaction 모드)를 앞에 둔다. 트랜잭션 로컬 설정이라 transaction 풀링과 맞는다.
 2. **worker 분리·확장**: `serve --no-worker` + `worker` N개. `core.claim_job`은 `FOR UPDATE SKIP LOCKED`라 worker를 늘려도 중복 처리하지 않는다. 처리량이 모자라면 먼저 worker 하나가 여러 작업을 동시에 기다리게 한다 (LLM 대기가 대부분이라 프로세스를 늘리는 것보다 싸다).
-3. **작업 큐**: 유휴 worker마다 1초 간격 확인 쿼리가 생긴다. worker가 많아지면 `LISTEN/NOTIFY`로 깨우거나 Procrastinate(plan §5)로 옮긴다.
+3. **작업 큐**: 유휴 worker는 `LISTEN career_jobs`로 깨어나고 30초마다 한 번만 확인한다 (worker당 LISTEN 연결 1개, 분당 확인 쿼리 약 2회). PgBouncer transaction 모드 뒤의 worker는 `CAREER_WORKER_LISTEN=0`(짧은 간격 확인)이거나 DB에 직접 붙는다. 처리량이 더 필요하면 Procrastinate(plan §5)를 검토한다.
 4. **PostgreSQL**: 검색 질의 색인 사용, 필요하면 읽기 복제본, 벡터가 많아지면 HNSW(재현율 확인 후). 공간(workspace)별 필터가 있어 개인 규모 정확 검색은 오래 버틴다.
 5. **비용**: 사용자당 비용은 모델 API 토큰이 지배한다. 계산 자원 최적화보다 게이트웨이의 예산·라우팅(저가 모델로 추출)이 효과가 크다.
 
