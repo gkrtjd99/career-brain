@@ -315,9 +315,24 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 키워드 검색용 SECURITY DEFINER 함수(trigram 색인 사용)는 시험했지만 넣지 않았다 (2글자 한국어 낱말은 색인 이득이 없고, 소유자가 superuser가 아니면 RLS가 그대로 적용된다. `search.md` "RLS 아래 trigram 색인").
 - 상세: `docs/architecture/study.md`(시간대·별칭), `docs/architecture/applications.md`(문서 검사의 별칭), `docs/architecture/models.md`(판정 모델).
 
+## 판정 응답 캐시 (c0022)
+
+`c0022_search_judges` (`down_revision = c0021`). 판정 모델(`judge_claim`·`judge_visibility`) 응답을 공간별로 담아 같은 질문을 다시 부르지 않는다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `judge_cache` (새 표) | `workspace_id`(FK CASCADE) + 공간 복합 키, `purpose`(CHECK `judge_claim`·`judge_visibility`), `model`(`엔드포인트/모델`), `prompt_version`, `input_hash`(CHECK 소문자 hex 64자), `response_text`(CHECK 65,536자 이하), 원래 호출의 `endpoint`·`result_model`·`cost_usd`·`cost_basis`·`call_id`, `hits`(CHECK ≥ 0), `created_at`·`last_hit_at`·`expires_at`. UNIQUE `uq_judge_cache_key`(공간, purpose, model, prompt_version, input_hash), 색인 `ix_judge_cache_expires` | `SELECT, INSERT, UPDATE, DELETE` |
+
+- FORCE RLS(`rls.workspace_isolation_sql`). 다른 공간 문맥에서는 0행 (시험: `pg_class.relforcerowsecurity`, 공간 둘의 같은 질문).
+- 쓰기는 `INSERT … ON CONFLICT (uq_judge_cache_key) DO UPDATE` 하나. 꺼낼 때는 그 행을 `FOR UPDATE`로 잡고 `hits`를 올린다.
+- 정리: 쓸 때 그 공간의 만료 행을 지운다(`CAREER_JUDGE_CACHE_DAYS`, 기본 30일). `DELETE /core/judges/cache`로 비운다. 공간을 지우면 CASCADE.
+- 내보내기: `EXCLUDED_TABLES` — 다시 물으면 생기는 파생 자료이고, 응답 인용(`quote`)에 문서 글이 들어 있어 지운 문서의 글을 백업으로 옮기지 않는다 (`test_export.py`).
+- 같은 migration 번호에 검색 쪽 표 변경은 없다: 별칭 검색어 넓히기는 c0021 `workspace_settings.tech_aliases`를 읽기만 하고, 2글자 bigram 색인은 보류했다 (`search.md`).
+- 상세: `docs/architecture/models.md` "응답 캐시".
+
 ## 웹 복원 작업 상태·옛 head 묶음 변환 (c0024)
 
-`down_revision = c0021` (c0022·c0023·c0025와 병렬로 만들었다. 합칠 때 순서를 다시 잇는다). 웹 복원 작업 상태를 프로세스 메모리에서 DB로 옮긴다.
+`down_revision = c0022` (c0022·c0023·c0025와 병렬로 만들어 합칠 때 번호 순서로 다시 이었다). 웹 복원 작업 상태를 프로세스 메모리에서 DB로 옮긴다.
 
 | 변경 | 내용 | 앱 role |
 |---|---|---|

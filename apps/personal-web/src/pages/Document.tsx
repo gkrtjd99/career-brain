@@ -16,6 +16,7 @@ import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "
 import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { ExportSheet } from "../components/doc/ExportSheet";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
+import { VisibilityJudgePanel } from "../components/doc/VisibilityJudgePanel";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
 import { int } from "../lib/format";
@@ -400,6 +401,9 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
             <Loaded query={validate}>
               {(r) => <ChecksPanel result={r} dirty={dirty} onJump={jump} blockNo={blockNo} />}
             </Loaded>
+          ) : null}
+          {panel === "checks" && appId ? (
+            <VisibilityJudgePanel appId={appId} docId={doc.id} dirty={dirty} blocks={baseBlocks} onJump={jump} blockNo={blockNo} />
           ) : null}
           {panel === "ai" ? (
             <SuggestionsPanel

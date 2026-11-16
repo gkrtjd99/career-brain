@@ -44,6 +44,17 @@ export interface JudgeRun {
   cost_usd: string | null;
   cost_basis: string | null;
   basis: "judge_advisory";
+  /** 응답 캐시(c0022)에서 꺼낸 수. calls·cost_usd에는 들어가지 않는다 */
+  cached?: number;
+}
+
+/** 판정 응답 캐시 (c0022, GET /core/judges/cache) */
+export interface JudgeCacheStats {
+  entries: number;
+  hits: number;
+  saved_usd: string | null;
+  /** 보관 일수 (CAREER_JUDGE_CACHE_DAYS, 0 = 캐시 안 씀) */
+  days: number;
 }
 
 export interface VisibilityJudgeRow {
@@ -81,5 +92,7 @@ export function settingsEndpoints({ get, json }: SettingsDeps) {
       json<VisibilityJudge>("POST", `/core/applications/${id(applicationId)}/visibility-judge`, {
         json: { document_id: documentId ?? null },
       }),
+    judgeCache: () => get<JudgeCacheStats>("/core/judges/cache"),
+    clearJudgeCache: () => json<{ deleted: number }>("DELETE", "/core/judges/cache"),
   };
 }

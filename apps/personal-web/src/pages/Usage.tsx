@@ -4,7 +4,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Loaded, PageHeader } from "../components/common";
 import { api } from "../lib/api";
-import { formatDate, int, usd } from "../lib/format";
+import { formatDate } from "../lib/dates";
+import { int, usd } from "../lib/format";
 
 const GROUPS: [UsageGroup, string][] = [
   ["day", "날짜별"],

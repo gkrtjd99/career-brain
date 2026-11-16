@@ -422,6 +422,8 @@ class JudgeRunOut(BaseModel):
     cost_usd: str | None = None
     cost_basis: str | None = None
     basis: str = "judge_advisory"
+    # 응답 캐시(c0022)에서 꺼낸 수. calls·cost_usd는 이번에 실제로 부른 것만
+    cached: int = 0
 
 
 class ClaimSuggestionOut(BaseModel):

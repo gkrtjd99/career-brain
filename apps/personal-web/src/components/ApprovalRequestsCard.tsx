@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
-import { formatDateTime } from "../lib/format";
+import { formatDateTime } from "../lib/dates";
 import { ACTION_LABEL } from "../lib/systemLabels";
 
 /** 오늘 화면의 "승인 요청" 카드. 대기 중인 요청이 있을 때만 보인다. */

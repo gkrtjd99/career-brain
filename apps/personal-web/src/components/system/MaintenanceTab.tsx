@@ -7,7 +7,8 @@ import { Download, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorText, Loaded } from "../common";
 import { api, ApiError } from "../../lib/api";
-import { formatDateTime, int } from "../../lib/format";
+import { formatDateTime } from "../../lib/dates";
+import { int } from "../../lib/format";
 import { bytes, saveBlob, systemErrorText } from "../../lib/systemLabels";
 import {
   currentRestoreJob,

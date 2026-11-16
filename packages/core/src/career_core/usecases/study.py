@@ -1995,7 +1995,7 @@ async def _judge_lines(
         if (why := judges.unavailable(gateway, actor, judges.JUDGE_CLAIM_PURPOSE)) is not None:
             return lines, why
         assert gateway is not None
-        call_model = judges.gateway_caller(gateway, actor)
+        call_model = judges.gateway_caller(gateway, actor, db=db)
     ids = {c.claim_id for ln in lines for c in ln.candidates}
     async with db.workspace_session(actor.workspace_id) as s:
         blocked = await restricted_claims(s, ids)

@@ -1,4 +1,4 @@
-"""한국어 표현 규칙 (문서 검사용). 형태소 분석기 없이 정규식·사전으로만 한다.
+"""한국어 표현 규칙 (문서 검사·검색용). 기본은 형태소 분석기 없이 정규식·사전으로만 한다.
 
 - 수 표현: "두 배" → 2, "세 명" → 3, "절반" → 50, "3천" → 3000, "1만 2천 명" → 12000, "삼십 명" → 30.
   고유어 수(한·두·세…)와 한자어 수(일·이·삼…십·백·천)는 뒤에 단위 명사(명·배·개·번…)가 올 때만 수로 본다.
@@ -6,12 +6,19 @@
 - 기술명 한영 병기: "파이썬/Python", "자바스크립트/JavaScript", "쿠버네티스/K8s"를 같은 기술로 본다.
   기본 표(`TECH_ALIASES`) 위에 공간 설정의 사용자 별칭이 합쳐진다 (`merge_aliases`, `use_aliases`).
 
+- 내용어 뽑기(`content_words`): 기본 `RuleAnalyzer`는 조사만 뗀다. 선택 extra `korean`(kiwipiepy)을 깔고
+  `CAREER_KOREAN_ANALYZER=kiwi`를 주면 `KiwiAnalyzer`가 어미·복합명사·띄어쓰기 차이까지 다룬다.
+  설치가 없으면 규칙 기반으로 돌아간다. 사실 변경·요건 가시성·빈도 묶음·키워드 검색이 이 함수를 쓴다.
+
 일부러 작고 단순하다. 놓치는 표현이 있고("수백 명", "두어 번"), 그런 표현은 숫자로 세지 않는다.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -334,6 +341,26 @@ class TechAliases:
         low = _spelling_key(term)
         return self._to_canon.get(low, low)
 
+    def lookup(self, term: str) -> str | None:
+        """표에 있는 표기면 대표 표기, 없으면 None."""
+        return self._to_canon.get(_spelling_key(term))
+
+    def display(self, canon: str) -> str:
+        """화면 이름: 사용자 항목이면 쓴 그대로("FastAPI"), 기본 표면 대표 표기."""
+        for e in self.entries:
+            if e.key == canon:
+                return e.term
+        return canon
+
+    def phrases(self) -> tuple[str, ...]:
+        """여러 낱말로 된 표기들 ("아마존 웹 서비스", 사용자 항목 "fast api")."""
+        return tuple(k for k in self._to_canon if " " in k)
+
+    def longer_hangul(self, spelling: str) -> tuple[str, ...]:
+        """이 한글 표기로 시작하는 더 긴 표기 ("자바" → "자바스크립트"). 그 안의 일치는 이 기술이 아니다."""
+        low = _spelling_key(spelling)
+        return tuple(k for k in self._hangul_longer if k != low and k.startswith(low))
+
     def spellings(self, term: str) -> tuple[str, ...]:
         canon = self.canonical(term)
         return (canon, *self.table.get(canon, ()))
@@ -438,20 +465,219 @@ def korean_tech_terms(text: str, aliases: TechAliases | None = None) -> list[str
     ]
 
 
+# --- 내용어 뽑기: 규칙(기본) 또는 선택 설치 형태소 분석기 ------------------------------------
+
+# 낱말 끝에서 떼는 조사·어미 조각 (긴 것부터). 떼고 남은 말이 두 글자 이상일 때만 뗀다.
+PARTICLES = tuple(
+    sorted(
+        [
+            "으로서",
+            "으로써",
+            "에서는",
+            "에서의",
+            "에서",
+            "으로",
+            "에게",
+            "까지",
+            "부터",
+            "과의",
+            "와의",
+            "이나",
+            "이며",
+            "이고",
+            "하는",
+            "하고",
+            "하여",
+            "해서",
+            "했고",
+            "한",
+            "을",
+            "를",
+            "이",
+            "가",
+            "은",
+            "는",
+            "에",
+            "의",
+            "와",
+            "과",
+            "로",
+            "도",
+            "만",
+        ],
+        key=len,
+        reverse=True,
+    )
+)
+_HANGUL_WORD = re.compile(r"[가-힣]{2,}")
+_HANGUL_ONLY = re.compile(r"[가-힣]+")
+
+
+def strip_particle(word: str, particles: tuple[str, ...] = PARTICLES) -> str:
+    """낱말 끝의 조사·어미 하나를 뗀다 ("트래픽을" → "트래픽"). 남는 말이 두 글자 미만이면 그대로."""
+    for p in particles:
+        if word.endswith(p) and len(word) - len(p) >= 2:
+            return word[: -len(p)]
+    return word
+
+
+class RuleAnalyzer:
+    """규칙 기반 (기본): 한글 낱말마다 끝의 조사·어미 하나를 뗀다. 복합 명사는 나누지 않는다."""
+
+    name = "rule"
+    morphological = False
+
+    def content_words(self, text: str) -> list[str]:
+        return [strip_particle(w) for w in _HANGUL_WORD.findall(text or "")]
+
+    def tokens(self, text: str) -> list[tuple[str, str]]:
+        """(형태, 품사). 규칙 기반은 품사를 모른다: 내용어마다 ("낱말", "W")."""
+        return [(w, "W") for w in self.content_words(text)]
+
+
+# Kiwi 품사: 일반·고유 명사, 어근. 명사 파생 접미사(-화·-기·-자·-가 등)는 앞 명사에 붙이고,
+# 형용사 파생(-하다, XSA: "공정한", "다양한")이 붙은 명사는 내용어로 보지 않는다.
+_KIWI_NOUN_TAGS = frozenset({"NNG", "NNP", "XR"})
+# 사전을 줄여 올린다: 오타·여러 낱말 사전 없이 RSS ~0.58GB → ~0.41GB (합성 평가 결과 같음, search.md)
+KIWI_OPTIONS: dict[str, Any] = {"load_typo_dict": False, "load_multi_dict": False}
+
+
+class KiwiAnalyzer:
+    """선택 설치 `korean` (kiwipiepy, Apache-2.0). 처음 쓸 때 모델을 올린다 (~0.4GB RSS, ~0.5초).
+
+    명사·어근만 남긴다. 복합 명사는 나뉜다 ("결제시스템" → 결제, 시스템).
+    같은 글을 여러 번 묻는 검사(요건마다 문서 전체)를 위해 최근 결과를 기억한다.
+    """
+
+    name = "kiwi"
+    morphological = True
+
+    def __init__(self, **options: Any) -> None:
+        from kiwipiepy import Kiwi  # 선택 의존성: 없으면 ImportError
+
+        self._kiwi = Kiwi(num_workers=-1, **{**KIWI_OPTIONS, **options})
+        self._lock = threading.Lock()
+        self._cache: OrderedDict[str, tuple[tuple[str, str], ...]] = OrderedDict()
+
+    def tokens(self, text: str) -> list[tuple[str, str]]:
+        key = text or ""
+        with self._lock:
+            hit = self._cache.get(key)
+            if hit is None:
+                hit = tuple((t.form, t.tag) for t in self._kiwi.tokenize(key))
+                self._cache[key] = hit
+                if len(self._cache) > 512:
+                    self._cache.popitem(last=False)
+            else:
+                self._cache.move_to_end(key)
+        return list(hit)
+
+    def content_words(self, text: str) -> list[str]:
+        out: list[str] = []
+        prev_noun = False
+        for form, tag in self.tokens(text):
+            if tag in _KIWI_NOUN_TAGS and _HANGUL_ONLY.fullmatch(form):
+                out.append(form)
+                prev_noun = True
+                continue
+            if prev_noun and tag == "XSN" and _HANGUL_ONLY.fullmatch(form):
+                out[-1] += form
+                continue
+            if prev_noun and tag == "XSA":
+                out.pop()
+            prev_noun = False
+        return out
+
+
+ANALYZERS = ("rule", "kiwi")
+_RULE = RuleAnalyzer()
+_analyzer_cache: dict[str, RuleAnalyzer | KiwiAnalyzer] = {}
+_analyzer_lock = threading.Lock()
+_ANALYZER: ContextVar[RuleAnalyzer | KiwiAnalyzer | None] = ContextVar(
+    "career_korean_analyzer", default=None
+)
+
+
+def load_analyzer(name: str | None) -> RuleAnalyzer | KiwiAnalyzer:
+    """이름으로 분석기를 고른다. `kiwi`인데 설치되지 않았으면 규칙 기반으로 (검사를 멈추지 않는다)."""
+    if (name or "rule").strip().lower() != "kiwi":
+        return _RULE
+    with _analyzer_lock:
+        if "kiwi" not in _analyzer_cache:
+            try:
+                _analyzer_cache["kiwi"] = KiwiAnalyzer()
+            except ImportError:
+                _analyzer_cache["kiwi"] = _RULE
+        return _analyzer_cache["kiwi"]
+
+
+def korean_analyzer() -> RuleAnalyzer | KiwiAnalyzer:
+    """지금 쓰는 분석기: `use_analyzer` 블록 → `CAREER_KOREAN_ANALYZER`(rule|kiwi) → 규칙 기반."""
+    active = _ANALYZER.get()
+    if active is not None:
+        return active
+    return load_analyzer(os.environ.get("CAREER_KOREAN_ANALYZER"))
+
+
+@contextmanager
+def use_analyzer(analyzer: RuleAnalyzer | KiwiAnalyzer | None) -> Iterator[None]:
+    """이 블록 안의 내용어 뽑기에 `analyzer`를 쓴다 (평가·시험용)."""
+    token = _ANALYZER.set(analyzer)
+    try:
+        yield
+    finally:
+        _ANALYZER.reset(token)
+
+
+def content_words(text: str) -> list[str]:
+    """한글 내용어 (원문 순서, 중복 포함). 불용어는 부르는 쪽이 뺀다."""
+    return korean_analyzer().content_words(text)
+
+
+def contains_phrase(text: str, phrase: str) -> bool:
+    """글에 이 한글 낱말·구가 있는가. 여러 낱말 구는 띄어쓰기를 보지 않는다 ("테스트 코드" = "테스트코드").
+
+    형태소 분석기가 있으면 내용어 순서로 맞춘다 ("공정한"의 "공정"은 낱말 "공정"이 아니다).
+    """
+    t, p = text or "", " ".join((phrase or "").split())
+    if not p:
+        return False
+    analyzer = korean_analyzer()
+    if analyzer.morphological:
+        want = analyzer.content_words(p)
+        have = analyzer.content_words(t)
+        if want:
+            n = len(want)
+            return any(have[i : i + n] == want for i in range(len(have) - n + 1))
+    if " " not in p:
+        return p in t  # 한 낱말은 그대로 (공백을 지우면 "정보 안내"에서 "보안"이 나온다)
+    return p.replace(" ", "") in t.replace(" ", "")
+
+
 __all__ = [
+    "ANALYZERS",
     "BUILTIN_ALIASES",
     "COUNTERS",
+    "PARTICLES",
     "TECH_ALIASES",
     "AliasEntry",
     "AliasError",
+    "KiwiAnalyzer",
+    "RuleAnalyzer",
     "TechAliases",
     "canonical_tech",
+    "contains_phrase",
+    "content_words",
     "current_aliases",
     "found_spellings",
+    "korean_analyzer",
     "korean_numbers",
     "korean_tech_terms",
+    "load_analyzer",
     "merge_aliases",
     "parse_alias_entries",
+    "strip_particle",
     "tech_spellings",
     "use_aliases",
+    "use_analyzer",
 ]

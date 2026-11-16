@@ -111,6 +111,17 @@ export function SearchPage() {
                 {r.hits.length}건 · {r.mode === "hybrid" ? "키워드 + 의미" : r.mode === "keyword" ? "키워드" : r.mode}
                 {r.semantic_note ? ` · 의미 검색 안 함: ${semanticNote(r.semantic_note)}` : ""}
               </p>
+              {r.expanded_terms?.length ? (
+                <p className="mb-2 text-xs text-muted">
+                  별칭으로 넓혀 찾음:{" "}
+                  {r.expanded_terms.map((e, i) => (
+                    <span key={e.term}>
+                      {i ? " · " : ""}“{e.term}” → {e.spellings.join(", ")}
+                    </span>
+                  ))}{" "}
+                  (설정 → 작업 공간의 기술명 별칭)
+                </p>
+              ) : null}
               {r.hits.length ? <Hits hits={r.hits} /> : <EmptyState>찾은 결과가 없습니다.</EmptyState>}
             </div>
           )}

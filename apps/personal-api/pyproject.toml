@@ -12,6 +12,7 @@ browser = ["career-core[browser]"]
 oauth = ["career-core[oauth]"]
 age = ["career-core[age]"]
 pdf-render = ["career-core[pdf-render]"]
+korean = ["career-core[korean]"]
 
 [build-system]
 requires = ["hatchling"]

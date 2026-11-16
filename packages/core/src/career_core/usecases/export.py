@@ -72,6 +72,8 @@ EXCLUDED_TABLES: dict[str, str] = {
     "core.oauth_tokens": "본 외부 토큰·폐기 목록: 수명이 짧은 설치별 기록이고 연결(oauth_identities)을 따른다",
     "core.maintenance_results": "이 설치의 주기 유지보수 기록 (c0020). 복원한 설치에서 다시 쌓인다",
     "core.restore_jobs": "웹 복원 작업 상태 (c0024). 이 설치의 임시 파일을 가리키는 일시 상태",
+    "core.judge_cache": "판정 모델 응답 캐시 (c0022): 다시 물으면 생기는 파생 자료이고, "
+    "지운 문서의 인용을 백업으로 옮기지 않는다",
 }
 # 복원 후 다시 큐에 넣는 작업 종류 → 대상 표. 내보낼 때 대기·실행 중이던 것만 manifest에 적는다.
 REQUEUE_KINDS: dict[str, str] = {
@@ -1179,6 +1181,7 @@ def _schema_c0021(arc: _Archive) -> None:
     arc.rewrite("core.workspace_settings", lambda row: {**row, "tech_aliases": []})
 
 
+no_data_change("c0022", "판정 응답 캐시 judge_cache (내보내지 않음)")
 no_data_change("c0024", "웹 복원 작업 표 restore_jobs (내보내지 않음)")
 
 

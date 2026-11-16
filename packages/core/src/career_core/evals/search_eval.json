@@ -70,5 +70,14 @@
     {"q": "온콜 경험", "expect": "장애 대응 당번", "type": "paraphrase"},
     {"q": "발표 경험", "expect": "세미나", "type": "paraphrase"},
     {"q": "서비스 장애를 어떻게 수습했나", "expect": "되돌리고", "type": "paraphrase"}
+  ],
+  "workspace_aliases": [{"term": "FastAPI", "aliases": ["패스트API", "fast api"]}],
+  "alias_queries": [
+    {"q": "패스트API", "expect": "FastAPI로 다시 작성", "via": "workspace"},
+    {"q": "kubernetes", "expect": "쿠버네티스", "via": "builtin"},
+    {"q": "k8s", "expect": "쿠버네티스", "via": "builtin"},
+    {"q": "포스트그레스", "expect": "PostgreSQL", "via": "builtin"},
+    {"q": "레디스", "expect": "Redis 캐시", "via": "builtin"},
+    {"q": "마이에스큐엘", "expect": "MySQL", "via": "builtin"}
   ]
 }

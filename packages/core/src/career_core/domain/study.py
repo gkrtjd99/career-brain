@@ -15,7 +15,12 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from career_core.domain.korean import TechAliases
+from career_core.domain.korean import (
+    TechAliases,
+    contains_phrase,
+    content_words,
+    korean_analyzer,
+)
 
 
 class StudyRuleError(ValueError):
@@ -549,10 +554,14 @@ def requirement_terms(text: str, aliases: TechAliases | None = None) -> list[Req
         add(key, maps.labels.get(key, raw))
     for _, key in sorted(phrase_hits):
         add(key, maps.labels.get(key, key))
+    # 띄어쓰기는 보지 않는다 ("테스트코드" = "테스트 코드"). 형태소 분석기가 있으면 낱말 단위로.
     for ko in _KO_TERMS:
-        if ko in rest:
+        if contains_phrase(rest, ko):
             add(ko, ko)
     return found
+
+
+_HANGUL_RE = re.compile(r"[가-힣]+")
 
 
 def _strip_particle(word: str) -> str:
@@ -565,11 +574,17 @@ def _strip_particle(word: str) -> str:
 def requirement_query(text: str) -> str:
     """요건 문장 → 주장 검색어. 흔한 요건 말("경험", "또는", "이상")을 빼고 낱말만 남긴다."""
     words = []
+    morph = korean_analyzer().morphological
     for raw in re.split(r"[\s,.;:!?()\[\]{}\"'`/·]+", text or ""):
-        w = _strip_particle(raw.strip())
-        if len(w) < 2 and w.lower() not in ("c", "r"):
-            continue
-        if w in _KO_STOP or w.lower() in _EN_STOP or re.fullmatch(r"\d+(?:년|개월)?", w):
-            continue
-        words.append(w)
+        raw = raw.strip()
+        # 형태소 분석기가 있으면 한글 낱말을 내용어로 ("결제시스템을" → 결제, 시스템)
+        parts = (
+            content_words(raw) if morph and _HANGUL_RE.fullmatch(raw) else [_strip_particle(raw)]
+        )
+        for w in parts:
+            if len(w) < 2 and w.lower() not in ("c", "r"):
+                continue
+            if w in _KO_STOP or w.lower() in _EN_STOP or re.fullmatch(r"\d+(?:년|개월)?", w):
+                continue
+            words.append(w)
     return " ".join(words) or " ".join((text or "").split())

@@ -585,7 +585,10 @@ async def test_visibility_judge_quotes_are_checked_and_advisory(db, env, tmp_pat
         r = await c.post(f"/core/applications/{aid}/visibility-judge", headers=auth("owner"))
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["basis"] == "judge_advisory" and body["judge"]["calls"] == 1
+        # 위에서 같은 요건·같은 글을 이미 물었다: 응답 캐시(c0022)에서 꺼내고 다시 부르지 않는다
+        assert body["basis"] == "judge_advisory"
+        assert (body["judge"]["calls"], body["judge"]["cached"]) == (0, 1)
+        assert len(client.requests) == 1
         r = await c.get(
             f"/core/study/postings/{pid}/claim-suggestions",
             params={"judge": "true"},
@@ -621,18 +624,19 @@ def _gold(fx):
 
 async def test_judge_eval_with_scripted_client(db, env):
     fx = judge_eval.load_fixture()
-    assert len(fx["claims"]) == 24 and sum(len(d["requirements"]) for d in fx["documents"]) == 16
+    # 합성 100건: 주장 64 + 가시성 36 (c0022에서 40건 → 100건, 실제 공고·이력서 말투)
+    assert len(fx["claims"]) == 64 and sum(len(d["requirements"]) for d in fx["documents"]) == 36
     report = await judge_eval.evaluate(fx, None)
     base = report.scores
-    assert (base["claim"]["baseline"].correct, base["visibility"]["baseline"].correct) == (14, 13)
+    assert (base["claim"]["baseline"].correct, base["visibility"]["baseline"].correct) == (31, 21)
     assert "judge" not in base["claim"] and report.calls == 0
 
     client = ScriptedJudge(_gold(fx))
     gw = judge_gateway(db, client)
     report = await judge_eval.evaluate(fx, judges.gateway_caller(gw, env["owner"]))
-    assert report.scores["claim"]["judge"].correct == 24
-    assert report.scores["visibility"]["judge"].correct == 16
-    assert report.calls == len(client.requests) == 21 + 4  # 같은 요건 문장은 한 번에
+    assert report.scores["claim"]["judge"].correct == 64
+    assert report.scores["visibility"]["judge"].correct == 36
+    assert report.calls == len(client.requests) == 43 + 9  # 같은 요건 문장은 한 번에
     assert all(r.data_classes == frozenset({"public"}) for r in client.requests)
     assert any("format" in line or "accuracy" in line for line in judge_eval.format_report(report))
 
@@ -646,5 +650,5 @@ async def test_judge_eval_with_scripted_client(db, env):
         fx, judges.gateway_caller(judge_gateway(db, lazy), env["owner"])
     )
     vis = report.scores["visibility"]["judge"]
-    assert vis.unclear == 16 and vis.correct == 8  # 정답이 no인 8개만 맞음
-    assert report.scores["claim"]["judge"].correct == 15  # 정답이 yes인 15개
+    assert vis.unclear == 36 and vis.correct == 17  # 정답이 no인 17개만 맞음
+    assert report.scores["claim"]["judge"].correct == 38  # 정답이 yes인 38개

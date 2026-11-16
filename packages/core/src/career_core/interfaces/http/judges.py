@@ -29,6 +29,17 @@ class VisibilityRowOut(BaseModel):
     agrees: bool | None
 
 
+class JudgeCacheOut(BaseModel):
+    entries: int
+    hits: int
+    saved_usd: str | None
+    days: int  # 보관 일수 (CAREER_JUDGE_CACHE_DAYS, 0 = 캐시 안 씀)
+
+
+class JudgeCacheClearedOut(BaseModel):
+    deleted: int
+
+
 class VisibilityJudgeOut(BaseModel):
     application_id: UUID
     document_ids: list[UUID]
@@ -48,7 +59,9 @@ def add_judge_routes(router: APIRouter, deps, authorize) -> None:
     async def visibility_judge(
         actor: judge_actor, application_id: UUID, body: VisibilityJudgeIn | None = None
     ) -> VisibilityJudgeOut:
-        """요건 가시성: 단어 일치 기준선 + 판정 모델 의견. 저장하지 않고 검사 판정도 바꾸지 않는다."""
+        """요건 가시성: 단어 일치 기준선 + 판정 모델 의견. 문서에 저장하지 않고 검사 판정도 바꾸지 않는다.
+
+        같은 요건·같은 글이면 응답 캐시(c0022)에서 꺼낸다 (`judge.cached`)."""
         body = body or VisibilityJudgeIn()
         try:
             result = await uc.judge_application_visibility(
@@ -57,3 +70,16 @@ def add_judge_routes(router: APIRouter, deps, authorize) -> None:
         except NotFound as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found") from exc
         return VisibilityJudgeOut.model_validate(result, from_attributes=True)
+
+    @router.get("/judges/cache", response_model=JudgeCacheOut)
+    async def judge_cache(actor: judge_actor) -> JudgeCacheOut:
+        """판정 응답 캐시(c0022) 크기와 꺼내 쓴 횟수. 같은 질문은 다시 부르지 않는다."""
+        stats = await uc.cache_stats(deps.db, actor)
+        return JudgeCacheOut(
+            entries=stats.entries, hits=stats.hits, saved_usd=stats.saved_usd, days=uc.cache_days()
+        )
+
+    @router.delete("/judges/cache", response_model=JudgeCacheClearedOut)
+    async def clear_judge_cache(actor: judge_actor) -> JudgeCacheClearedOut:
+        """이 공간의 판정 응답 캐시를 지운다 (다음 판정은 모델을 다시 부른다)."""
+        return JudgeCacheClearedOut(deleted=await uc.clear_cache(deps.db, actor))

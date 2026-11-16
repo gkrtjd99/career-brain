@@ -6,6 +6,7 @@
 #   docker build -t career-brain:local --build-arg EXTRAS=local-embed . # + 로컬 임베딩 (fastembed/ONNX)
 #   docker build -t career-brain:local --build-arg EXTRAS=browser .     # + 동적 공고 렌더링 (Chromium)
 #   docker build -t career-brain:local --build-arg EXTRAS=pdf-render .  # + 스캔 PDF 공고를 이미지로 (pypdfium2, ~8MB)
+#   docker build -t career-brain:local --build-arg EXTRAS=korean .      # + 한국어 형태소 분석 (kiwipiepy, ~100MB, CAREER_KOREAN_ANALYZER=kiwi)
 #   docker build -t career-brain:local --build-arg WEB=0 .              # 웹 빌드 생략 (API만)
 #
 # 이미지에는 비밀값·설정·사용자 자료가 없다. 설정은 환경변수와 /config/models.toml,

@@ -1,7 +1,7 @@
 """core: 웹 복원 작업 상태를 DB에 (여러 프로세스·재시작에 걸쳐)
 
 Revision ID: c0024
-Revises: c0021
+Revises: c0022
 
 - ``core.restore_jobs``: 웹 복원(``/core/maintenance/restore``) 작업 하나 = 올린 묶음 하나. 공간마다 하나
   (``UNIQUE(workspace_id)``, 새 업로드가 옛 작업을 바꾼다). 상태·단계·진행 수·확인 보고와 오류만 둔다.
@@ -19,7 +19,7 @@ from career_core.db import rls
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "c0024"
-down_revision = "c0021"
+down_revision = "c0022"
 branch_labels = None
 depends_on = None
 

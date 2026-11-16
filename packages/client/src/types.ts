@@ -294,11 +294,19 @@ export interface SearchHit {
   study_title?: string | null;
 }
 
+/** 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api) */
+export interface ExpandedTerm {
+  term: string;
+  canonical: string;
+  spellings: string[];
+}
+
 export interface SearchResult {
   query: string;
   mode: string;
   semantic_note: string | null;
   hits: SearchHit[];
+  expanded_terms?: ExpandedTerm[];
 }
 
 // ---------------------------------------------------------------- job postings

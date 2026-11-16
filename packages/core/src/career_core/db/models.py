@@ -1058,3 +1058,32 @@ class JobFetchConfirmation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0022: 판정 모델 결과 캐시
+
+
+class JudgeCache(Base):
+    """판정 모델 응답 캐시: (용도, 라우트 모델, 프롬프트 버전, 입력 해시)마다 한 행. 만료 뒤에는 쓰지 않는다.
+
+    응답에 문서 인용이 들어 있어 공간 RLS 아래 둔다. 내보내기에서는 뺀다 (export.EXCLUDED_TABLES).
+    """
+
+    __tablename__ = "judge_cache"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    purpose: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    prompt_version: Mapped[str] = mapped_column(Text)
+    input_hash: Mapped[str] = mapped_column(Text)
+    response_text: Mapped[str] = mapped_column(Text)
+    endpoint: Mapped[str] = mapped_column(Text)
+    result_model: Mapped[str] = mapped_column(Text)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), default=None)
+    cost_basis: Mapped[str] = mapped_column(Text)
+    call_id: Mapped[UUID | None] = mapped_column(default=None)
+    hits: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
