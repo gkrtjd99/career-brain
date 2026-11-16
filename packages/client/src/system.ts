@@ -102,6 +102,18 @@ export interface MaintenanceRun {
   blobs_total: number;
 }
 
+/** 주기 유지보수 (c0020). 일정은 설치 전체, 결과 수는 이 공간 것만. */
+export interface AutoMaintenance {
+  last_started_at: IsoDateTime | null;
+  last_finished_at: IsoDateTime | null;
+  interval_seconds: number | null;
+  next_at: IsoDateTime | null;
+  running: boolean;
+  counts: Record<string, number>;
+  errors: number;
+  last_changed_at: IsoDateTime | null;
+}
+
 export interface Maintenance {
   tables: Record<string, number>;
   excluded: Record<string, number>;
@@ -115,6 +127,8 @@ export interface Maintenance {
   /** 웹에서 묶음을 올려 합치기 (c0018) */
   restore_available: boolean;
   max_restore_bytes: number;
+  /** 주기 유지보수 (c0020). 없으면 서버가 예전 버전 */
+  auto?: AutoMaintenance | null;
 }
 
 export type DuplicatePolicy = "skip" | "fail";
