@@ -133,6 +133,11 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 - FORCE RLS(`workspace_isolation`), 앱 role `SELECT, INSERT, UPDATE, DELETE`. 다른 공간의 같은 질문은 다시 부른다 (시험).
 - `GET /core/judges/cache` → `{entries, hits, saved_usd, days}`, `DELETE /core/judges/cache` → `{deleted}` (scope `documents.ai`).
 - 내보내기에서 뺀다 (`EXCLUDED_TABLES`): 다시 물으면 생기는 파생 자료이고, 응답 `quote`에 문서 글이 들어 있어 지운 문서의 글을 백업으로 옮기지 않기 위해서다.
+- 대상 ID (c0026): 행마다 요청에 들어간 주장(`claim_ids`, 주장 판정의 후보)과 지원 문서(`document_ids`, 가시성 판정에 합친 문서)를 적는다.
+  주장·지원 문서를 지우면(경험·지원 삭제의 CASCADE, 복원의 삭제 기록 재적용 포함) DB trigger `judge_cache_forget`이 그 ID가 든 응답을 지운다.
+  키에는 넣지 않는다: 같은 글이면 다른 주장이어도 같은 응답을 쓰고, 꺼낼 때 그 주장 ID를 행에 더한다. 평가 스크립트처럼 주장 ID가 없는 호출은 빈 배열이다.
+  c0026 전에 담긴 행은 대상을 몰라 만료나 비우기로만 지워진다. 공고(요건 글)를 지워도 캐시는 남는다(만료까지).
+- 웹: 설정 화면 "판정 응답 캐시" (egress 권한): 응답 수·꺼내 쓴 횟수·아낀 비용·보관 일수, "캐시 비우기"(확인 창).
 
 ### 평가 (`python -m career_core.evals.judge_eval --models <파일>`)
 
@@ -149,6 +154,7 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 이전 40건 세트(2026-11-17 앞선 측정): 기준선 14/24·13/16, gpt-6.1-sol 22/24·16/16($0.048/25회), gemini-3.5-flash-lite 24/24·16/16($0.007/25회).
 
 - 기준선이 틀린 것: 학습·계획을 경험으로, 부정문("써 본 적 없다"), 같은 낱말 다른 뜻, 다른 표현(낱말이 안 겹침).
+- 2026-11-17 다시 잰 기준선(`--baseline-only`, 모델 호출 없음): 기본 별칭 표를 넓혀(c32 `프로메테우스`·`그라파나`, c59 `지라`·`컨플루언스`) 주장 31/64 → **33/64**, 가시성 21/36 그대로. 형태소 모드(kiwi)도 33/64 — 복합명사 규칙으로 c19가 다시 맞음 (`search.md` "복합명사 낱말 일치"). 판정 모델 숫자는 다시 재지 않았다.
 - 표본이 작다 (합성 100건, 같은 사람이 만듦). 기본 라우트로 켜지 않는다. 쓰려면 `models.toml`에 `judge_claim`·`judge_visibility`를 적는다.
 
 ## 모니터링

@@ -1192,6 +1192,9 @@ def _c0025_fetch_confirmations(arc) -> None:
         arc.add_table("core.job_fetch_confirmations")
 
 
+no_data_change("c0026", "judge_cache 대상 ID·삭제 trigger (judge_cache는 내보내지 않음)")
+
+
 @schema_step("c0029", "parse_runs.hidden_text 추가 (옛 묶음의 파싱은 숨김 글을 넣었다: 'keep')")
 def _c0029_parse_hidden_text(arc) -> None:
     if arc.has("core.parse_runs"):

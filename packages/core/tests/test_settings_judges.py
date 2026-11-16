@@ -628,7 +628,8 @@ async def test_judge_eval_with_scripted_client(db, env):
     assert len(fx["claims"]) == 64 and sum(len(d["requirements"]) for d in fx["documents"]) == 36
     report = await judge_eval.evaluate(fx, None)
     base = report.scores
-    assert (base["claim"]["baseline"].correct, base["visibility"]["baseline"].correct) == (31, 21)
+    # 31 → 33: 기본 별칭 표를 넓혀(2026-11-17) c32(프로메테우스·그라파나)·c59(지라·컨플루언스)가 맞음
+    assert (base["claim"]["baseline"].correct, base["visibility"]["baseline"].correct) == (33, 21)
     assert "judge" not in base["claim"] and report.calls == 0
 
     client = ScriptedJudge(_gold(fx))

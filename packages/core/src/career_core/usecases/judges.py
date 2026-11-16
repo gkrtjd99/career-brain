@@ -12,7 +12,8 @@
 - 판정 결과는 **참고용**이다. 주장을 자동으로 연결하지 않고, 요건을 충족으로 표시하지 않는다.
   판정을 주장·문서에 저장하지 않는다. 같은 질문에 두 번 돈을 내지 않도록 모델 응답만 캐시(c0022
   `judge_cache`)에 둔다: (용도, 라우트 모델, 프롬프트 버전, 입력 해시)가 같고 만료 전이면 다시 부르지 않는다.
-  비용은 처음 부를 때만 모델 장부 `model_calls`에 남는다.
+  비용은 처음 부를 때만 모델 장부 `model_calls`에 남는다. 캐시 행에는 요청에 들어간 주장·지원 문서 ID가
+  붙어(c0026) 그 주장·문서를 지우면 DB trigger가 응답도 지운다.
 - 자료 등급: restricted 원본에서 온 주장·그 주장에 연결된 문단은 보내지 않는다
   (`data_classes.restricted_claims`). 나머지는 근거 원본 등급 + private로 게이트웨이 egress 검사를 받는다.
 - 외부로 자료를 보내므로 `egress` 범위가 있는 사람만 부른다.
@@ -25,7 +26,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -71,6 +74,22 @@ CACHE_PURPOSES = ("judge_claim", "judge_visibility")
 MAX_CACHED_RESPONSE_CHARS = 65_536
 
 ModelCaller = Callable[[str, ModelRequest], Awaitable[ModelResult]]
+
+# 지금 묻는 요청에 들어간 (주장 ID들, 지원 문서 ID들). 캐시에 쓸 때 행에 붙인다 (c0026).
+_TARGETS: ContextVar[tuple[tuple[UUID, ...], tuple[UUID, ...]]] = ContextVar(
+    "career_judge_cache_targets", default=((), ())
+)
+
+
+@contextmanager
+def cache_targets(*, claims: Sequence[UUID] = (), documents: Sequence[UUID] = ()) -> Iterator[None]:
+    """이 블록에서 캐시에 담는 응답에 대상 ID를 붙인다. 그 주장·문서를 지우면 응답도 지워진다."""
+    token = _TARGETS.set((tuple(dict.fromkeys(claims)), tuple(dict.fromkeys(documents))))
+    try:
+        yield
+    finally:
+        _TARGETS.reset(token)
+
 
 CLAIM_SYSTEM_PROMPT = """\
 You review one job-posting requirement and numbered candidate statements taken from the user's
@@ -276,6 +295,7 @@ def cached_caller(
     """(용도, 라우트 모델, 프롬프트 버전, 입력 해시)가 같고 만료 전인 응답이 있으면 다시 부르지 않는다.
 
     꺼낸 응답은 `notes`에 `judge_cache_hit`, 비용 0, `cost_basis = cached`. 장부에는 새 행을 남기지 않는다.
+    대상 ID(`cache_targets`)는 담을 때 붙이고, 꺼낼 때 새 대상이 있으면 더한다 (같은 글의 다른 주장).
     """
     keep_days = cache_days() if days is None else days
 
@@ -291,6 +311,7 @@ def cached_caller(
             JudgeCache.input_hash == digest,
         )
         now = clock()
+        claims, documents = _TARGETS.get()
         async with db.workspace_session(actor.workspace_id) as s:
             row = await s.scalar(
                 select(JudgeCache).where(*key, JudgeCache.expires_at > now).with_for_update()
@@ -298,6 +319,10 @@ def cached_caller(
             if row is not None:
                 row.hits += 1
                 row.last_hit_at = now
+                if not set(claims) <= set(row.claim_ids or ()):
+                    row.claim_ids = list(dict.fromkeys([*(row.claim_ids or ()), *claims]))
+                if not set(documents) <= set(row.document_ids or ()):
+                    row.document_ids = list(dict.fromkeys([*(row.document_ids or ()), *documents]))
                 return ModelResult(
                     text=row.response_text,
                     endpoint=row.endpoint,
@@ -323,6 +348,8 @@ def cached_caller(
             "created_at": now,
             "last_hit_at": None,
             "expires_at": now + timedelta(days=keep_days),
+            "claim_ids": list(claims),
+            "document_ids": list(documents),
         }
         async with db.workspace_session(actor.workspace_id) as s:
             # 만료된 행은 이 공간에 새로 쓸 때 지운다 (주기 작업 없이 크기가 묶인다)
@@ -396,10 +423,18 @@ def _parse(text: str, ids: Sequence[str]) -> dict[str, dict[str, Any]]:
 
 
 async def _ask(
-    call_model: ModelCaller, purpose: str, request: ModelRequest, ids: Sequence[str], tally: _Tally
+    call_model: ModelCaller,
+    purpose: str,
+    request: ModelRequest,
+    ids: Sequence[str],
+    tally: _Tally,
+    *,
+    claims: Sequence[UUID] = (),
+    documents: Sequence[UUID] = (),
 ) -> dict[str, dict[str, Any]] | None:
     try:
-        result = await call_model(purpose, request)
+        with cache_targets(claims=claims, documents=documents):
+            result = await call_model(purpose, request)
     except ModelDenied as exc:
         tally.errors.append(f"denied:{exc.code}")
         return None
@@ -428,8 +463,12 @@ async def judge_claims(
     *,
     data_classes: frozenset[str],
     tally: _Tally | None = None,
+    claim_ids: Sequence[UUID] = (),
 ) -> tuple[dict[str, Verdict], JudgeRun]:
-    """요건 한 줄 × 후보 주장들 (키, 문장). 결과는 키별 판정. 후보가 없으면 부르지 않는다."""
+    """요건 한 줄 × 후보 주장들 (키, 문장). 결과는 키별 판정. 후보가 없으면 부르지 않는다.
+
+    `claim_ids`: 보낸 후보의 주장 ID. 응답 캐시 행에 붙어, 그 주장을 지우면 응답도 지워진다 (c0026).
+    """
     tally = tally if tally is not None else _Tally()
     items = list(candidates)[:MAX_CANDIDATES]
     if not items:
@@ -446,7 +485,7 @@ async def judge_claims(
         max_output_tokens=min(4000, 200 + 120 * len(items)),
         data_classes=data_classes,
     )
-    parsed = await _ask(call_model, JUDGE_CLAIM_PURPOSE, request, ids, tally)
+    parsed = await _ask(call_model, JUDGE_CLAIM_PURPOSE, request, ids, tally, claims=claim_ids)
     out: dict[str, Verdict] = {}
     for rid, (key, _) in zip(ids, items):
         row = (parsed or {}).get(rid)
@@ -467,8 +506,12 @@ async def judge_visibility(
     *,
     data_classes: frozenset[str],
     tally: _Tally | None = None,
+    document_ids: Sequence[UUID] = (),
 ) -> tuple[dict[str, Verdict], JudgeRun]:
-    """요건들 (키, 문장) × 문서 글. "보인다"는 인용이 문서에 실제로 있을 때만 인정한다."""
+    """요건들 (키, 문장) × 문서 글. "보인다"는 인용이 문서에 실제로 있을 때만 인정한다.
+
+    `document_ids`: 글을 합친 지원 문서. 응답 캐시 행에 붙어, 그 문서를 지우면 응답도 지워진다 (c0026).
+    """
     tally = tally if tally is not None else _Tally()
     items = list(requirements)[:MAX_REQUIREMENTS]
     text = (document or "")[:MAX_DOCUMENT_CHARS]
@@ -486,7 +529,9 @@ async def judge_visibility(
         max_output_tokens=min(4000, 200 + 160 * len(items)),
         data_classes=data_classes,
     )
-    parsed = await _ask(call_model, JUDGE_VISIBILITY_PURPOSE, request, ids, tally)
+    parsed = await _ask(
+        call_model, JUDGE_VISIBILITY_PURPOSE, request, ids, tally, documents=document_ids
+    )
     out: dict[str, Verdict] = {}
     for rid, (key, _) in zip(ids, items):
         row = (parsed or {}).get(rid)
@@ -589,6 +634,7 @@ async def judge_application_visibility(
             "\n\n".join(b.text for b in sent),
             # 문서 글은 사용자가 쓴 글(private). 브레인 근거 문장은 보내지 않는다.
             data_classes=frozenset({"private"}),
+            document_ids=[d.id for d in docs],
         )
     rows = []
     for i, r in enumerate(baseline):
@@ -622,6 +668,7 @@ __all__ = [
     "VisibilityRow",
     "cache_days",
     "cache_stats",
+    "cache_targets",
     "cached_caller",
     "clear_cache",
     "gateway_caller",

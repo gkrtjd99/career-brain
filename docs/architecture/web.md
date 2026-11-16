@@ -36,7 +36,7 @@ apps/personal-web/src/
   components/doc/ BlockEditor(문단 편집), ChecksPanel(품질 검사), SuggestionsPanel(AI 수정안), BatchSuggestSheet(문단별 일괄 수정안, c0023)
   components/runs/ RunParts(예상 비용·실행 진행·멱등 키), InterviewBatchSheet(경험별 일괄 인터뷰 질문, c0023)
   components/study/ parts(응시·오답 기록, 복습 카드)
-  components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전)
+  components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전), JudgeCacheSection(판정 응답 캐시 크기·비우기, egress 권한)
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
                   Study, StudyItem, Usage, Settings
 ```
