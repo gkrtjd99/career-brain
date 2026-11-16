@@ -554,7 +554,7 @@ function ReportView({ report }: { report: MergeReport }) {
 
 /** 자동 정리(주기 유지보수) 상태: 마지막·다음 실행과 이 공간에서 한 일. */
 function AutoMaintenanceLine({ auto }: { auto: NonNullable<Maintenance["auto"]> }) {
-  if (!auto.interval_seconds) {
+  if (auto.interval_seconds === 0) {
     return <p className="text-xs text-muted">자동 정리: 꺼짐 (CAREER_MAINTENANCE_INTERVAL_SECONDS=0)</p>;
   }
   const done = Object.entries(auto.counts).filter(([, n]) => n > 0);
