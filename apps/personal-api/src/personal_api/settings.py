@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from personal_api.envfile import load_env_file
+
 # 로컬 개발 기본값 (deploy/compose). 인터넷에 노출하는 배포에서는 반드시 환경변수로 바꾼다.
 _DEV_APP_URL = "postgresql+psycopg://career_api:career-api-dev-only@127.0.0.1:5432/career_brain"
 _DEV_MIGRATION_URL = "postgresql+psycopg://career:career-dev-only@127.0.0.1:5432/career_brain"
@@ -19,6 +21,8 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
+        # 로컬 `.env`(git 제외)로 키·토큰을 둘 수 있다. 셸 환경변수가 우선한다.
+        load_env_file(os.environ.get("CAREER_ENV_FILE", ".env"))
         return cls(
             database_url=os.environ.get("CAREER_DATABASE_URL", _DEV_APP_URL),
             migration_database_url=os.environ.get(

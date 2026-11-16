@@ -43,10 +43,11 @@ npm run dev                                             # http://localhost:5173
 
 ```bash
 cp models.example.toml models.toml       # 엔드포인트·라우트·월 예산 (키는 환경변수로)
+cp .env.example .env                     # 키·토큰 (git 제외, 셸 환경변수가 우선)
 uv run personal-api models               # 설정 상태 (키 값은 출력하지 않음)
 uv run personal-api pricing              # 단가표 점검 (--fetch-xai: xAI 공식 단가 API와 대조)
-CAREER_API_TOKEN=<token> uv run personal-api ping       # 짧은 합성 요청으로 연결 확인 (과금됨)
-CAREER_API_TOKEN=<token> uv run personal-api usage --by model
+uv run personal-api ping                 # 짧은 합성 요청으로 연결 확인 (종량제면 과금)
+uv run personal-api usage --by model     # CAREER_API_TOKEN 의 공간
 curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=day&days=30"
 ```
 
