@@ -110,3 +110,20 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - `core.job_fetch_runs` — 가져오기 시도 기록. `status` pending/done/listing/failed, `error_code`, `http_status`, `unchanged`, 목록 페이지면 `candidates`(따라가지 않음), `notes`.
 - 확정하지 않은 초안은 7일 뒤 `purge_unconfirmed`로 정리 (버전·실행 기록은 FK CASCADE).
 - 상세: `docs/architecture/postings.md`.
+
+## 지원·문서 (c0007)
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `applications` | 저장한 공고 하나에 대한 지원. `posting_id`, 만들 때 확정돼 있던 `posting_version_id`, `status` draft/submitted/passed/rejected/withdrawn, `result_note`. 제출 이후 상태면 `submitted_at` 필수 (`ck_applications_submitted`) | 전체 |
+| `application_documents` | 지원의 문서. `kind` question/resume/cover_letter/portfolio/other. 문항이면 `question_index`·`question_prompt`(복사본) 필수. `char_limit`·`byte_limit`·`count_rule`(공백·줄바꿈·인코딩). `current_revision`(0 = 본문 없음) | 전체 |
+| `document_revisions` | 저장 1회 = 1행. `blocks`(문단 `{id, text, origin, claim_ids}`), `content_hash`, 저장 시점 `counts`, `origin` user/ai_suggestion(그러면 `suggestion_id` 필수), `reason`, `idempotency_key`. `(document_id, revision_no)`·`(document_id, idempotency_key)` UNIQUE | **SELECT, INSERT** |
+| `document_claims` | revision 문단 ↔ `core.claims`. `(revision_id, block_id, claim_id)` UNIQUE | **SELECT, INSERT** |
+| `document_suggestions` | AI 수정안. 원문·수정안·이유, `status` proposed/rejected/applied/dismissed, 거부면 `reject_reasons` 필수, 적용이면 `applied_revision_id` 필수, `model_call_id` | SELECT, INSERT, UPDATE |
+| `application_submissions` | 실제 제출본. 지원마다 1건(`application_id` UNIQUE). 문서 본문·근거 주장 문장·공고 항목을 **복사**한 `documents`·`posting`, 당시 검사 결과 `checks`, `content_hash`, 제출 시점 `posting_version_id` | **SELECT, INSERT** |
+
+- 모든 테이블 RLS FORCE, 공간 간 참조는 복합 FK. 다른 공간의 주장 ID를 문단에 걸면 앱이 `unknown_claim`으로, DB가 FK로 거부한다.
+- 지울 수 없게 묶은 참조는 `NO ACTION`(문장 끝 검사): 제출본 → 지원·공고·공고 버전, 문단 근거 → 주장, 적용된 수정안 → revision. 공간 삭제의 연쇄 삭제는 막지 않는다.
+- 저장 충돌: 문서 행을 `FOR UPDATE`로 잠그고 `base_revision = current_revision`일 때만 다음 번호로 넣는다. 다르면 409, 덮어쓰지 않는다.
+- AI 수정안은 `claims`·`claim_evidence`에 쓰지 않는다. `claim_evidence`는 원래 원문 위치와 인터뷰 답만 가리키므로(`ck_claim_evidence_kind`) AI 글이 근거가 될 길이 없다.
+- 상세: `docs/architecture/applications.md`.
