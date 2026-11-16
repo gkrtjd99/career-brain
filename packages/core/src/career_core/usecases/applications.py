@@ -14,14 +14,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
-from dataclasses import dataclass
+import re
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from career_core.db import Claim, Database, Experience, JobPosting
@@ -32,6 +34,7 @@ from career_core.db.models import (
     ApplicationSubmission,
     DocumentClaim,
     DocumentRevision,
+    DocumentSettings,
     DocumentSuggestion,
 )
 from career_core.domain.brain import CONFIRMED_STATUSES
@@ -48,6 +51,7 @@ from career_core.domain.documents import (
     EvidenceClaim,
     Finding,
     RevisionConflict,
+    SpanInput,
     SuggestionStatus,
     TextCounts,
     ai_ratio,
@@ -62,7 +66,8 @@ from career_core.domain.documents import (
     rule_from_prompt,
 )
 from career_core.domain.postings import FieldName, PostingStatus
-from career_core.llm import ChatMessage, ModelRequest
+from career_core.domain.sensitive import OwnContacts, sensitive_findings, sensitive_hash
+from career_core.llm import ChatMessage, ModelRequest, ModelResult
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound
@@ -109,6 +114,8 @@ class DocumentSummary:
     byte_limit: int | None
     current_revision: int
     counts: dict | None
+    # 공용 문서에서 복사했으면 그 출처 {document_id, revision_id}
+    source: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,12 +156,14 @@ class BlockView:
     text: str
     origin: str
     claim_ids: list[str]
+    # 문장 단위 근거 [{start, end, claim_ids}] (없으면 빈 목록 = 문단 단위)
+    spans: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentView:
     id: UUID
-    application_id: UUID
+    application_id: UUID | None  # None이면 공용 문서
     kind: str
     title: str
     question_index: int | None
@@ -170,6 +179,8 @@ class DocumentView:
     counts: dict
     ai_ratio: float
     editable: bool
+    # 복사 출처 {document_id, revision_id, revision_no, title} (공용 문서에서 복사한 경우)
+    source: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +222,8 @@ class SuggestResult:
     questions: list[str]
     dropped: int
     model_call_id: UUID | None
+    # 같은 멱등 키로 이미 만든 수정안을 돌려줬다 (모델을 다시 부르지 않았다)
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,8 +290,9 @@ def _limit(value: Any, code: str) -> int | None:
     return value
 
 
-def _ensure_editable(app: Application) -> None:
-    if app.status != ApplicationStatus.DRAFT:
+def _ensure_editable(app: Application | None) -> None:
+    """지원 문서는 초안 지원에서만 고친다. 공용 문서(app=None)는 늘 고칠 수 있다(revision은 남는다)."""
+    if app is not None and app.status != ApplicationStatus.DRAFT:
         raise DocumentRuleError("application_locked")
 
 
@@ -291,8 +305,16 @@ def _counts(doc: ApplicationDocument, blocks: Sequence[dict]) -> TextCounts:
     )
 
 
+def _block_key(b: dict) -> list:
+    """해시·비교용. 문장 단위 근거(spans)는 있을 때만 넣는다 — 예전 revision의 해시가 그대로다."""
+    key = [b["id"], b["text"], b.get("claim_ids") or []]
+    if b.get("spans"):
+        key.append([[sp["start"], sp["end"], sp["claim_ids"]] for sp in b["spans"]])
+    return key
+
+
 def blocks_hash(blocks: Sequence[dict]) -> str:
-    data = [[b["id"], b["text"], b.get("claim_ids") or []] for b in blocks]
+    data = [_block_key(b) for b in blocks]
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -308,17 +330,21 @@ async def _get_app(s: AsyncSession, application_id: UUID, *, lock: bool = False)
 
 
 async def _get_doc(
-    s: AsyncSession, application_id: UUID, document_id: UUID, *, lock: bool = False
-) -> tuple[Application, ApplicationDocument]:
-    q = select(ApplicationDocument).where(
-        ApplicationDocument.id == document_id,
-        ApplicationDocument.application_id == application_id,
-    )
+    s: AsyncSession, application_id: UUID | None, document_id: UUID, *, lock: bool = False
+) -> tuple[Application | None, ApplicationDocument]:
+    """지원 문서(application_id) 또는 공용 문서(None). 다른 쪽 ID로는 찾지 않는다."""
+    q = select(ApplicationDocument).where(ApplicationDocument.id == document_id)
+    if application_id is None:
+        q = q.where(ApplicationDocument.application_id.is_(None))
+    else:
+        q = q.where(ApplicationDocument.application_id == application_id)
     if lock:
         q = q.with_for_update()
     doc = await s.scalar(q)
     if doc is None:
         raise NotFound("document")
+    if application_id is None:
+        return None, doc
     return await _get_app(s, application_id), doc
 
 
@@ -380,31 +406,59 @@ def _evidence(info: dict) -> EvidenceClaim:
 
 
 async def _block_inputs(s: AsyncSession, blocks: Sequence[dict]) -> list[BlockInput]:
-    infos = await _claims(s, {c for b in blocks for c in b.get("claim_ids") or []})
+    ids = {c for b in blocks for c in b.get("claim_ids") or []}
+    ids |= {c for b in blocks for sp in b.get("spans") or [] for c in sp["claim_ids"]}
+    infos = await _claims(s, ids)
+
+    def ev(claim_ids: Sequence[str]) -> tuple[EvidenceClaim, ...]:
+        return tuple(_evidence(infos[c]) for c in claim_ids if c in infos)
+
     return [
         BlockInput(
             id=b["id"],
             text=b["text"],
             origin=b.get("origin", BlockOrigin.USER),
-            claims=tuple(_evidence(infos[c]) for c in b.get("claim_ids") or [] if c in infos),
+            claims=ev(b.get("claim_ids") or []),
+            spans=tuple(
+                SpanInput(sp["start"], sp["end"], ev(sp["claim_ids"]))
+                for sp in b.get("spans") or []
+            ),
         )
         for b in blocks
     ]
 
 
+async def _settings(s: AsyncSession) -> DocumentSettings | None:
+    return await s.scalar(select(DocumentSettings))
+
+
+async def workspace_cliches(s: AsyncSession) -> tuple[str, ...]:
+    """공간 설정의 상투어 목록. 설정이 없으면 기본 목록 (설정 목록은 기본을 대신한다)."""
+    row = await _settings(s)
+    if row is None or row.cliches is None:
+        return DEFAULT_CLICHES
+    return tuple(row.cliches)
+
+
+async def own_contacts(s: AsyncSession) -> OwnContacts:
+    row = await _settings(s)
+    return OwnContacts.parse(row.own_contacts if row else None)
+
+
 async def _check_context(
-    s: AsyncSession, app: Application, extra_cliches: Sequence[str] = ()
-) -> tuple[CheckContext, JobPosting]:
-    posting = await s.get(JobPosting, app.posting_id)
-    fields = posting.fields or {}
+    s: AsyncSession, app: Application | None, extra_cliches: Sequence[str] = ()
+) -> tuple[CheckContext, JobPosting | None]:
+    """검사 문맥. 공용 문서(app=None)는 공고가 없다: 요건 가시성·회사 바꿔치기는 비고,
+    저장한 공고의 회사명은 모두 '다른 회사명'으로 본다(공용 문서에 특정 지원처가 남은 경우)."""
+    posting = await s.get(JobPosting, app.posting_id) if app is not None else None
+    fields = (posting.fields or {}) if posting is not None else {}
     reqs = tuple(("requirements", r) for r in fields.get(FieldName.REQUIREMENTS) or []) + tuple(
         ("preferred", r) for r in fields.get(FieldName.PREFERRED) or []
     )
-    others = (
-        await s.execute(
-            select(JobPosting.fields["company"].astext).where(JobPosting.id != posting.id)
-        )
-    ).scalars()
+    q = select(JobPosting.fields["company"].astext)
+    if posting is not None:
+        q = q.where(JobPosting.id != posting.id)
+    others = (await s.execute(q)).scalars()
     company = fields.get(FieldName.COMPANY)
     brain_rows = (
         await s.execute(
@@ -415,7 +469,11 @@ async def _check_context(
             .limit(5000)
         )
     ).all()
-    cliches = tuple(dict.fromkeys([*DEFAULT_CLICHES, *(c.strip() for c in extra_cliches if c)]))
+    # 공간 설정 목록 + 요청마다 더하는 extra_cliches (예전 요청 모양도 그대로 받는다)
+    base_cliches = await workspace_cliches(s)
+    cliches = tuple(
+        dict.fromkeys([*base_cliches, *(c.strip() for c in extra_cliches if c and c.strip())])
+    )
     ctx = CheckContext(
         company=company,
         job_title=fields.get(FieldName.TITLE),
@@ -532,11 +590,13 @@ async def list_applications(db: Database, actor: ActorContext) -> list[Applicati
                     ApplicationDocument.kind,
                     ApplicationDocument.current_revision,
                     DocumentRevision.counts,
-                ).outerjoin(
+                )
+                .outerjoin(
                     DocumentRevision,
                     (DocumentRevision.document_id == ApplicationDocument.id)
                     & (DocumentRevision.revision_no == ApplicationDocument.current_revision),
                 )
+                .where(ApplicationDocument.application_id.is_not(None))
             )
         ).all()
         for aid, kind, current, rev_counts in rows:
@@ -602,6 +662,7 @@ async def get_application(
                     d.byte_limit,
                     d.current_revision,
                     _counts(d, rev.blocks).as_dict() if rev else None,
+                    _source_ref(d),
                 )
             )
         submission_id = await s.scalar(
@@ -651,7 +712,7 @@ async def set_status(
 async def add_document(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     *,
     kind: str,
     title: str,
@@ -665,6 +726,9 @@ async def add_document(
     except ValueError as exc:
         raise DocumentRuleError("invalid_kind") from exc
     prompt = " ".join((question_prompt or "").split()) or None
+    if kind == DocumentKind.QUESTION and application_id is None:
+        # 공고 문항 문서는 지원에만 속한다. 공용 문서는 이력서·포트폴리오·자소서·기타
+        raise DocumentRuleError("question_not_shared")
     if kind == DocumentKind.QUESTION and not prompt:
         raise DocumentRuleError("question_prompt_required")
     if count_rule is None and prompt:
@@ -673,8 +737,8 @@ async def add_document(
     else:
         rule = CountRule.parse(count_rule)
     async with db.workspace_session(actor.workspace_id) as s:
-        app = await _get_app(s, application_id)
-        _ensure_editable(app)
+        if application_id is not None:
+            _ensure_editable(await _get_app(s, application_id))
         doc = ApplicationDocument(
             id=uuid4(),
             workspace_id=actor.workspace_id,
@@ -694,7 +758,7 @@ async def add_document(
 async def update_document(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     changes: dict[str, Any],
 ) -> None:
@@ -715,13 +779,32 @@ async def update_document(
             doc.count_rule = CountRule.parse(changes["count_rule"]).as_dict()
 
 
+def _source_ref(doc: ApplicationDocument) -> dict | None:
+    if doc.source_document_id is None:
+        return None
+    return {"document_id": str(doc.source_document_id), "revision_id": str(doc.source_revision_id)}
+
+
+def _block_view(b: dict) -> BlockView:
+    return BlockView(
+        b["id"],
+        b["text"],
+        b.get("origin", "user"),
+        list(b.get("claim_ids") or []),
+        [dict(sp) for sp in b.get("spans") or []],
+    )
+
+
 def _document_view(
-    app: Application, doc: ApplicationDocument, rev: DocumentRevision | None
+    app: Application | None,
+    doc: ApplicationDocument,
+    rev: DocumentRevision | None,
+    source: dict | None = None,
 ) -> DocumentView:
     blocks = rev.blocks if rev else []
     return DocumentView(
         id=doc.id,
-        application_id=app.id,
+        application_id=doc.application_id,
         kind=doc.kind,
         title=doc.title,
         question_index=doc.question_index,
@@ -732,21 +815,34 @@ def _document_view(
         current_revision=doc.current_revision,
         revision_no=rev.revision_no if rev else 0,
         revision_id=rev.id if rev else None,
-        blocks=[
-            BlockView(b["id"], b["text"], b.get("origin", "user"), list(b.get("claim_ids") or []))
-            for b in blocks
-        ],
+        blocks=[_block_view(b) for b in blocks],
         text=document_text(blocks),
         counts=_counts(doc, blocks).as_dict(),
         ai_ratio=ai_ratio(blocks),
-        editable=app.status == ApplicationStatus.DRAFT,
+        editable=app is None or app.status == ApplicationStatus.DRAFT,
+        source=source,
     )
+
+
+async def _source_info(s: AsyncSession, doc: ApplicationDocument) -> dict | None:
+    """복사 출처: 원본 문서 ID·제목과 복사한 revision 번호. 원본이 그 뒤에 바뀌어도 이 값은 그대로다."""
+    ref = _source_ref(doc)
+    if ref is None:
+        return None
+    src = await s.get(ApplicationDocument, doc.source_document_id)
+    rev = await s.get(DocumentRevision, doc.source_revision_id)
+    return {
+        **ref,
+        "revision_no": rev.revision_no if rev else None,
+        "title": src.title if src else None,
+        "current_revision": src.current_revision if src else None,
+    }
 
 
 async def get_document(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     *,
     revision: int | None = None,
@@ -757,13 +853,14 @@ async def get_document(
         rev = await _revision(s, doc.id, no)
         if rev is None and no != 0:
             raise NotFound("revision")
-    return _document_view(app, doc, rev)
+        source = await _source_info(s, doc)
+    return _document_view(app, doc, rev, source)
 
 
 async def count_draft(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     blocks: Sequence[str],
 ) -> dict[str, Any]:
@@ -781,7 +878,7 @@ async def count_draft(
 
 
 async def list_revisions(
-    db: Database, actor: ActorContext, application_id: UUID, document_id: UUID
+    db: Database, actor: ActorContext, application_id: UUID | None, document_id: UUID
 ) -> list[RevisionSummary]:
     async with db.workspace_session(actor.workspace_id) as s:
         await _get_doc(s, application_id, document_id)
@@ -812,6 +909,7 @@ async def list_revisions(
 
 
 async def _ensure_claims(s: AsyncSession, blocks: Sequence[dict]) -> None:
+    # span의 주장은 블록 claim_ids에 합쳐져 있다 (domain.documents._finish_block)
     wanted = {c for b in blocks for c in b.get("claim_ids") or []}
     if not wanted:
         return
@@ -869,15 +967,15 @@ async def _insert_revision(
 
 
 def _same_content(a: Sequence[dict], b: Sequence[dict]) -> bool:
-    return [(x["id"], x["text"], x.get("origin"), x.get("claim_ids") or []) for x in a] == [
-        (x["id"], x["text"], x.get("origin"), x.get("claim_ids") or []) for x in b
+    return [(*_block_key(x), x.get("origin")) for x in a] == [
+        (*_block_key(x), x.get("origin")) for x in b
     ]
 
 
 async def save_revision(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     *,
     base_revision: int,
@@ -943,24 +1041,60 @@ def review_suggestion(
     return reasons
 
 
+ModelCaller = Callable[[str, ModelRequest], Awaitable[ModelResult]]
+
+
+async def _replay(s: AsyncSession, document_id: UUID, key: str) -> list[DocumentSuggestion]:
+    return list(
+        (
+            await s.execute(
+                select(DocumentSuggestion)
+                .where(
+                    DocumentSuggestion.document_id == document_id,
+                    DocumentSuggestion.idempotency_key == key,
+                )
+                .order_by(DocumentSuggestion.created_at, DocumentSuggestion.block_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _replayed(rows: Sequence[DocumentSuggestion]) -> SuggestResult:
+    return SuggestResult(
+        [_suggestion_view(r) for r in rows], [], 0, rows[0].model_call_id, replayed=True
+    )
+
+
 async def suggest_edits(
     db: Database,
-    gateway: ModelGateway,
+    gateway: ModelGateway | None,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     *,
     base_revision: int,
     block_ids: Sequence[str] | None = None,
     instruction: str | None = None,
+    idempotency_key: str | None = None,
+    call_model: ModelCaller | None = None,
 ) -> SuggestResult:
     """모델에게 최소 수정안을 받는다 (용도 `doc_suggest`, 자료 등급은 근거 원본을 따른다).
 
     코드가 원문·연결 근거와 대조해 사실을 바꾼 수정안은 `rejected`로 남긴다(사유와 함께).
     수정안은 문서에도 브레인에도 바로 들어가지 않는다. 사용자가 적용해야 새 revision이 된다.
+
+    - ``idempotency_key``: 같은 키로 이미 만든 수정안이 있으면 모델을 부르지 않고 그것을 돌려준다
+      (요청 재시도·실행 재개에서 중복 생성 없음). 수정안이 0건이었던 호출은 기록이 없으니 다시 부른다.
+    - ``call_model``: 모델 호출 함수. 실행(run) 단계는 ``StepContext.model``을 넘겨 비용을 실행에 쌓는다.
+      없으면 ``gateway.run``.
     """
+    key = (idempotency_key or "").strip()[:200] or None
     async with db.workspace_session(actor.workspace_id) as s:
         app, doc = await _get_doc(s, application_id, document_id)
+        if key and (done := await _replay(s, doc.id, key)):
+            return _replayed(done)
         _ensure_editable(app)
         if base_revision != doc.current_revision:
             raise RevisionConflict(doc.current_revision)
@@ -1001,7 +1135,14 @@ async def suggest_edits(
         max_output_tokens=4000,
         data_classes=data_classes,
     )
-    result = await gateway.run(actor, SUGGEST_PURPOSE, request)
+    if call_model is None:
+        if gateway is None:
+            raise DocumentRuleError("models_not_configured")
+
+        async def call_model(purpose: str, req: ModelRequest) -> ModelResult:
+            return await gateway.run(actor, purpose, req)
+
+    result = await call_model(SUGGEST_PURPOSE, request)
     call_id = UUID(result.call_id)
     try:
         parsed = _SuggestOut.model_validate(parse_model_json(result.text))
@@ -1032,18 +1173,29 @@ async def suggest_edits(
                 status=(SuggestionStatus.REJECTED if reasons else SuggestionStatus.PROPOSED).value,
                 reject_reasons=reasons,
                 model_call_id=call_id,
+                idempotency_key=key,
                 created_by=actor.subject_id,
             )
         )
     if rows:
-        async with db.workspace_session(actor.workspace_id) as s:
-            s.add_all(rows)
+        try:
+            async with db.workspace_session(actor.workspace_id) as s:
+                s.add_all(rows)
+        except IntegrityError:
+            # 같은 키의 동시 요청이 먼저 저장했다: 그 결과를 돌려준다 (이번 모델 결과는 버린다)
+            if not key:
+                raise
+            async with db.workspace_session(actor.workspace_id) as s:
+                done = await _replay(s, doc.id, key)
+            if not done:
+                raise
+            return _replayed(done)
     questions = [q.strip()[:500] for q in parsed.questions if q and q.strip()][:10]
     return SuggestResult([_suggestion_view(r) for r in rows], questions, dropped, call_id)
 
 
 async def list_suggestions(
-    db: Database, actor: ActorContext, application_id: UUID, document_id: UUID
+    db: Database, actor: ActorContext, application_id: UUID | None, document_id: UUID
 ) -> list[SuggestionView]:
     async with db.workspace_session(actor.workspace_id) as s:
         await _get_doc(s, application_id, document_id)
@@ -1064,7 +1216,7 @@ async def list_suggestions(
 async def apply_suggestion(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     suggestion_id: UUID,
     *,
@@ -1111,7 +1263,7 @@ async def apply_suggestion(
 async def dismiss_suggestion(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     suggestion_id: UUID,
 ) -> str:
@@ -1132,7 +1284,7 @@ async def dismiss_suggestion(
 async def validate_document(
     db: Database,
     actor: ActorContext,
-    application_id: UUID,
+    application_id: UUID | None,
     document_id: UUID,
     *,
     revision: int | None = None,
@@ -1242,7 +1394,88 @@ def submission_payload(raw: dict[str, Any]) -> dict[str, Any]:
     note = raw.get("note")
     if note is not None and not isinstance(note, str):
         raise _approval_error("invalid_payload")
-    return {"revisions": dict(sorted(out.items())), "note": (note or "").strip()[:MAX_NOTE_CHARS]}
+    payload: dict[str, Any] = {
+        "revisions": dict(sorted(out.items())),
+        "note": (note or "").strip()[:MAX_NOTE_CHARS],
+    }
+    # 민감 정보 경고를 확인했다는 표시(검사 결과의 지문). 있을 때만 넣는다 — 예전 승인의 해시가 그대로다.
+    ack = raw.get("sensitive_ack")
+    if ack is not None:
+        if not isinstance(ack, str) or not _HEX64.fullmatch(ack):
+            raise _approval_error("invalid_payload")
+        payload["sensitive_ack"] = ack
+    return payload
+
+
+class SensitiveUnacknowledged(DocumentRuleError):
+    """제출 전 재검사에서 민감 정보·회사 기밀 경고가 있는데 확인(acknowledge)하지 않았다. 409.
+
+    값을 지우지 않는다. 사용자가 고치거나, 그대로 둔다고 ``sensitive_ack``(=``sensitive_hash``)로 확인한다.
+    """
+
+    def __init__(self, sensitive_hash: str, findings: list[dict]) -> None:
+        super().__init__("sensitive_unacknowledged")
+        self.sensitive_hash = sensitive_hash
+        self.findings = findings
+
+
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+async def _sensitive(
+    s: AsyncSession, docs: Sequence[ApplicationDocument]
+) -> tuple[str | None, list[dict]]:
+    """지원 문서들의 현재 revision에서 민감 정보·회사 기밀 경고. (지문, 경고 목록)"""
+    own = await own_contacts(s)
+    items = []
+    out: list[dict] = []
+    for d in docs:
+        rev = await _revision(s, d.id, d.current_revision)
+        found = []
+        for b in rev.blocks if rev else []:
+            found.extend(sensitive_findings(b["text"], own=own, block_id=b["id"]))
+        items.append((str(d.id), found))
+        out.extend({"document_id": str(d.id), "title": d.title, **f.as_dict()} for f in found)
+    return sensitive_hash(items), out
+
+
+async def _app_documents(s: AsyncSession, application_id: UUID) -> list[ApplicationDocument]:
+    return list(
+        (
+            await s.execute(
+                select(ApplicationDocument)
+                .where(ApplicationDocument.application_id == application_id)
+                .order_by(
+                    ApplicationDocument.question_index.asc().nulls_last(),
+                    ApplicationDocument.created_at,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def sensitive_check(
+    db: Database, actor: ActorContext, application_id: UUID
+) -> dict[str, Any]:
+    """제출 전 재검사 (plan §11): 주민등록번호, 본인 것이 아닌 전화·이메일, 대외비·기밀 표시.
+
+    경고가 있으면 제출에 ``sensitive_ack``로 이 ``sensitive_hash``를 넣어야 한다. 아무것도 지우지 않는다.
+    """
+    async with db.workspace_session(actor.workspace_id) as s:
+        await _get_app(s, application_id)
+        digest, findings = await _sensitive(s, await _app_documents(s, application_id))
+    summary: dict[str, int] = {}
+    for f in findings:
+        summary[f["code"]] = summary.get(f["code"], 0) + 1
+    return {
+        "application_id": str(application_id),
+        "sensitive_hash": digest,
+        "requires_ack": digest is not None,
+        "findings": findings,
+        "summary": dict(sorted(summary.items())),
+    }
 
 
 def _approval_error(code: str):
@@ -1304,11 +1537,14 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
         "posting_pending_changes": sorted(posting.pending_changes or []),
         "documents": doc_state,
     }
+    sensitive_digest, sensitive = await _sensitive(s, docs)
     summary = {
         "application_id": str(app.id),
         "title": app.title,
         "posting_version_id": state["posting_version_id"],
         "documents": summary_docs,
+        # 승인하는 사람이 보도록: 민감 정보 경고 수와 확인에 쓸 지문
+        "sensitive": {"hash": sensitive_digest, "count": len(sensitive)},
     }
     return content_hash(state), summary
 
@@ -1321,8 +1557,12 @@ async def submit_application(
     revisions: dict[UUID, int],
     note: str | None = None,
     approval_id: UUID | None = None,
+    sensitive_ack: str | None = None,
 ) -> SubmissionView:
     """제출본을 고정한다. `revisions`는 사용자가 확인한 문서별 revision 번호다.
+
+    제출 직전에 민감 정보·회사 기밀을 다시 검사한다. 경고가 있으면 ``sensitive_ack``가 그 지문과 같아야
+    한다 (아니면 SensitiveUnacknowledged, 409). 승인 묶음으로 제출하면 확인 값도 승인 내용에 들어간다.
 
     지금 최신과 하나라도 다르면 RevisionConflict(stale 목록). 확인한 것과 다른 내용을 고정하지 않는다.
 
@@ -1339,7 +1579,7 @@ async def submit_application(
     elif not actor.has_scope("draft-write"):
         raise DocumentRuleError("submit_requires_approve")
     try:
-        return await _submit(db, actor, application_id, revisions, note, approval_id)
+        return await _submit(db, actor, application_id, revisions, note, approval_id, sensitive_ack)
     except ApprovalError as exc:
         # 제출 트랜잭션은 롤백됐다. 대상·내용이 바뀐 승인은 따로 무효로 남긴다.
         await record_rejection(db, actor.workspace_id, approval_id, exc.code)
@@ -1353,6 +1593,7 @@ async def _submit(
     revisions: dict[UUID, int],
     note: str | None,
     approval_id: UUID | None,
+    sensitive_ack: str | None = None,
 ) -> SubmissionView:
     from career_core.usecases.approvals import consume_approval
 
@@ -1384,7 +1625,11 @@ async def _submit(
                 approval_id,
                 action=SUBMIT_ACTION,
                 target_id=application_id,
-                payload={"revisions": {str(k): v for k, v in revisions.items()}, "note": note},
+                payload={
+                    "revisions": {str(k): v for k, v in revisions.items()},
+                    "note": note,
+                    **({"sensitive_ack": sensitive_ack} if sensitive_ack is not None else {}),
+                },
             )
         if set(revisions) - {d.id for d in docs}:
             raise DocumentRuleError("unknown_document")
@@ -1402,6 +1647,9 @@ async def _submit(
         filled = [d for d in docs if d.current_revision > 0]
         if not filled:
             raise DocumentRuleError("nothing_to_submit")
+        sensitive_digest, sensitive = await _sensitive(s, filled)
+        if sensitive_digest is not None and sensitive_ack != sensitive_digest:
+            raise SensitiveUnacknowledged(sensitive_digest, sensitive)
         ctx, posting = await _check_context(s, app)
         snapshots = []
         checks: dict[str, Any] = {"documents": {}}
@@ -1440,6 +1688,12 @@ async def _submit(
                 }
             )
         checks["requirements"] = requirement_visibility(ctx, all_inputs)
+        # 확인하고 그대로 낸 민감 정보 경고 (값은 가린 형태). 제출본과 같이 남긴다.
+        checks["sensitive"] = {
+            "hash": sensitive_digest,
+            "acknowledged": sensitive_digest is not None,
+            "findings": sensitive,
+        }
         posting_snapshot = {
             "posting_id": str(posting.id),
             "canonical_url": posting.canonical_url,
@@ -1497,6 +1751,7 @@ __all__ = [
     "ApplicationView",
     "DocumentView",
     "RevisionResult",
+    "SensitiveUnacknowledged",
     "SubmissionView",
     "SuggestResult",
     "SuggestionView",
@@ -1513,6 +1768,7 @@ __all__ = [
     "list_suggestions",
     "review_suggestion",
     "save_revision",
+    "sensitive_check",
     "set_status",
     "submission_payload",
     "submission_target",

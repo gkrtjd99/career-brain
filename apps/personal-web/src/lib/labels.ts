@@ -7,11 +7,14 @@ import type {
   Contribution,
   CoverageStatus,
   DocumentKind,
+  ExportFormat,
   FetchStatus,
   MistakeReason,
   PostingField,
   PostingStatus,
   ReviewGrade,
+  StageKind,
+  StageOutcome,
   StudyItemKind,
   StudyItemStatus,
   Visibility,
@@ -190,6 +193,20 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_count_rule: "글자 수 기준 값이 맞지 않습니다.",
   nothing_to_submit: "제출할 글이 없습니다.",
   unknown_document: "지원에 없는 문서입니다.",
+  // c0012 공용 문서·내보내기·전형 단계·민감 정보
+  question_not_shared: "공고 문항은 공용 문서로 만들 수 없습니다.",
+  nothing_to_copy: "복사할 글이 없습니다. 공용 문서를 먼저 저장하세요.",
+  nothing_to_export: "내보낼 글이 없습니다. 먼저 저장하세요.",
+  invalid_format: "지원하지 않는 내보내기 형식입니다.",
+  invalid_spans: "문장 근거 위치가 문단 글과 맞지 않습니다.",
+  invalid_cliches: "상투어는 한 줄에 40자까지 적습니다.",
+  too_many_cliches: "상투어는 300개까지입니다.",
+  invalid_contacts: "연락처 형식이 맞지 않습니다 (각 10개까지).",
+  not_submitted: "제출본을 고정한 뒤에 전형 단계를 기록합니다.",
+  too_many_stages: "전형 단계는 30개까지입니다.",
+  invalid_stage_kind: "전형 종류 값이 맞지 않습니다.",
+  invalid_outcome: "결과 값이 맞지 않습니다.",
+  sensitive_unacknowledged: "민감 정보 경고를 확인해야 고정할 수 있습니다.",
   // O09 학습
   mistake_resolved: "다 익힌 오답입니다. 다시 열어야 복습할 수 있습니다.",
   no_study_result: "학습을 마쳤거나 응시 기록이 있어야 경험 후보로 올릴 수 있습니다.",
@@ -233,7 +250,7 @@ export const NEWLINE_RULE: Record<string, string> = {
 };
 
 /** 검사 경고 분류: 위험(다른 회사명·범용 문장) / 근거(근거 없는 문장) / 조작 / 분량 / 참고 */
-export type FindingGroup = "limit" | "risk" | "evidence" | "manipulation" | "info";
+export type FindingGroup = "limit" | "risk" | "evidence" | "manipulation" | "sensitive" | "info";
 
 export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
   over_char_limit: { label: "글자 수 초과", group: "limit" },
@@ -250,6 +267,10 @@ export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
   screening_instruction: { label: "심사 프로그램에 지시하는 문장", group: "manipulation" },
   keyword_repetition: { label: "같은 단어 반복", group: "manipulation" },
   keyword_list_unsupported: { label: "근거 없는 키워드 나열", group: "manipulation" },
+  resident_registration_number: { label: "주민등록번호", group: "sensitive" },
+  phone_number: { label: "본인 것이 아닌 전화번호", group: "sensitive" },
+  email_address: { label: "본인 것이 아닌 이메일", group: "sensitive" },
+  company_confidential: { label: "대외비·기밀 표시", group: "sensitive" },
   cliche: { label: "상투어", group: "info" },
   paragraph_not_specific: { label: "구체성 부족", group: "info" },
 };
@@ -259,6 +280,7 @@ export const FINDING_GROUP: Record<FindingGroup, { label: string; tone: BadgeTon
   risk: { label: "위험", tone: "danger" },
   manipulation: { label: "조작 의심", tone: "danger" },
   evidence: { label: "근거", tone: "warn" },
+  sensitive: { label: "민감 정보", tone: "danger" },
   info: { label: "참고", tone: "neutral" },
 };
 
@@ -289,6 +311,29 @@ export const SUGGESTION_STATUS: Record<string, { label: string; tone: BadgeTone 
 export const REVISION_ORIGIN: Record<string, string> = {
   user: "직접 저장",
   ai_suggestion: "AI 수정안 적용",
+};
+
+export const STAGE_KIND: Record<StageKind, string> = {
+  document: "서류",
+  test: "테스트",
+  assignment: "과제",
+  interview: "면접",
+  final: "최종",
+  other: "기타",
+};
+
+export const STAGE_OUTCOME: Record<StageOutcome, { label: string; tone: BadgeTone }> = {
+  pending: { label: "결과 전", tone: "accent" },
+  passed: { label: "통과", tone: "ok" },
+  failed: { label: "탈락", tone: "none" },
+  withdrawn: { label: "포기", tone: "none" },
+  cancelled: { label: "취소됨", tone: "neutral" },
+};
+
+export const EXPORT_FORMAT: Record<ExportFormat, string> = {
+  md: "Markdown (.md)",
+  docx: "Word (.docx)",
+  html: "PDF (인쇄 화면)",
 };
 
 // ---------------------------------------------------------------- O09 학습

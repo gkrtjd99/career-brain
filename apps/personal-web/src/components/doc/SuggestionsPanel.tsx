@@ -2,12 +2,19 @@ import type { Suggestion, SuggestOut } from "@career-brain/client";
 import { Badge, Button, EmptyState, Label, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { wordDiff } from "../../lib/diff";
 import { formatDateTime } from "../../lib/format";
 import { REJECT_REASON, SUGGESTION_STATUS } from "../../lib/labels";
 import { ErrorText, Loaded } from "../common";
+
+/** 요청 하나의 멱등 키 (보안 문맥이 아니면 randomUUID 가 없을 수 있다) */
+function newRequestKey(): string {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 function Diff({ before, after }: { before: string; after: string }) {
   return (
@@ -43,7 +50,7 @@ export function SuggestionsPanel({
   blockNo,
   onApplied,
 }: {
-  appId: string;
+  appId: string | null;
   docId: string;
   base: number;
   dirty: boolean;
@@ -61,14 +68,21 @@ export function SuggestionsPanel({
     queryFn: () => api.suggestions(appId, docId),
   });
   const refresh = () => qc.invalidateQueries({ queryKey: ["suggestions", docId] });
+  // 응답을 못 받고 같은 요청을 다시 보내면 같은 키를 쓴다 → 서버가 모델을 다시 부르지 않고 저장된 수정안을 준다
+  const attempt = useRef<{ params: string; key: string } | null>(null);
   const ask = useMutation({
-    mutationFn: () =>
-      api.requestSuggestions(appId, docId, {
+    mutationFn: () => {
+      const body = {
         base_revision: base,
         block_ids: onlyActive && activeBlockId ? [activeBlockId] : null,
         instruction: instruction.trim() || null,
-      }),
+      };
+      const params = JSON.stringify([docId, body]);
+      if (attempt.current?.params !== params) attempt.current = { params, key: newRequestKey() };
+      return api.requestSuggestions(appId, docId, { ...body, idempotency_key: attempt.current.key });
+    },
     onSuccess: (res) => {
+      attempt.current = null;
       setLast(res);
       refresh();
     },
@@ -143,6 +157,7 @@ export function SuggestionsPanel({
             </div>
           ) : null}
           {last.dropped ? <p className="text-xs text-muted">없는 문단·같은 글·중복이라 버린 제안 {last.dropped}개</p> : null}
+          {last.replayed ? <p className="text-xs text-muted">같은 요청을 다시 보내 모델을 부르지 않고 저장된 수정안을 보여 줍니다.</p> : null}
           {!last.suggestions.length ? <p className="text-xs text-muted">이번에는 제안이 없습니다.</p> : null}
         </div>
       ) : null}

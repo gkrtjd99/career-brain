@@ -118,6 +118,20 @@ export const documentRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Document"), "DocumentPage"),
 });
 
+const sharedDocumentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/documents",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/SharedDocuments"), "SharedDocumentsPage"),
+});
+
+export const sharedDocumentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/documents/$documentId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Document"), "SharedDocumentPage"),
+});
+
 const STUDY_TABS: StudyTab[] = ["reviews", "coverage", "items", "assessments", "mistakes"];
 export const studyRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -149,6 +163,8 @@ const routeTree = rootRoute.addChildren([
   applicationsRoute,
   applicationRoute,
   documentRoute,
+  sharedDocumentsRoute,
+  sharedDocumentRoute,
   studyRoute,
   studyItemRoute,
 ]);

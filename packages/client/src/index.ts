@@ -79,6 +79,11 @@ export function createClient({
   const post = <R>(path: string, body: unknown = {}) => json<R>("POST", path, { json: body });
   const patch = <R>(path: string, body: unknown) => json<R>("PATCH", path, { json: body });
   const id = encodeURIComponent;
+  /** 문서 경로: 지원 문서는 /core/applications/{a}/documents/{d}, 공용 문서는 /core/documents/{d} */
+  const docPath = (applicationId: string | null, documentId: string) =>
+    applicationId === null
+      ? `/core/documents/${id(documentId)}`
+      : `/core/applications/${id(applicationId)}/documents/${id(documentId)}`;
 
   return {
     coreHealth: () => get<T.CoreHealth>("/core/health"),
@@ -199,76 +204,153 @@ export function createClient({
     ) => post<T.StatusOut>(`/core/applications/${id(applicationId)}/status`, { status, note }),
     addDocument: (applicationId: string, body: T.DocumentIn) =>
       post<{ id: T.Uuid }>(`/core/applications/${id(applicationId)}/documents`, body),
-    document: (applicationId: string, documentId: string, revision?: number) =>
-      get<T.AppDocument>(`/core/applications/${id(applicationId)}/documents/${id(documentId)}`, {
+    document: (applicationId: string | null, documentId: string, revision?: number) =>
+      get<T.AppDocument>(docPath(applicationId, documentId), {
         revision,
       }),
-    patchDocument: (applicationId: string, documentId: string, body: T.DocumentPatch) =>
+    patchDocument: (applicationId: string | null, documentId: string, body: T.DocumentPatch) =>
       patch<T.AppDocument>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}`,
+        docPath(applicationId, documentId),
         body,
       ),
-    revisions: (applicationId: string, documentId: string) =>
+    revisions: (applicationId: string | null, documentId: string) =>
       get<T.RevisionSummary[]>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/revisions`,
+        `${docPath(applicationId, documentId)}/revisions`,
       ),
     /** 409이면 ApiError.detail 이 RevisionConflictDetail 이다. 자동으로 다시 보내지 않는다. */
-    saveRevision: (applicationId: string, documentId: string, body: T.RevisionIn) =>
+    saveRevision: (applicationId: string | null, documentId: string, body: T.RevisionIn) =>
       post<T.RevisionOut>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/revisions`,
+        `${docPath(applicationId, documentId)}/revisions`,
         body,
       ),
     /** 편집 중인 문단의 글자·바이트 수 (서버 코드가 센다, 저장 안 함) */
-    countDraft: (applicationId: string, documentId: string, blocks: string[], signal?: AbortSignal) =>
+    countDraft: (applicationId: string | null, documentId: string, blocks: string[], signal?: AbortSignal) =>
       json<T.TextCounts>(
         "POST",
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/count`,
+        `${docPath(applicationId, documentId)}/count`,
         { json: { blocks }, signal },
       ),
     validateDocument: (
-      applicationId: string,
+      applicationId: string | null,
       documentId: string,
       body: { revision?: number; extra_cliches?: string[] } = {},
     ) =>
       post<T.ValidateResult>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/validate`,
+        `${docPath(applicationId, documentId)}/validate`,
         body,
       ),
-    suggestions: (applicationId: string, documentId: string) =>
+    suggestions: (applicationId: string | null, documentId: string) =>
       get<T.Suggestion[]>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/suggestions`,
+        `${docPath(applicationId, documentId)}/suggestions`,
       ),
     requestSuggestions: (
-      applicationId: string,
+      applicationId: string | null,
       documentId: string,
-      body: { base_revision: number; block_ids?: string[] | null; instruction?: string | null },
+      body: {
+        base_revision: number;
+        block_ids?: string[] | null;
+        instruction?: string | null;
+        /** 같은 키로 다시 보내면 모델을 다시 부르지 않고 저장된 수정안을 돌려준다 */
+        idempotency_key?: string | null;
+      },
     ) =>
       post<T.SuggestOut>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/suggestions`,
+        `${docPath(applicationId, documentId)}/suggestions`,
         body,
       ),
     applySuggestion: (
-      applicationId: string,
+      applicationId: string | null,
       documentId: string,
       suggestionId: string,
       baseRevision: number,
     ) =>
       post<T.RevisionOut>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/suggestions/${id(suggestionId)}/apply`,
+        `${docPath(applicationId, documentId)}/suggestions/${id(suggestionId)}/apply`,
         { base_revision: baseRevision },
       ),
-    dismissSuggestion: (applicationId: string, documentId: string, suggestionId: string) =>
+    dismissSuggestion: (applicationId: string | null, documentId: string, suggestionId: string) =>
       post<T.StatusOut>(
-        `/core/applications/${id(applicationId)}/documents/${id(documentId)}/suggestions/${id(suggestionId)}/dismiss`,
+        `${docPath(applicationId, documentId)}/suggestions/${id(suggestionId)}/dismiss`,
       ),
     applicationChecks: (applicationId: string) =>
       get<T.ApplicationChecks>(`/core/applications/${id(applicationId)}/checks`),
+    /**
+     * 민감 정보 경고가 있으면 `sensitiveAck`(= sensitiveCheck 의 sensitive_hash)가 있어야 한다.
+     * 없거나 다르면 409 이고 ApiError.detail 이 SensitiveUnacknowledgedDetail 이다.
+     */
     submitApplication: (
       applicationId: string,
       revisions: Record<string, number>,
       note?: string | null,
+      sensitiveAck?: string | null,
     ) =>
-      post<T.Submission>(`/core/applications/${id(applicationId)}/submit`, { revisions, note }),
+      post<T.Submission>(`/core/applications/${id(applicationId)}/submit`, {
+        revisions,
+        note,
+        ...(sensitiveAck ? { sensitive_ack: sensitiveAck } : {}),
+      }),
+    /** 제출 전 재검사: 주민등록번호·본인 것이 아닌 연락처·대외비 표시. 지우지 않고 경고만 */
+    sensitiveCheck: (applicationId: string) =>
+      get<T.SensitiveCheck>(`/core/applications/${id(applicationId)}/sensitive-check`),
+    /** 공용 문서의 revision(기본 최신)을 이 지원의 새 문서로 복사한다 */
+    copyDocument: (
+      applicationId: string,
+      body: { source_document_id: string; revision?: number | null; title?: string | null },
+    ) => post<{ id: T.Uuid }>(`/core/applications/${id(applicationId)}/documents/copy`, body),
+
+    // 전형 단계 (제출 후. 결과만 적고 원인은 판단하지 않는다)
+    stages: (applicationId: string) =>
+      get<T.ApplicationStage[]>(`/core/applications/${id(applicationId)}/stages`),
+    addStage: (applicationId: string, body: T.StageIn) =>
+      post<T.ApplicationStage>(`/core/applications/${id(applicationId)}/stages`, body),
+    patchStage: (applicationId: string, stageId: string, body: T.StagePatch) =>
+      patch<T.ApplicationStage>(
+        `/core/applications/${id(applicationId)}/stages/${id(stageId)}`,
+        body,
+      ),
+    deleteStage: async (applicationId: string, stageId: string) => {
+      await request("DELETE", `/core/applications/${id(applicationId)}/stages/${id(stageId)}`);
+    },
+
+    // 공용 문서. 편집·검사·수정안은 documentPath(null, ...) 경로로 지원 문서와 같은 메서드를 쓴다.
+    sharedDocuments: () => get<T.SharedDocumentSummary[]>("/core/documents"),
+    createSharedDocument: (body: T.SharedDocumentIn) => post<{ id: T.Uuid }>("/core/documents", body),
+
+    // 문서 설정 (상투어 목록·본인 연락처)
+    documentSettings: () => get<T.DocumentSettings>("/core/document-settings"),
+    saveDocumentSettings: (body: T.DocumentSettingsIn) =>
+      json<T.DocumentSettings>("PUT", "/core/document-settings", { json: body }),
+
+    // 내보내기. applicationId 가 null 이면 공용 문서.
+    exportCheck: (
+      applicationId: string | null,
+      documentId: string,
+      format: T.ExportFormat,
+      revision?: number,
+    ) =>
+      get<T.ExportCheck>(`${docPath(applicationId, documentId)}/export/check`, {
+        format,
+        revision,
+      }),
+    exportFile: async (
+      applicationId: string | null,
+      documentId: string,
+      format: T.ExportFormat,
+      revision?: number,
+    ): Promise<T.ExportFile> => {
+      const res = await request("GET", `${docPath(applicationId, documentId)}/export`, {
+        query: { format, revision },
+      });
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const m = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+      const codes = res.headers.get("X-Export-Codes") ?? "";
+      return {
+        filename: m?.[1] ? decodeURIComponent(m[1]) : `document.${format}`,
+        blob: await res.blob(),
+        findings: Number(res.headers.get("X-Export-Findings") ?? "0"),
+        codes: codes ? codes.split(",") : [],
+      };
+    },
     submission: (applicationId: string) =>
       get<T.Submission>(`/core/applications/${id(applicationId)}/submission`),
 

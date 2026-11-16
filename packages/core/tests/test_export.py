@@ -24,8 +24,10 @@ from career_core.jobs.worker import parsing_handlers, run_until_idle
 from career_core.policies import ProviderEgressPolicy
 from career_core.ports import ActorContext
 from career_core.testing import migrated_database
+from career_core.usecases import application_stages as stages_uc
 from career_core.usecases import applications as apps_uc
 from career_core.usecases import brain, interviews
+from career_core.usecases import documents as docs_uc
 from career_core.usecases import postings as postings_uc
 from career_core.usecases import study as study_uc
 from career_core.usecases.export import (
@@ -202,7 +204,22 @@ async def build_workspace(db, blobs, owner, *, tag):
         )
         s.add(sug)
     await apps_uc.apply_suggestion(db, owner, app, doc, sug.id, base_revision=1)
-    submission = await apps_uc.submit_application(db, owner, app, revisions={doc: 2}, note="합성")
+    # c0012: 공용 문서 → 지원 문서로 복사 (복사본 → 원본 문서·revision FK가 순환한다), 문서 설정
+    shared = await docs_uc.create_shared_document(db, owner, kind="resume", title=f"기본 {tag}")
+    await apps_uc.save_revision(
+        db,
+        owner,
+        None,
+        shared,
+        base_revision=0,
+        operations=[{"op": "insert", "text": "공용 이력서 문단", "claim_ids": [str(claim)]}],
+    )
+    copy = await docs_uc.copy_to_application(db, owner, app, shared)
+    await docs_uc.update_settings(db, owner, cliches=["합성상투어"])
+    submission = await apps_uc.submit_application(
+        db, owner, app, revisions={doc: 2, copy: 1}, note="합성"
+    )
+    await stages_uc.add_stage(db, owner, app, kind="document", outcome="passed")
 
     # 학습: 요건 ↔ 주장, 계획, 기록, 응시, 오답, 복습, 경험 후보
     await study_uc.link_claim(
@@ -230,6 +247,8 @@ async def build_workspace(db, blobs, owner, *, tag):
         "application": app,
         "document": doc,
         "submission": submission,
+        "shared": shared,
+        "copy": copy,
         "item": item,
         "screenshot": key,
     }
@@ -288,11 +307,15 @@ async def test_every_workspace_table_is_exported_or_excluded(db):
         for fk in t.foreign_keys:
             if not fk.deferrable:
                 assert pos[fk.ref_table] < pos[t.name], (t.name, fk.ref_table)
-    # 순환 FK(공고 ↔ 확정 버전, revision ↔ 수정안, 실행 ↔ 승인)는 한쪽이 DEFERRABLE이라 표 순서가 정해진다
+    # 순환 FK(공고 ↔ 확정 버전, revision ↔ 수정안, 실행 ↔ 승인, 문서 ↔ 복사 출처)는 한쪽이
+    # DEFERRABLE이라 표 순서가 정해진다
     assert {fk.name for fk in plan.deferred} == {
         "fk_job_postings_confirmed_version",
         "fk_document_revisions_suggestion",
         "fk_runs_approval_id",
+        # c0012: 복사본 → 원본 문서(같은 표), 복사본 → 원본 revision(revision → 문서 순환)
+        "fk_application_documents_source_document",
+        "fk_application_documents_source_revision",
     }
     assert plan.groups == ()
 
@@ -383,6 +406,8 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
         "core.document_claims",
         "core.document_suggestions",
         "core.application_submissions",
+        "core.application_stages",
+        "core.document_settings",
         "core.study_requirement_claims",
         "core.study_items",
         "core.study_sessions",
@@ -393,7 +418,8 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
     ):
         assert rows[name] > 0, name
     assert rows["core.workspaces"] == 1 and rows["core.actors"] == 1
-    assert rows["core.document_revisions"] == 2
+    # 지원 문서 2 + 공용 문서 1 + 복사본 1
+    assert rows["core.document_revisions"] == 4
     assert {f"blobs/{bl['key']}" for bl in manifest["blobs"]} == {
         n for n in files if n.startswith("blobs/")
     }
@@ -486,6 +512,12 @@ async def assert_relations(target, blobs, owner, a, before_sub):
     assert str(a["claim"]) in doc.blocks[0].claim_ids
     [sug] = await apps_uc.list_suggestions(target, owner, a["application"], a["document"])
     assert sug.status == "applied"
+    # 복사본은 출처(공용 문서·revision)를 그대로 가리킨다
+    copy = await apps_uc.get_document(target, owner, a["application"], a["copy"])
+    assert copy.source["document_id"] == str(a["shared"]) and copy.source["revision_no"] == 1
+    [stage] = await stages_uc.list_stages(target, owner, a["application"])
+    assert (stage.outcome, stage.submission_id) == ("passed", a["submission"].id)
+    assert (await docs_uc.get_settings(target, owner)).cliches == ["합성상투어"]
     # §17.12: 제출본은 그대로이고 여전히 고칠 수 없다
     frozen = await apps_uc.get_submission(target, owner, a["application"])
     assert (frozen.documents, frozen.content_hash, frozen.posting) == before_sub

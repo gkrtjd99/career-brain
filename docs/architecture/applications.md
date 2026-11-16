@@ -1,7 +1,9 @@
 # 지원·문서·수정안·제출본 (O07)
 
-plan §11(문서 수정·확정·제출본, AI slop 방지, 요건 가시성)의 첫 구현. 테이블: `database.md` "지원·문서 (c0007)".
-코드: `domain/documents.py`(순수 규칙), `usecases/applications.py`, `interfaces/http/applications.py`.
+plan §11(문서 수정·확정·제출본, AI slop 방지, 요건 가시성)의 첫 구현. 테이블: `database.md` "지원·문서 (c0007)", "문서 추가 (c0012)".
+코드: `domain/documents.py`(순수 규칙), `domain/korean.py`(한국어 수 표현·기술명 별칭), `domain/sensitive.py`(민감 정보),
+`domain/document_export.py`(파일 만들기·검사), `usecases/applications.py`, `usecases/documents.py`(공용 문서·설정·내보내기),
+`usecases/application_stages.py`, `workflows/documents.py`(일괄 수정안), `interfaces/http/applications.py`.
 
 ## 흐름
 
@@ -11,8 +13,12 @@ plan §11(문서 수정·확정·제출본, AI slop 방지, 요건 가시성)의
 문단 ↔ 브레인 주장(확인된 것만 근거로 셈)
 검사(validate) ─▶ 글자·바이트 수, 품질 경고, 요건 가시성      ← 코드 계산, 모델 없음
 AI 수정안(선택) ─▶ 코드가 사실 변경·조작 문구 거부 ─▶ 사용자가 골라 적용 = 새 revision
+제출 전 재검사 ─▶ 주민등록번호·남의 연락처·대외비 표시가 있으면 경고 + 확인(sensitive_ack) 필요
 제출(approve) ─▶ 문서 본문·근거 문장·공고 항목을 복사한 불변 스냅샷, 지원은 submitted
+전형 단계 ─▶ 제출본에 묶인 서류·면접… 일정과 결과 (원인은 적지 않는다)
 결과 기록 ─▶ passed / rejected / withdrawn (원인을 단정하지 않는다)
+
+공용 문서(지원 없음) ─복사(출처: 문서·revision)─▶ 지원 문서
 ```
 
 ## 경로 (`/api/core` 아래)
@@ -33,6 +39,14 @@ AI 수정안(선택) ─▶ 코드가 사실 변경·조작 문구 거부 ─▶
 | `GET /applications/{id}/checks` | read | 문서별 경고 요약 + 모든 문서를 합친 요건 가시성 |
 | `POST /applications/{id}/submit {revisions: {doc_id: n}, note?}` | `applications.submit` → approve | 제출본 고정 (201, 확인한 revision이 최신과 다르면 409) |
 | `GET /applications/{id}/submission` | read | 제출본 |
+| `POST /applications/{id}/documents/copy {source_document_id, revision?, title?}` | write | 공용 문서의 revision(기본 최신)을 새 지원 문서로 복사 (201) |
+| `GET /applications/{id}/sensitive-check` | read | 제출 전 재검사 결과 `{sensitive_hash, requires_ack, findings, summary}` |
+| `GET/POST /applications/{id}/stages` · `PATCH/DELETE .../stages/{sid}` | read / write | 전형 단계. 제출본이 있어야 추가 (없으면 409 `not_submitted`) |
+| `POST /documents {kind, title, …}` · `GET /documents` | write / read | 공용 문서 만들기·목록(복사해 간 지원 문서 수 `copies`). `kind=question`은 422 `question_not_shared` |
+| `/documents/{doc}` 아래 | 지원 문서와 같음 | 보기·설정·revisions·count·validate·suggestions·export. 경로만 다르고 규칙은 같다 |
+| `GET .../documents/{doc}/export/check?format=md\|docx\|html&revision=` | read | 파일을 만들어 검사만 (파일 이름·크기·경고) |
+| `GET .../documents/{doc}/export?format=…` | read | 파일. 경고 수·코드는 `X-Export-Findings`·`X-Export-Codes` 헤더에도 |
+| `GET/PUT /document-settings {cliches?, own_contacts?}` | read / write | 공간의 상투어 목록(`null` = 기본 목록)과 본인 연락처. 준 칸만 바꾼다 |
 
 오류: 규칙 위반은 422 + 코드(`unknown_block`, `unknown_claim`, `empty_block`, `invalid_count_rule`…), 잠김·상태 충돌은 409
 (`application_locked`, `already_submitted`, `posting_not_saved`, `suggestion_stale`, `suggestion_not_open`, `invalid_transition`).
@@ -40,14 +54,31 @@ revision 충돌은 `409 {"detail": {"code": "revision_conflict", "current_revisi
 
 ## 문서 본문과 저장
 
-- 본문은 문단(블록) 목록이 원장이다: `{id, text, origin: user|ai, claim_ids}`. 블록 ID는 서버가 만들고 바뀌지 않는다.
-  제출 문자열은 블록을 줄바꿈 하나로 잇는다. Markdown·DOCX 같은 출력은 아직 없다.
+- 본문은 문단(블록) 목록이 원장이다: `{id, text, origin: user|ai, claim_ids, spans?}`. 블록 ID는 서버가 만들고 바뀌지 않는다.
+  제출 문자열은 블록을 줄바꿈 하나로 잇는다. 파일 출력은 아래 "내보내기".
 - 저장 요청: `base_revision`, `operations`, `reason?`, `idempotency_key?` (plan §11의 요청 모양. `evidence_ids`는 `link` 연산의 `claim_ids`).
-  - `replace {block_id, text, claim_ids?}` · `insert {text, index?, claim_ids?}` · `delete {block_id}` · `link {block_id, claim_ids}` ·
-    `set_blocks {blocks: [{id?, text, claim_ids?}]}`(편집기가 통째로 보낼 때. 같은 ID·같은 글이면 origin 유지)
+  - `replace {block_id, text, claim_ids?, spans?}` · `insert {text, index?, claim_ids?, spans?}` · `delete {block_id}` · `link {block_id, claim_ids}` ·
+    `link_spans {block_id, spans}` · `set_blocks {blocks: [{id?, text, claim_ids?, spans?}]}`(편집기가 통째로 보낼 때. 같은 ID·같은 글이면 origin 유지)
   - `base_revision ≠ current_revision` → 409. 자동 병합·덮어쓰기 없음. 같은 `idempotency_key` 재전송은 처음 결과를 돌려준다. 내용이 같으면 새 revision을 만들지 않는다.
   - 본문은 NFC로 정리하고 줄바꿈은 `\n`으로 통일한다. 보이지 않는 문자는 지우지 않는다(검사가 경고해야 한다).
 - 제출한 지원의 문서는 더 고치지 않는다(`application_locked`). 다음 지원은 새 지원으로 만든다.
+
+### 문장 단위 근거 (spans)
+
+- `spans: [{start, end, claim_ids}]` — 문단 글 안의 위치(코드 포인트, 끝 미포함). 문단마다 50개까지. 위치가 글 밖이거나 주장이 없으면 422 `invalid_spans`.
+- span의 주장은 문단 `claim_ids`에도 합친다. 그래서 문단 단위로만 보는 코드(요건 가시성, 제출본 근거, `document_claims`)는 그대로 동작한다.
+- 글이 바뀌었는데 spans를 다시 주지 않으면, 옛 span이 가리키던 글을 새 글에서 다시 찾는다. 못 찾으면 그 span만 뺀다(근거 없는 위치를 남기지 않는다).
+- 호환: spans가 없는 문단은 예전과 똑같이 저장·해시된다(`blocks_hash`는 spans가 있을 때만 그것을 넣는다). 이전 revision의 해시는 바뀌지 않는다.
+- 웹 편집기: 문단에서 글을 고르면 "고른 문장 근거" 버튼이 생긴다. 편집 중에는 위치 대신 인용문을 들고 있다가 저장할 때 위치를 다시 찾는다.
+
+### 공용 문서와 복사
+
+- 공용 문서는 `application_id IS NULL`인 문서다. 포트폴리오·기본 이력서처럼 지원 여러 곳에서 쓰는 글. revision·base_revision/409·멱등 키·근거 규칙·AI 수정안은 지원 문서와 같다.
+  공고 문맥이 없으므로 검사에서 "다른 회사 이름"은 공간의 모든 공고 회사명을 대상으로 보고, 요건 가시성은 비어 있다.
+- 공고 문항(`question`)은 공용 문서가 될 수 없다(DB `ck_application_documents_shared_kind`도 막는다).
+- 복사(`documents/copy`)는 원본 한 revision의 블록·근거 연결·문단 origin을 새 지원 문서의 revision 1로 넣는다. reason은 "공용 문서 '…' r{n}에서 복사".
+  복사본은 `source_document_id`·`source_revision_id`를 남기고(`source` 칸: 원본 제목·복사한 revision 번호·원본의 지금 revision), 이후 원본과 서로 영향이 없다.
+  근거 연결은 지금도 공간에 있는 주장만 옮긴다. AI 수정 문단은 복사해도 AI 문단이다(AI 비율이 사라지지 않는다).
 
 ## 글자·바이트 수 (§17.20)
 
@@ -70,9 +101,9 @@ revision 충돌은 `409 {"detail": {"code": "revision_conflict", "current_revisi
 |---|---|---|
 | `generic_company_swap` | 회사명·직무명(또는 "귀사·회사")을 말하는데, 그걸 빼면 숫자·영문 고유명사·공고 고유 단어·연결 근거의 단어가 하나도 없는 문장 | §17.16 |
 | `other_company_name` | 공간의 다른 공고 회사명이 남은 문장 (본인 경력·주장에 나오는 조직명은 뺀다) | §17.16 |
-| `cliche` (info) | 상투어 목록. 요청마다 `extra_cliches`로 더할 수 있다 | |
+| `cliche` (info) | 공간 설정의 상투어 목록(`document_settings.cliches`, 비어 있으면 기본 목록). 요청의 `extra_cliches`는 계속 받고 그 목록에 더한다 | |
 | `paragraph_not_specific` (info) | 근거도 없고 구체적인 단어도 없는 문단 | |
-| `unsupported_statement` | 경험(행동 + 과거형)·숫자를 말하는데 문단에 **확인된** 주장 연결이 없음 | §17.17 |
+| `unsupported_statement` | 경험(행동 + 과거형)·숫자를 말하는데 **확인된** 주장 연결이 없음. 문단에 spans가 있으면 문장마다(그 문장과 겹치는 span의 주장 + 문단 전체 근거) 보고, 없으면 문단 단위. `detail.evidence_level` = sentence/paragraph | §17.17 |
 | `number_not_in_evidence` | 근거는 있지만 근거·경험 정보에 없는 숫자 | §17.17 |
 | `role_not_in_evidence` | 근거에 없는 주도·총괄·리드 같은 역할 표현 | §17.17 |
 | `evidence_unconfirmed` | 연결한 주장이 아직 `extracted` | §17.11 |
@@ -80,6 +111,16 @@ revision 충돌은 `409 {"detail": {"code": "revision_conflict", "current_revisi
 | `screening_instruction` | 심사 프로그램·모델에게 지시하는 문장 (영어·한국어 패턴) | §17.19 |
 | `keyword_repetition` · `keyword_list_unsupported` | 같은 단어를 채워 넣음 / 브레인 근거 없는 공고 키워드 나열 | §17.19 |
 | `over_char_limit` · `over_byte_limit` (error) · `unencodable_characters` | 문서 설정 기준 | §17.20 |
+
+### 한국어 표현 (규칙 기반)
+
+형태소 분석기를 넣지 않고 정규식·사전으로 한다(의존성 0, 같은 입력 같은 결과). `domain/korean.py`.
+
+- 수 표현: "3천", "1만 2천", "1.5만"(단위가 붙은 숫자), "두 배"·"세 명"·"열한 개"(고유어 수 + 단위 명사), "삼천"·"이십만"(한자어 수에 단위 글자가 있을 때), "절반"(50).
+  단위 명사 목록(`COUNTERS`)과 뒤에 조사·끝이 오는지를 본다. "한"만 있는 경우("한 번")는 관용 표현이 많아 수로 보지 않는다. "만큼"은 만이 아니다.
+  이 값은 `number_not_in_evidence`와 수정안의 `number` 거부에 쓴다(근거 "2배"와 문서 "두 배"는 같은 수).
+- 기술명 별칭: 파이썬/Python, 자바스크립트/JavaScript, 쿠버네티스/K8s 같은 표(`TECH_ALIASES`). 요건 가시성·`keyword_list_unsupported`·수정안 `new_term`이 표기를 하나로 맞춰 비교한다.
+  "자바"는 "자바스크립트" 안에서는 따로 세지 않는다. 문서 표기가 공고와 다르면(`spelling_differs`) 공고 표기를 같이 적으라는 안내를 붙인다(판정은 그대로 `met_visible`).
 
 ### 요건 가시성 (§17.18)
 
@@ -106,6 +147,10 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
 4. 사용자가 `apply {base_revision}` → 해당 문단만 바꾼 새 revision(`origin = ai_suggestion`, 문단 `origin = ai`). 근거 연결은 그대로.
    문단이 그사이 바뀌었으면 `suggestion_stale`. 문서 보기의 `ai_ratio`가 AI 수정 문단의 글자 비율이다.
 5. 수정안은 브레인에 쓰지 않는다. 주장·근거 테이블에 행이 생기지 않고, 수정안 ID를 근거로 걸 수도 없다.
+6. 멱등: 요청에 `idempotency_key`를 주면 `(document_id, idempotency_key, block_id)` UNIQUE로 저장한다. 같은 키를 다시 보내면 모델을 부르지 않고 저장된 수정안을 `replayed: true`로 돌려준다(동시 요청의 UNIQUE 충돌도 같은 길로). 웹은 응답을 못 받은 같은 요청을 다시 보낼 때 같은 키를 쓴다.
+7. 일괄 수정안 workflow `suggest_document_batch` (`documents.ai`): `{application_id, document_id, base_revision, block_ids?, instruction?}` (지원 문서만). 문단마다 한 단계로 `StepContext.model`을 불러 비용이 실행(run)에 쌓이고,
+   문단마다 `effect_key("block:{id}")`를 멱등 키로 쓰므로 중간에 멈춘 실행을 이어도 이미 만든 문단의 수정안을 다시 만들지 않는다. 문서가 그사이 바뀌면 `revision_conflict`로 멈춘다.
+   실행 기록에는 문단 ID·개수만 남기고 글·질문 문장은 넣지 않는다(결과: `{blocks, proposed, rejected, questions}`).
 
 ## 제출본 (§17.12)
 
@@ -115,16 +160,47 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
 - `application_submissions`는 SELECT/INSERT만. 이후 주장 문장·공고 항목을 고쳐도 제출본은 바뀌지 않는다(시험으로 확인).
 - 확인 대기 중인 공고 변경(`pending_changes`)이 있으면 스냅샷에 같이 남는다.
 
+### 제출 전 민감 정보 재검사
+
+- 지원 문서들의 최신 revision에서 찾는다(`domain/sensitive.py`, 정규식): 주민등록번호(`resident_registration_number`, error), 본인 것이 아닌 휴대전화·지역번호 전화(`phone_number`),
+  본인 것이 아닌 이메일(`email_address`), "대외비·기밀·사내한정·confidential·internal only" 같은 표시(`company_confidential`). "기밀성"은 표시가 아니다.
+- 본인 연락처는 `document_settings.own_contacts`(전화는 숫자만·+82는 0으로, 이메일은 소문자로 비교). 경고의 값은 가려서(`detail.masked`) 보여 준다.
+- 경고가 있으면 제출에 `sensitive_ack` = `sensitive_hash`(경고 목록의 sha256)가 있어야 한다. 없거나 다르면 409 `{code: "sensitive_unacknowledged", sensitive_hash, findings}`.
+  아무것도 지우지 않는다. 승인 묶음으로 제출하면 `sensitive_ack`도 승인 내용 해시에 들어간다(경고가 있을 때만 넣으므로 예전 승인 해시는 그대로).
+- 확인하고 낸 경고는 제출본 `checks.sensitive`에 남는다.
+
+### 전형 단계 (`application_stages`)
+
+- 제출본(`submission_id`)에 묶인 단계: `kind` document/test/assignment/interview/final/other, 이름(기본: 서류·테스트·과제·면접·최종·기타), 일정, `outcome` pending/passed/failed/withdrawn/cancelled, `decided_at`, 메모.
+  결과를 고르면 `decided_at`을 채우고 pending으로 돌리면 지운다(`ck_application_stages_decided`). 지원마다 30개까지.
+- 시스템은 결과를 기록만 한다. 원인 칸이 없고, 단계 결과로 지원 상태를 자동으로 바꾸지 않는다.
+
+## 내보내기 (Markdown · DOCX · PDF)
+
+- `md`: 제목 + 문단. 줄 앞의 Markdown 기호와 `<`는 escape해 글이 서식으로 바뀌지 않게 한다.
+- `docx`: 표준 라이브러리 `zipfile`로 최소 WordprocessingML(문단·제목, 굵게만)을 쓴다. 시각은 고정해 같은 글이면 같은 파일이다. python-docx 같은 의존성은 넣지 않았다.
+- PDF: 서버는 인쇄용 HTML(`format=html`, 스크립트·inline style 없음, 인쇄 CSS만)을 만들고 웹이 새 창에서 브라우저 인쇄("PDF로 저장")를 연다.
+  한글 글꼴을 서버 PDF 라이브러리에 싣는 비용(수 MB 글꼴 + 의존성)을 피하려는 선택이다. 파일 이름은 `….pdf.html`.
+- 만든 파일을 다시 읽어 검사한다: DOCX는 XML에서 숨김(`w:vanish`·`webHidden`)·흰 글씨·크기 0/1 서식과 본문 글을, HTML은 원본과 보이는 글을 본다. 그 위에 숨김 문자·심사 지시문 검사와 민감 정보 검사.
+  경고만 하고(`export/check`로 먼저 보여 준다) 파일은 그대로 준다. 웹은 경고가 있으면 확인 체크를 받은 뒤 받게 한다.
+
 ## plan과 다른 점
 
 - §7의 `artifacts / artifact_versions / artifact_claims` 대신 `application_documents / document_revisions / document_claims`.
-  지금 문서는 지원 하나에 속한다. 여러 지원에서 다시 쓰는 포트폴리오 같은 공용 문서는 백로그.
-- §7의 `application_stages`(전형·일정)는 만들지 않았다. 상태는 `applications.status` 하나. 전형 단계는 O09(학습·시험 연결)와 함께 본다.
+  공용 문서는 별도 표가 아니라 같은 표의 `application_id IS NULL` 행이다(revision·근거·수정안 규칙을 한 벌로 유지).
+- §7의 `application_stages`는 제출본에 묶었다(제출 전 단계는 없다). 지원 상태는 여전히 `applications.status`가 원장이고 단계는 자동으로 바꾸지 않는다.
 - §11 승인 묶음(행위·대상·내용 해시·만료·멱등 키)은 O08 범위다. 지금 제출은 `approve` scope + 확인한 revision 번호 일치로 막는다.
-- 문단 단위 근거 연결(문장 단위는 백로그). 숫자·역할 대조도 그 문단에 연결된 주장 기준이다.
+- 문장 단위 근거는 문단 블록 안의 위치(spans)다. `document_claims`는 여전히 문단 단위 행이다(span 주장도 문단 `claim_ids`에 합쳐 들어간다).
+- 상투어 목록은 일반 "공간 설정" 표가 아니라 문서 전용 `document_settings`에 둔다.
 
 ## 한계
 
-- 한국어 처리는 조사 떼기·불용어 정도다. 형태소 분석이 없어 놓치거나 과하게 잡는다. 한글 수 표현("두 배", "천 명")은 숫자로 보지 않는다.
+- 한국어 처리는 조사 떼기·불용어와 규칙 기반 수 표현·기술명 별칭 표다. 형태소 분석이 없어 놓치거나 과하게 잡는다
+  (예: 단위 명사 목록에 없는 "두 군데", 띄어 쓰지 않은 "세명이서"는 잡고 "한 명"은 일부러 뺀다). 별칭 표는 코드에 있고 사용자가 고칠 수 없다.
 - 역할 대조는 정해진 단어 목록이다("맡아 이끌었다" 같은 표현은 놓칠 수 있다).
-- 숨김 서식 검사는 붙여 넣은 HTML/CSS 흔적만 본다. 문서 파일(DOCX·PDF) 내보내기·검사는 아직 없다.
+- 숨김 서식 검사는 붙여 넣은 HTML/CSS 흔적과 우리가 만든 DOCX·HTML만 본다. 사용자가 올린 DOCX·PDF를 검사하지는 않는다. 서버가 PDF를 만들지 않는다(브라우저 인쇄).
+- 제출본(스냅샷)은 아직 파일로 내보내지 않는다(문서 revision만).
+- 일괄 수정안 workflow: 한 단계 도중 worker가 죽으면 그 시도의 모델 비용은 `model_calls` 장부에만 있고 run의 `cost_usd`에는 더해지지 않는다.
+  모델이 수정안 0개를 돌려준 문단은 기록이 없어 재개 때 다시 부른다. 모델이 돌려준 질문은 개수만 남는다(글은 실행 기록에 넣지 않는다).
+- 공용 문서의 revision은 "최근 활동"에 나오지 않는다(활동 목록이 지원과 join한다).
+- 웹 편집기에서 문장 근거를 끊어도 그 주장은 문단 근거로 남는다(서버가 span 주장을 문단 `claim_ids`에 합쳐 두므로). 문단 근거에서 따로 끊어야 한다.

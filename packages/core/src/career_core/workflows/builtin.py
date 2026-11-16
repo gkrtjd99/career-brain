@@ -78,7 +78,12 @@ def _validate_submit(raw: dict[str, Any]) -> dict[str, Any]:
         raise RunRuleError("invalid_input") from exc
     try:
         payload = app_uc.submission_payload(
-            {"revisions": raw.get("revisions"), "note": raw.get("note")}
+            {
+                "revisions": raw.get("revisions"),
+                "note": raw.get("note"),
+                # c0012: 민감 정보 경고를 확인한 지문 (있을 때만)
+                **({"sensitive_ack": raw["sensitive_ack"]} if raw.get("sensitive_ack") else {}),
+            }
         )
     except ApprovalError as exc:
         raise RunRuleError("invalid_input") from exc
@@ -92,7 +97,15 @@ async def _request_submit_approval(ctx: StepContext) -> StepResult:
             ctx.actor,
             action=app_uc.SUBMIT_ACTION,
             target_id=UUID(ctx.input["application_id"]),
-            payload={"revisions": ctx.input["revisions"], "note": ctx.input["note"]},
+            payload={
+                "revisions": ctx.input["revisions"],
+                "note": ctx.input["note"],
+                **(
+                    {"sensitive_ack": ctx.input["sensitive_ack"]}
+                    if ctx.input.get("sensitive_ack")
+                    else {}
+                ),
+            },
             reason="submit_application run",
             idempotency_key=ctx.effect_key("approval"),
             run_id=ctx.run_id,
@@ -127,6 +140,7 @@ async def _submit_with_approval(ctx: StepContext) -> StepResult:
             revisions={UUID(k): v for k, v in ctx.input["revisions"].items()},
             note=ctx.input["note"] or None,
             approval_id=approval_id,
+            sensitive_ack=ctx.input.get("sensitive_ack"),
         )
     except ApprovalError as exc:
         raise StepFailed(exc.code) from exc
@@ -147,5 +161,10 @@ SUBMIT_APPLICATION = Workflow(
 
 
 WORKFLOWS: dict[str, Workflow] = {w.name: w for w in (SAVE_JOB_URLS, SUBMIT_APPLICATION)}
+
+# c0012 문서 수정안 일괄 (workflows/documents.py)
+from career_core.workflows.documents import SUGGEST_DOCUMENT_BATCH
+
+WORKFLOWS[SUGGEST_DOCUMENT_BATCH.name] = SUGGEST_DOCUMENT_BATCH
 
 __all__ = ["SAVE_JOB_URLS", "SUBMIT_APPLICATION", "WORKFLOWS"]

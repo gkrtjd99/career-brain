@@ -165,6 +165,22 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 원문은 넣지 않는다. 입력·위치·결과·사건에는 ID·번호·짧은 코드만.
 - 상세: `docs/architecture/runs.md`, MCP: `docs/architecture/mcp.md`.
 
+## 문서 추가 (c0012)
+
+공용 문서·복사 출처·문장 단위 근거·수정안 멱등·문서 설정·전형 단계. 상세: `docs/architecture/applications.md`.
+
+| 바뀐 것 | 내용 | 앱 role |
+|---|---|---|
+| `application_documents.application_id` | NULL 허용. NULL = 공용 문서. `ck_application_documents_shared_kind`: 공용 문서는 `question`일 수 없다. 부분 색인 `ix_application_documents_shared (workspace_id) WHERE application_id IS NULL` | (그대로) |
+| `application_documents.source_document_id`·`source_revision_id` | 복사 출처. 둘 다 있거나 둘 다 없다(`ck_application_documents_source`). 복합 FK `(workspace_id, …)` → 문서·revision, `DEFERRABLE INITIALLY IMMEDIATE` (자기 참조 + 문서 ↔ revision 순환이라 복원 때 미룬다) | (그대로) |
+| `document_revisions.blocks` | 문단에 선택 키 `spans: [{start, end, claim_ids}]`. 칸 변경 없음(JSONB) | |
+| `document_suggestions.idempotency_key` | 요청 멱등 키. `uq_document_suggestions_idempotency (document_id, idempotency_key, block_id)` (NULL은 겹쳐도 된다) | |
+| `document_settings` (새 표) | 공간마다 1행(`workspace_id` UNIQUE). `cliches` JSONB 배열(NULL = 기본 목록, `ck_document_settings_cliches`), `own_contacts` JSONB `{emails, phones}`, `updated_by` | SELECT, INSERT, UPDATE |
+| `application_stages` (새 표) | 제출본에 묶인 전형 단계. `application_id`·`submission_id`(복합 FK, 제출본은 `NO ACTION`), `position`, `kind`, `name`, `scheduled_at`, `outcome`, `decided_at`(`ck_application_stages_decided`: pending ⇔ NULL), `note` | 전체 |
+
+- 두 새 표 모두 RLS FORCE, `workspace_id` + 공간 복합 FK. 내보내기·복원(c0011)에 들어간다(`test_export.py`가 행 수·관계를 확인).
+- 공용 문서도 revision·근거·수정안은 같은 표를 쓴다. 지원 목록·지원 검사는 `application_id IS NOT NULL`만 본다.
+
 ## 내보내기·복원 (c0011)
 
 - `core.export_runs` — 내보내기·복원 1회 = 1행 (`kind` export/restore, `via` cli/http, 묶음 sha256·크기·행 수·원본 수). 마지막 백업 시각 표시용. RLS FORCE, 앱 role은 **SELECT, INSERT**.
