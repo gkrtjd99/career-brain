@@ -19,7 +19,7 @@ _BILLINGS = {BILLING_METERED, BILLING_SUBSCRIPTION, BILLING_FREE}
 
 @dataclass(frozen=True, slots=True)
 class Preset:
-    kind: str  # "anthropic" | "openai" (OpenAI 호환 Chat Completions)
+    kind: str  # "anthropic" | "openai" (OpenAI 호환) | "local" (이 프로세스 안에서 도는 모델)
     base_url: str | None
     api_key_env: str | None
     pricing_provider: str | None
@@ -54,7 +54,10 @@ PRESETS: dict[str, Preset] = {
     "openrouter": Preset("openai", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", None),
     "ollama": Preset("openai", "http://127.0.0.1:11434/v1", None, None, billing=BILLING_FREE),
     "openai-compatible": Preset("openai", None, None, None),
+    # 로컬 임베딩(fastembed, ONNX). 자료가 기계 밖으로 나가지 않으므로 egress 검사를 하지 않는다.
+    "local": Preset("local", None, None, None, billing=BILLING_FREE),
 }
+KIND_LOCAL = "local"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +76,12 @@ class EndpointConfig:
     timeout_seconds: float = 120.0
     # Anthropic: 정책상 거절되면 서버가 다른 모델로 다시 돌린다 (server-side fallbacks).
     refusal_fallback: bool = True
+    # 로컬 모델 파일을 둘 곳 (preset = "local"). 없으면 fastembed 기본 캐시.
+    model_dir: str | None = None
+
+    @property
+    def leaves_host(self) -> bool:
+        return self.kind != KIND_LOCAL
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +98,26 @@ class BudgetConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingConfig:
+    # OpenAI text-embedding-3는 차원을 줄여 받을 수 있다. 로컬 모델은 고정 차원이라 무시한다.
+    dimensions: int | None = None
+    batch_size: int = 64
+
+
+EMBED_PURPOSE = "embed"
+
+
+@dataclass(frozen=True, slots=True)
 class ModelsConfig:
     endpoints: dict[str, EndpointConfig] = field(default_factory=dict)
     routes: dict[str, Route] = field(default_factory=dict)
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     price_files: tuple[Path, ...] = ()
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+
+    def embedding_route(self) -> Route | None:
+        """임베딩은 기본 라우트로 넘어가지 않는다 (대화 모델로 임베딩을 부르지 않게)."""
+        return self.routes.get(EMBED_PURPOSE)
 
     def route_for(self, purpose: str) -> Route | None:
         return self.routes.get(purpose) or self.routes.get("default")
@@ -143,6 +167,7 @@ def parse_models_config(text: str, *, base_dir: Path | None = None) -> ModelsCon
             price_as=raw.get("price_as"),
             timeout_seconds=float(raw.get("timeout_seconds", 120)),
             refusal_fallback=bool(raw.get("refusal_fallback", True)),
+            model_dir=raw.get("model_dir"),
         )
     routes = {purpose: parse_route(v) for purpose, v in data.get("routes", {}).items()}
     for purpose, route in routes.items():
@@ -161,7 +186,19 @@ def parse_models_config(text: str, *, base_dir: Path | None = None) -> ModelsCon
         (base / p) if not Path(p).is_absolute() else Path(p)
         for p in data.get("pricing", {}).get("files", [])
     )
-    return ModelsConfig(endpoints, routes, budget, price_files)
+    raw_embed = data.get("embedding", {})
+    dims = raw_embed.get("dimensions")
+    if dims is not None and (not isinstance(dims, int) or dims <= 0):
+        raise ConfigError("embedding.dimensions must be a positive integer")
+    embedding = EmbeddingConfig(
+        dimensions=dims, batch_size=max(1, int(raw_embed.get("batch_size", 64)))
+    )
+    for purpose, route in routes.items():
+        if purpose != EMBED_PURPOSE and endpoints[route.endpoint].kind == KIND_LOCAL:
+            raise ConfigError(f"route {purpose!r}: local endpoints only serve the embed route")
+    if (r := routes.get(EMBED_PURPOSE)) and endpoints[r.endpoint].kind == "anthropic":
+        raise ConfigError("the embed route needs an OpenAI-compatible or local endpoint")
+    return ModelsConfig(endpoints, routes, budget, price_files, embedding)
 
 
 def load_models_config(path: Path | str | None) -> ModelsConfig:

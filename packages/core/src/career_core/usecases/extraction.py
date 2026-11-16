@@ -45,6 +45,7 @@ from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelReque
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound, ensure_span
+from career_core.usecases.index_queue import request_index
 from career_core.usecases.parsing import StepOutcome
 
 EXTRACT_JOB = "extract"
@@ -327,6 +328,8 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
         ext.experiences_created = created_exp
         ext.claims_created = created_claims
         ext.claims_dropped = dropped
+        if created_claims:
+            await request_index(s, ws)
     return StepOutcome(done=True)
 
 

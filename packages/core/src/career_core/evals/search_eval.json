@@ -1,0 +1,74 @@
+{
+  "note": "합성 데이터. 실제 사람·회사가 아니다.",
+  "sources": [
+    {"filename": "resume.txt", "title": "합성 이력서", "data_class": "private", "blocks": [
+      "가상물류 주식회사 | 백엔드 엔지니어 | 2021.03 - 2023.02",
+      "주문 조회 API를 FastAPI로 다시 작성해 p95 응답 시간을 800ms에서 210ms로 줄였다.",
+      "팀과 함께 결제 데이터베이스를 MySQL에서 PostgreSQL로 이전했다.",
+      "배포 스크립트를 직접 만들어 배포 시간을 40분에서 12분으로 단축했다.",
+      "Redis 캐시를 도입해 상품 조회 트래픽의 70%를 데이터베이스 밖에서 처리했다.",
+      "장애 대응 당번을 맡아 새벽 장애 알림 규칙을 정리하고 오탐을 절반으로 줄였다."
+    ]},
+    {"filename": "project.txt", "title": "개인 프로젝트 메모", "data_class": "private", "blocks": [
+      "개인 프로젝트 | 지원 현황 트래커 | 2023.06",
+      "혼자 Next.js와 Supabase로 채용 지원 현황을 기록하는 웹앱을 만들었다.",
+      "공고 마감일이 다가오면 이메일로 알려 주는 기능을 만들었다.",
+      "Playwright로 핵심 화면 E2E 테스트를 작성했다."
+    ]},
+    {"filename": "notes.txt", "title": "활동 기록", "data_class": "private", "blocks": [
+      "스터디: 정보처리기사 실기 오답 노트를 주 2회 정리했다.",
+      "사내 발표: 쿠버네티스 입문 세미나를 열어 15명이 참석했다.",
+      "코드 리뷰 가이드를 문서로 만들어 리뷰 대기 시간을 줄였다."
+    ]}
+  ],
+  "experiences": [
+    {"title": "가상물류 백엔드", "organization": "가상물류 주식회사", "role": "백엔드 엔지니어",
+     "period": "2021.03 - 2023.02", "claims": [
+       {"statement": "주문 조회 API 응답 시간을 800ms에서 210ms로 줄였다", "kind": "result",
+        "contribution": "personal", "quote": "p95 응답 시간을 800ms에서 210ms로 줄였다"},
+       {"statement": "결제 데이터베이스를 PostgreSQL로 옮겼다", "kind": "action",
+        "contribution": "team", "quote": "결제 데이터베이스를 MySQL에서 PostgreSQL로 이전했다"},
+       {"statement": "배포 자동화로 배포 시간을 12분으로 줄였다", "kind": "result",
+        "contribution": "personal", "quote": "배포 시간을 40분에서 12분으로 단축했다"}
+     ],
+     "interview": [
+       {"focus": "difficulty", "answer": "장애가 나면 먼저 최근 배포를 되돌리고 로그를 확인하는 순서로 대응했다."}
+     ]},
+    {"title": "지원 현황 트래커", "period": "2023.06", "claims": [
+       {"statement": "Next.js와 Supabase로 지원 현황 웹앱을 혼자 만들었다", "kind": "action",
+        "contribution": "personal", "quote": "혼자 Next.js와 Supabase로 채용 지원 현황을 기록하는 웹앱을 만들었다"}
+     ]}
+  ],
+  "queries": [
+    {"q": "응답 시간 개선", "expect": "800ms", "type": "keyword"},
+    {"q": "FastAPI", "expect": "FastAPI로 다시 작성", "type": "keyword"},
+    {"q": "PostgreSQL 이전", "expect": "PostgreSQL", "type": "keyword"},
+    {"q": "배포 시간 단축", "expect": "배포 시간을 40분", "type": "keyword"},
+    {"q": "Redis", "expect": "Redis 캐시", "type": "keyword"},
+    {"q": "캐시 도입", "expect": "Redis 캐시", "type": "keyword"},
+    {"q": "장애 알림", "expect": "장애 알림 규칙", "type": "keyword"},
+    {"q": "오탐", "expect": "오탐", "type": "keyword"},
+    {"q": "Next.js", "expect": "Next.js", "type": "keyword"},
+    {"q": "지원 현황 트래커", "expect": "지원 현황", "type": "keyword"},
+    {"q": "마감일 알림", "expect": "마감일이 다가오면", "type": "keyword"},
+    {"q": "E2E 테스트", "expect": "E2E 테스트", "type": "keyword"},
+    {"q": "Playwright", "expect": "Playwright", "type": "keyword"},
+    {"q": "정보처리기사", "expect": "정보처리기사", "type": "keyword"},
+    {"q": "오답 노트", "expect": "오답 노트", "type": "keyword"},
+    {"q": "쿠버네티스 세미나", "expect": "쿠버네티스", "type": "keyword"},
+    {"q": "코드 리뷰", "expect": "코드 리뷰 가이드", "type": "keyword"},
+    {"q": "결제 데이터베이스", "expect": "결제 데이터베이스", "type": "keyword"},
+    {"q": "MySQL", "expect": "MySQL", "type": "keyword"},
+    {"q": "최근 배포를 되돌리고", "expect": "되돌리고", "type": "keyword"},
+    {"q": "트래픽 처리", "expect": "트래픽", "type": "keyword"},
+    {"q": "800ms", "expect": "800ms", "type": "keyword"},
+    {"q": "백엔드 엔지니어", "expect": "백엔드 엔지니어", "type": "keyword"},
+    {"q": "Supabase", "expect": "Supabase", "type": "keyword"},
+    {"q": "지연 시간을 줄인 경험", "expect": "800ms", "type": "paraphrase"},
+    {"q": "CI/CD 자동화", "expect": "배포", "type": "paraphrase"},
+    {"q": "데이터베이스 마이그레이션", "expect": "PostgreSQL", "type": "paraphrase"},
+    {"q": "온콜 경험", "expect": "장애 대응 당번", "type": "paraphrase"},
+    {"q": "발표 경험", "expect": "세미나", "type": "paraphrase"},
+    {"q": "서비스 장애를 어떻게 수습했나", "expect": "되돌리고", "type": "paraphrase"}
+  ]
+}

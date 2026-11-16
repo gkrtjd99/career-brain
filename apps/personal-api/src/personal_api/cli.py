@@ -25,6 +25,7 @@ from career_core.db import Database
 from career_core.db.migrate import upgrade
 from career_core.jobs.worker import (
     extraction_handlers,
+    index_handlers,
     parsing_handlers,
     run_once,
     run_until_idle,
@@ -35,6 +36,7 @@ from career_core.llm.pricing_check import XAI_LANGUAGE_MODELS_URL, check_prices,
 from career_core.policies import ProviderEgressPolicy
 from career_core.ports import ActorContext
 from career_core.usecases.extraction import ExtractionDeps
+from career_core.usecases.indexing import IndexDeps
 from career_core.usecases.parsing import ParsingDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
@@ -55,9 +57,11 @@ async def _worker(settings: Settings, *, once: bool) -> None:
         egress=ProviderEgressPolicy({}),  # 외부 제공자 미설정 = 외부 전송 없음
         local_parsers=default_local_parsers(),
     )
+    gateway = build_gateway(settings, db)
     handlers = {
         **parsing_handlers(deps),
-        **extraction_handlers(ExtractionDeps(db, build_gateway(settings, db))),
+        **extraction_handlers(ExtractionDeps(db, gateway)),
+        **index_handlers(IndexDeps(db, gateway)),
     }
     try:
         if once:
@@ -203,6 +207,35 @@ async def _ping(settings: Settings, purpose: str) -> int:
     return 0
 
 
+async def _reindex(settings: Settings) -> None:
+    from career_core.usecases.index_queue import enqueue_index
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        await enqueue_index(db, actor.workspace_id)
+        space = build_gateway(settings, db).embedding_space()
+    finally:
+        await db.dispose()
+    print(f"index job queued (space: {space or 'none — keyword search only'}); run the worker")
+
+
+async def _search(settings: Settings, query: str, limit: int) -> None:
+    from career_core.usecases.search import search
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        result = await search(db, actor, query, gateway=build_gateway(settings, db), limit=limit)
+    finally:
+        await db.dispose()
+    print(f"mode={result.mode} note={result.semantic_note or '-'}")
+    for h in result.hits:
+        where = h.experience_title or h.source_title or h.question or ""
+        ranks = f"k{h.keyword_rank or '-'} s{h.semantic_rank or '-'}"
+        print(f"{h.score:.4f} {ranks:<8} {h.kind:<6} {where[:24]:<24} {h.snippet[:90]}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="personal-api")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -219,6 +252,10 @@ def main(argv: list[str] | None = None) -> None:
     u = sub.add_parser("usage", help=f"model usage and cost for the {TOKEN_ENV} workspace")
     u.add_argument("--days", type=int, default=30)
     u.add_argument("--by", default="day", choices=["day", "model", "purpose", "endpoint", "status"])
+    sub.add_parser("reindex", help="queue a search re-index (after changing the embed route)")
+    se = sub.add_parser("search", help=f"search the {TOKEN_ENV} workspace brain")
+    se.add_argument("query")
+    se.add_argument("--limit", type=int, default=10)
     pg = sub.add_parser("ping", help="send a tiny synthetic request through a route (billed)")
     pg.add_argument("purpose", nargs="?", default="default")
     args = parser.parse_args(argv)
@@ -239,6 +276,10 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(_pricing(settings, args.max_age_days, args.fetch_xai))
     elif args.cmd == "usage":
         asyncio.run(_usage(settings, args.days, args.by))
+    elif args.cmd == "reindex":
+        asyncio.run(_reindex(settings))
+    elif args.cmd == "search":
+        asyncio.run(_search(settings, args.query, args.limit))
     elif args.cmd == "ping":
         sys.exit(asyncio.run(_ping(settings, args.purpose)))
 

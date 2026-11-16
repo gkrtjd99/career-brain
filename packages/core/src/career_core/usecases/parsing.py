@@ -26,6 +26,7 @@ from career_core.ports import (
     ParseError,
     ParserProvider,
 )
+from career_core.usecases.index_queue import request_index
 
 LOCAL_ORIGIN = "local"
 EGRESS_PURPOSE = "parse"
@@ -125,6 +126,8 @@ async def _finish(
             error_code = error_code or "no_text"
         run.missing_pages = sorted(missing)
         run.error_code = error_code
+        if has_blocks:
+            await request_index(s, ws)
         if pages_total is not None:
             run.pages_total = pages_total
     return StepOutcome(done=True)

@@ -94,3 +94,11 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
   한 번에 보내는 본문은 40,000자까지이고, 잘렸으면 `partial`.
 - 모델 출력·프롬프트 본문은 저장하지 않는다. 추출 결과로 남는 것은 원문 인용과 모델이 쓴 주장 문장(후보)뿐이다.
 - 위키는 테이블이 아니라 보기다. `GET /api/core/wiki/experiences/{id}`(JSON)와 `/markdown`이 확정 주장(`self_confirmed`/`evidence_supported`)만 종류별로 묶고, 각 주장 아래 원문 인용·인터뷰 답을 붙인다. 후보는 "확인 대기 N건"으로만 표시한다.
+
+## 검색 (c0005)
+
+- 확장: `pg_trgm`, `vector`(pgvector). DB 소유자가 만들 수 없으면 관리자가 미리 `CREATE EXTENSION`.
+- trigram GIN 색인: `claims.statement`, `document_blocks.text`, `interview_answers.answer`.
+- `core.embeddings` — 대상(`target_kind` ∈ claim/block/answer/job, `target_id`)·공간(`space`)마다 벡터 1개. 원문은 두지 않고 `content_hash`(sha256)만. `vector_dims(embedding) = dims` CHECK. RLS FORCE.
+  대상 테이블에 FK가 없다(여러 종류를 가리킨다). 대상이 사라진 벡터는 검색 조인에서 자연히 빠진다.
+- 상세: `docs/architecture/search.md`.
