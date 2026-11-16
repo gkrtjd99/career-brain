@@ -51,6 +51,8 @@ uv run personal-api usage --by model     # CAREER_API_TOKEN 의 공간
 curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=day&days=30"
 ```
 
+웹(개인 대시보드): `npm run dev` 후 설정 화면에 API 토큰을 넣는다. API 주소가 8000이 아니면 `CAREER_API_PROXY=http://127.0.0.1:8765 npm run dev`. 배포용 정적 파일은 `npm run build` → `apps/personal-web/dist`. 화면 구성: [docs/architecture/web.md](docs/architecture/web.md)
+
 DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md)
 
 ## 원칙
