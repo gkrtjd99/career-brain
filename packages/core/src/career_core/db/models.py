@@ -383,3 +383,121 @@ class JobFetchRun(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- O07: 지원·문서
+
+
+class Application(Base):
+    __tablename__ = "applications"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    posting_version_id: Mapped[UUID | None] = mapped_column(default=None)
+    title: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="draft")
+    result_note: Mapped[str | None] = mapped_column(Text, default=None)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ApplicationDocument(Base):
+    __tablename__ = "application_documents"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    question_index: Mapped[int | None] = mapped_column(Integer, default=None)
+    question_prompt: Mapped[str | None] = mapped_column(Text, default=None)
+    char_limit: Mapped[int | None] = mapped_column(Integer, default=None)
+    byte_limit: Mapped[int | None] = mapped_column(Integer, default=None)
+    count_rule: Mapped[dict] = mapped_column(JSONB, default=dict)
+    current_revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class DocumentRevision(Base):
+    """저장할 때마다 새로 생기는 문서 본문. 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "document_revisions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    document_id: Mapped[UUID]
+    revision_no: Mapped[int] = mapped_column(Integer)
+    blocks: Mapped[list] = mapped_column(JSONB)
+    content_hash: Mapped[str] = mapped_column(Text)
+    counts: Mapped[dict] = mapped_column(JSONB, default=dict)
+    origin: Mapped[str] = mapped_column(Text, default="user")
+    suggestion_id: Mapped[UUID | None] = mapped_column(default=None)
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentClaim(Base):
+    """revision의 문단 ↔ 브레인 주장. 추가·조회만."""
+
+    __tablename__ = "document_claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    revision_id: Mapped[UUID]
+    block_id: Mapped[str] = mapped_column(Text)
+    claim_id: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DocumentSuggestion(Base):
+    """AI 수정안. 초안일 뿐 브레인 근거가 아니다."""
+
+    __tablename__ = "document_suggestions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    document_id: Mapped[UUID]
+    base_revision_id: Mapped[UUID]
+    block_id: Mapped[str] = mapped_column(Text)
+    original_text: Mapped[str] = mapped_column(Text)
+    suggested_text: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text)
+    reject_reasons: Mapped[list] = mapped_column(JSONB, default=list)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    applied_revision_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ApplicationSubmission(Base):
+    """실제 제출본 스냅샷. 추가·조회만 (이후 경력·공고 수정이 소급되지 않는다)."""
+
+    __tablename__ = "application_submissions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    posting_version_id: Mapped[UUID | None] = mapped_column(default=None)
+    posting: Mapped[dict] = mapped_column(JSONB)
+    documents: Mapped[list] = mapped_column(JSONB)
+    checks: Mapped[dict] = mapped_column(JSONB)
+    content_hash: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    submitted_by: Mapped[UUID]
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

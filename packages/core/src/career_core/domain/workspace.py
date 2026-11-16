@@ -38,6 +38,11 @@ ACTION_SCOPES: dict[str, str] = {
     "search.reindex": "draft-write",
     "jobs.read": "read",
     "jobs.write": "draft-write",
+    # O07 지원·문서. 제출본 고정은 사람의 승인 행위다.
+    "applications.read": "read",
+    "applications.write": "draft-write",
+    "applications.submit": "approve",
+    "documents.ai": "egress",
 }
 
 
