@@ -429,6 +429,8 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 검색: OpenAI 임베딩 재현율 측정 (키 확보 후 `search_eval --models`).
 - 검색: potion 로컬 모델 메모리(~1.6GB) 줄이기 — 양자화·더 작은 모델 비교.
 - 공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터, 초안 정리 주기 실행.
+- 웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API 없음, 공고 목록 응답에 생성·저장 시각 없음, 블록 검색 결과에 block_id·위치 없음 (원본 보기 연결 불가).
+- 테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존).
 
 ## 확인한 공식 근거
 
