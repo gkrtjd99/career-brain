@@ -47,6 +47,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         blobs=LocalBlobStore(settings.blob_dir),
         max_upload_bytes=settings.max_upload_bytes,
         max_restore_bytes=settings.max_restore_bytes,
+        restore_dir=settings.restore_dir,
+        restore_stale_seconds=settings.restore_stale_seconds,
         monthly_budget_usd=models.budget.monthly_usd,
         models=ModelGateway(db, models, load_prices(models), client_factory=shared_client_factory),
         mcp_oauth=mcp_oauth_from_settings(settings, db),

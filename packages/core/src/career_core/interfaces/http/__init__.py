@@ -75,6 +75,8 @@ class CoreDeps:
     tokens: Any = None
     # 웹 복원 업로드를 받는 공유 폴더 (여러 프로세스면 모두 보는 곳). 없으면 CAREER_RESTORE_DIR → 시스템 임시.
     restore_dir: str | None = None
+    # c0027: 웹 복원의 끊김 판정(초). 없으면 60. worker의 신호 간격은 RestoreDeps.heartbeat (기본 2)
+    restore_stale_seconds: float | None = None
 
 
 class WorkspaceOut(BaseModel):

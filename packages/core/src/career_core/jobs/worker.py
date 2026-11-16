@@ -248,3 +248,10 @@ def run_handlers(deps) -> dict[str, JobHandler]:
             give_up=lambda ws, target: give_up_run(deps, ws, target),
         )
     }
+
+
+def restore_handlers(deps) -> dict[str, JobHandler]:
+    """웹 복원 확인·합치기 (c0027). ``deps``는 ``career_core.usecases.restore_jobs.RestoreDeps``."""
+    from career_core.usecases.restore_jobs import RESTORE_JOB, process_restore
+
+    return {RESTORE_JOB: JobHandler(run=lambda ws, target: process_restore(deps, ws, target))}

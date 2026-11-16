@@ -1371,10 +1371,24 @@ async def test_skipped_deletions_report_reasons(db, env, tmp_path):
 # ---------------------------------------------------------------- 웹 복원 (c0018)
 
 
-async def wait_job(client, job_id, headers):
+def restore_worker(db, blobs, root=None):
+    """웹 복원의 확인·합치기를 처리하는 worker 한 바퀴 (c0027: API가 아니라 작업 큐가 돈다)."""
+    from career_core.jobs.worker import restore_handlers
+    from career_core.usecases.restore_jobs import RestoreDeps
+
+    handlers = restore_handlers(RestoreDeps(db=db, blobs=blobs, root=root))
+
+    async def work():
+        return await run_until_idle(db, handlers)
+
+    return work
+
+
+async def wait_job(client, job_id, headers, work):
     import asyncio
 
     for _ in range(400):
+        await work()
         r = await client.get(f"/core/maintenance/restore/{job_id}", headers=headers)
         assert r.status_code == 200, r.text
         if r.json()["status"] not in ("verifying", "applying"):
@@ -1405,6 +1419,7 @@ async def test_web_restore_upload_verify_apply(db, env, tmp_path, monkeypatch):
         max_restore_bytes=1 << 26,
     )
     app.include_router(build_router(deps))
+    work = restore_worker(db, blobs)  # 같은 기본 폴더(시스템 임시 = uploads)
     raw = {"Authorization": "Bearer b", "Content-Type": "application/octet-stream"}
     h = {"Authorization": "Bearer b"}
     before = await table_counts(db, other.workspace_id)
@@ -1432,7 +1447,7 @@ async def test_web_restore_upload_verify_apply(db, env, tmp_path, monkeypatch):
 
         r = await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
         assert r.status_code == 202 and r.json()["status"] == "verifying"
-        job = await wait_job(client, jid, h)
+        job = await wait_job(client, jid, h, work)
         assert job["status"] == "verified", job
         rep = job["report"]
         assert rep["dry_run"] and rep["rows_added"] > 0 and rep["actors_mapped"] == 1
@@ -1451,7 +1466,7 @@ async def test_web_restore_upload_verify_apply(db, env, tmp_path, monkeypatch):
         assert r.json()["detail"] == "policy_changed"
         r = await client.post(f"{path}/{jid}/apply", json=apply_body, headers=h)
         assert r.status_code == 202
-        job = await wait_job(client, jid, h)
+        job = await wait_job(client, jid, h, work)
         assert job["status"] == "done" and not job["report"]["dry_run"]
         assert job["report"]["rows_added"] == rep["rows_added"]
         assert list(uploads.iterdir()) == []  # 합친 뒤 올린 파일은 지운다
@@ -1519,6 +1534,7 @@ async def test_web_restore_encrypted_archive(db, env, tmp_path, monkeypatch):
     await export_workspace(db, blobs, owner, out, recipients=[str(key.to_public())])
     app = FastAPI()
     app.include_router(build_router(CoreDeps(identity=Tokens({"b": other}), db=db, blobs=blobs)))
+    work = restore_worker(db, blobs)
     h = {"Authorization": "Bearer b"}
     path = "/core/maintenance/restore"
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as client:
@@ -1534,13 +1550,17 @@ async def test_web_restore_encrypted_archive(db, env, tmp_path, monkeypatch):
         identity = f"# synthetic test key\n{key}\n"
         r = await client.post(f"{path}/{job['id']}/verify", json={"identity": identity}, headers=h)
         assert r.status_code == 202
-        done = await wait_job(client, job["id"], h)
+        from career_core.usecases.restore_jobs import RestoreFolder
+
+        # worker가 집기 전까지 작업 폴더의 0600 파일로만 있고, worker가 쓴 뒤 지운다
+        key_file = RestoreFolder().identity_file(UUID(job["id"]))
+        assert key_file.stat().st_mode & 0o777 == 0o600
+        done = await wait_job(client, job["id"], h, work)
         assert done["status"] == "verified" and done["report"]["encrypted"]
-        # 신원 파일은 남지 않는다
-        assert not [p for p in tmp_path.rglob("identity-*")]
+        assert not key_file.exists()
         body = {"archive_sha256": job["sha256"], "identity": identity}
         r = await client.post(f"{path}/{job['id']}/apply", json=body, headers=h)
-        done = await wait_job(client, job["id"], h)
+        done = await wait_job(client, job["id"], h, work)
         assert done["status"] == "done" and done["report"]["rows_added"] > 0
 
 
@@ -1614,6 +1634,17 @@ async def _export_shape(url):
     return {t.name: [(c.name, c.type) for c in t.columns] for t in plan.tables}
 
 
+async def _column_defaults(url):
+    from career_core.usecases.export import read_column_defaults
+
+    target = Database(url, poolclass=NullPool)
+    try:
+        async with target.engine.connect() as conn:
+            return await read_column_defaults(conn)
+    finally:
+        await target.dispose()
+
+
 def _synthetic_archive(root, shape, heads):
     """모양만 있는 합성 묶음: 표마다 모든 칸이 null인 행 하나."""
     from career_core.usecases.export import _Archive, _table_file
@@ -1655,6 +1686,7 @@ async def test_schema_steps_cover_every_migration(tmp_path):
     assert set(SCHEMA_STEPS) <= set(after), "steps for revisions that are not in the chain"
     if not postgres_available(admin_url()):
         pytest.skip("PostgreSQL not reachable")
+    used = {}  # 단계가 서버 기본값으로 채운 (표, 칸) → (revision, 그 시점 기본값)
     with _empty_database() as url:
         upgrade(url, revision=SCHEMA_FLOOR)
         before = await _export_shape(url)
@@ -1667,7 +1699,12 @@ async def test_schema_steps_cover_every_migration(tmp_path):
                 assert not changed, f"{rev} changes exported tables {changed}: add a schema_step"
             else:
                 arc = _synthetic_archive(tmp_path / rev, before, [chain[chain.index(rev) - 1]])
+                # 그 revision 시점의 기본값으로 돌린다 (실제 복원은 이 설치 head의 값 → 아래에서 비교)
+                arc.defaults = await _column_defaults(url)
                 step.apply(arc)
+                for t, c in arc.defaults_used:
+                    d = arc.defaults.get(t, {}).get(c)
+                    used[(t, c)] = (rev, None if d is None else (d.constant, d.value))
                 got = {e["name"]: e for e in arc.manifest["tables"]}
                 assert set(got) == set(now), (rev, sorted(set(got) ^ set(now)))
                 for name, cols in now.items():
@@ -1677,6 +1714,16 @@ async def test_schema_steps_cover_every_migration(tmp_path):
                     else:
                         assert [tuple(c) for c in got[name]["columns"]] == cols, (rev, name)
             before = now
+        # 복원은 이 설치(head)의 기본값으로 채운다: 나중 migration이 바꾼 기본값이면 단계에 옛 값을 직접 적는다
+        head = await _column_defaults(url)
+        assert used, "no step uses a server default (add_columns)"
+        for (t, c), (rev, then) in used.items():
+            if c not in {name for name, _ in now.get(t, [])}:
+                continue  # 나중에 지운 칸
+            d = head.get(t, {}).get(c)
+            assert (None if d is None else (d.constant, d.value)) == then, (
+                f"{rev}: default of {t}.{c} changed later; write the old value in the step"
+            )
 
 
 async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, monkeypatch):
@@ -1738,8 +1785,8 @@ async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, m
 
         return change
 
-    floor = rewrite(out, tmp_path / "c0016.tar.gz", head("c0016"))
-    with pytest.raises(ArchiveError, match="no conversion step for c0018"):
+    floor = rewrite(out, tmp_path / "c0010.tar.gz", head("c0010"))
+    with pytest.raises(ArchiveError, match="no conversion step for c0011"):
         await restore_workspace(db, blobs, floor, new_ids=True, dry_run=True)
     future = rewrite(out, tmp_path / "c9999.tar.gz", head("c9999"))
     with pytest.raises(ArchiveError, match="version_mismatch"):
@@ -1748,6 +1795,129 @@ async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, m
     monkeypatch.setitem(SCHEMA_STEPS, "c0021", SchemaStep("c0021", "잘못된 표시", None))
     with pytest.raises(ArchiveError, match="schema_mismatch: tables differ"):
         await restore_workspace(db, blobs, out, new_ids=True, dry_run=True)
+
+
+# c0011 = 내보내기가 생긴 head. 그때부터 c0018 전까지의 묶음은 형식 1이기도 하다.
+@pytest.mark.parametrize("old_head", ["c0011", "c0012", "c0013", "c0014", "c0015", "c0016"])
+async def test_archive_from_heads_before_c0018_is_converted(db, tmp_path, monkeypatch, old_head):
+    """c0011–c0016 head에서 만든 진짜 묶음(형식 1)이 지금 설치로 들어간다 (표 더하기·칸 기본값 단계).
+
+    행은 그 head의 칸만 쓰는 SQL로 넣는다 (지금 코드의 ORM 모델은 나중 칸을 가진다).
+    """
+    from career_core.testing import TEST_APP_LOGIN, TEST_APP_PASSWORD
+    from career_core.usecases import export as export_mod
+    from career_core.usecases.export import merge_workspace
+
+    blobs = LocalBlobStore(tmp_path / "blobs")
+    out = tmp_path / f"{old_head}.tar.gz"
+    ids = {k: uuid4() for k in ("run", "call", "session", "question")}
+    with _empty_database() as url:
+        upgrade(url, revision=old_head)
+        old = Database(
+            url.set(username=TEST_APP_LOGIN, password=TEST_APP_PASSWORD), poolclass=NullPool
+        )
+        try:
+            ws, me = await create_workspace(
+                old, name=f"{old_head} 설치 (합성)", owner_display_name="o"
+            )
+            owner = owner_of(ws, me)
+            exp = await brain.create_experience(old, owner, title=f"{old_head} 경험 (합성)")
+            p = {"w": ws, "a": me, "e": exp, **{k: str(v) for k, v in ids.items()}}
+            async with old.workspace_session(ws) as s:
+                for sql in (
+                    (
+                        "INSERT INTO core.runs (id, workspace_id, workflow, status, input, position, "
+                        "step, waits, cost_usd, cost_unknown, model_calls, resumes, actor_kind, "
+                        "actor_scopes, created_by) VALUES (:run, :w, 'synthetic', 'queued', '{}', "
+                        "'{}', 0, 0, 0.125, false, 1, 0, 'human', '{}', :a)"
+                    ),
+                    (
+                        "INSERT INTO core.model_calls (id, workspace_id, purpose, endpoint, "
+                        "requested_model, status, input_tokens, cached_input_tokens, "
+                        "cache_write_tokens, output_tokens, reasoning_tokens, billing, cost_basis, "
+                        "price_refs) VALUES (:call, :w, 'synthetic', 'local', 'm', 'ok', 3, 0, 0, 2, "
+                        "0, 'free', 'none', '{}')"
+                    ),
+                    (
+                        "INSERT INTO core.interview_sessions (id, workspace_id, experience_id, status, "
+                        "created_by) VALUES (:session, :w, :e, 'open', :a)"
+                    ),
+                    (
+                        "INSERT INTO core.interview_questions (id, workspace_id, session_id, ordinal, "
+                        "focus, prompt, origin) VALUES (:question, :w, :session, 1, 'metric', "
+                        "'얼마나 줄었나요? (합성)', 'template')"
+                    ),
+                ):
+                    await s.execute(text(sql), p)
+            monkeypatch.setattr(export_mod, "core_migration_heads", lambda: [old_head])
+            report = await export_workspace(old, blobs, owner, out)
+            monkeypatch.undo()
+        finally:
+            await old.dispose()
+
+    # 그 시절 묶음처럼 형식 1로 (tombstone_tables 없음)
+    def v1(files):
+        m = json.loads(files["manifest.json"])
+        m["format_version"] = 1
+        m.pop("tombstone_tables")
+        files["manifest.json"] = json.dumps(m).encode()
+
+    out = rewrite(out, tmp_path / f"{old_head}-v1.tar.gz", v1)
+    names = {t["name"] for t in report.manifest["tables"]}
+    assert ("core.application_stages" in names) == (old_head >= "c0012")
+    assert ("core.deletions" in names) == (old_head >= "c0014")
+
+    restored = await restore_workspace(db, blobs, out, new_ids=True)
+    assert restored.schema_converted_from == [old_head]
+    assert restored.format_upgraded_from == 1
+    assert restored.rows_total == report.rows_total
+    copy = owner_of(restored.workspace_id, restored.owners[0])
+    async with db.workspace_session(copy.workspace_id) as s:
+        run = (await s.execute(text("SELECT cost_from_ledger, cost_usd FROM core.runs"))).one()
+        call = (await s.execute(text("SELECT run_id, run_step FROM core.model_calls"))).one()
+        session = await s.scalar(text("SELECT idempotency_key FROM core.interview_sessions"))
+        question = await s.scalar(text("SELECT request_id FROM core.interview_questions"))
+    # c0016 전 실행은 예전 비용 방식(서버 기본값 false), 장부 태그·멱등 키는 없음
+    assert (run.cost_from_ledger, run.cost_usd) == (False, Decimal("0.125"))
+    assert (call.run_id, call.run_step, session, question) == (None, None, None, None)
+    titles = [e.title for e in await brain.list_experiences(db, copy)]
+    assert titles == [f"{old_head} 경험 (합성)"]
+    # 같은 묶음을 그 공간에 다시 합치면 모두 겹친다 (변환한 행이 DB 출력과 같은 모양)
+    merged = await merge_workspace(db, blobs, copy, out, dry_run=True)
+    assert merged.schema_converted_from == [old_head] and merged.rows_added == 0
+
+
+async def test_column_defaults_from_the_catalog(db, tmp_path):
+    """변환 단계용 기본값: 상수는 ``to_jsonb`` 값, 행마다 다른 값(now() 등)은 쓰지 않는다."""
+    from career_core.usecases.export import read_column_defaults
+
+    async with db.engine.connect() as conn:
+        defaults = await read_column_defaults(conn)
+    ledger = defaults["core.runs"]["cost_from_ledger"]
+    assert ledger.constant and ledger.value is False
+    assert defaults["core.workspace_settings"]["tech_aliases"].value == []
+    assert defaults["core.application_stages"]["outcome"].value == "pending"
+    assert defaults["core.document_settings"]["own_contacts"].value == {}
+    created = defaults["core.runs"]["created_at"]
+    assert not created.constant and "now()" in created.expr
+    assert "summary" not in defaults["core.experiences"]  # DEFAULT 없는 칸 = NULL
+
+    arc = _synthetic_archive(
+        tmp_path / "a", {"core.runs": [("id", "uuid")], "core.experiences": [("id", "uuid")]}, []
+    )
+    with pytest.raises(ArchiveError, match="defaults were not read"):
+        arc.add_columns("core.runs", "cost_from_ledger")
+    arc.defaults = defaults
+    with pytest.raises(ArchiveError, match="not a constant"):
+        arc.add_columns("core.runs", "created_at")
+    arc.add_columns("core.runs", "cost_from_ledger", note="손으로 정한 값")
+    assert list(arc.iter_rows("core.runs")) == [
+        {"id": None, "cost_from_ledger": False, "note": "손으로 정한 값"}
+    ]
+    with pytest.raises(ArchiveError, match="already has"):
+        arc.add_columns("core.runs", "cost_from_ledger")
+    with pytest.raises(ArchiveError, match="no table"):
+        arc.add_columns("core.nothing", "x")
 
 
 # ---------------------------------------------------------------- 합치기 내용 키 (c0024)
@@ -1849,6 +2019,83 @@ async def test_merge_recognises_rows_changed_after_export(db, env, tmp_path):
     assert {x.name: x.added for x in changed.tables}["core.claims"] == 1
 
 
+async def test_merge_lists_near_duplicates_and_honours_choices(db, env, tmp_path):
+    """정체 칸(경험 제목·주장 문장)만 고친 행은 비슷한 행 쌍으로 보고에 오른다. 기본은 둘 다 둔다(지금처럼),
+    쌍마다 "들어오는 행 건너뛰기"를 고르면 기존 행으로 잇고 자식도 기존 행을 가리킨다."""
+    from career_core.usecases.export import (
+        NEAR_DUPLICATE_KEY,
+        NEAR_KEEP_BOTH,
+        NEAR_SKIP_INCOMING,
+        merge_workspace,
+    )
+
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    exp, claim = str(env["a"]["experience"]), str(env["a"]["claim"])
+    first = tmp_path / "first.tar.gz"
+    await export_workspace(db, blobs, owner, first)
+    assert (await merge_workspace(db, blobs, other, first)).rows_added > 0
+    async with db.workspace_session(owner.workspace_id) as s:
+        await s.execute(
+            text("UPDATE core.experiences SET title = title || ' (고침)' WHERE id = :e"), {"e": exp}
+        )
+        await s.execute(
+            text("UPDATE core.claims SET statement = statement || ' (고침)' WHERE id = :c"),
+            {"c": claim},
+        )
+    second = tmp_path / "second.tar.gz"
+    await export_workspace(db, blobs, owner, second)
+    b_exps = {e.title: e.id for e in await brain.list_experiences(db, other)}
+
+    # 기본: 경험이 쌍으로 오르고 새 경험으로 더한다 (자식 주장도 새 경험 밑에 새로) — 고르기 전과 같은 결과
+    plain = await merge_workspace(db, blobs, other, second, dry_run=True)
+    added = {x.name: x.added for x in plain.tables}
+    [pair] = plain.near_duplicates
+    assert (pair.table, pair.incoming_id, pair.decision) == (
+        "core.experiences",
+        exp,
+        NEAR_KEEP_BOTH,
+    )
+    assert pair.columns == ["title"] and pair.incoming["title"].endswith("(고침)")
+    assert pair.existing_id == str(b_exps[pair.existing["title"]])
+    assert plain.near_duplicates_total == 1
+    assert added["core.experiences"] == 1 and added["core.claims"] > 1
+
+    # 경험을 건너뛰면 자식이 기존 경험을 가리킨다: 그대로인 주장은 겹치고, 문장을 고친 주장이 새 쌍
+    skip_exp = {("core.experiences", exp): pair.existing_id}
+    second_try = await merge_workspace(
+        db, blobs, other, second, dry_run=True, near_duplicates=skip_exp
+    )
+    t = {x.name: x for x in second_try.tables}
+    assert t["core.experiences"].added == 0
+    assert t["core.experiences"].skipped_by[NEAR_DUPLICATE_KEY] == 1
+    pairs = {(p.table, p.incoming_id): p for p in second_try.near_duplicates}
+    assert pairs[("core.experiences", exp)].decision == NEAR_SKIP_INCOMING
+    claim_pair = pairs[("core.claims", claim)]
+    assert claim_pair.columns == ["statement"] and claim_pair.decision == NEAR_KEEP_BOTH
+    assert t["core.claims"].added == 1
+
+    # 둘 다 건너뛰면 더할 것이 없다. 실제로 합쳐도 B의 경험 제목은 그대로
+    both = {**skip_exp, ("core.claims", claim): claim_pair.existing_id}
+    before = await table_counts(db, other.workspace_id)
+    done = await merge_workspace(db, blobs, other, second, near_duplicates=both)
+    assert done.rows_added == 0 and not done.dry_run
+    after = await table_counts(db, other.workspace_id)
+    assert after == {**before, "core.export_runs": before["core.export_runs"] + 1}  # 합치기 기록만
+    assert {e.title for e in await brain.list_experiences(db, other)} == set(b_exps)
+
+    # 고른 쌍이 더는 그 쌍이 아니면 (다른 기존 ID) 아무것도 쓰지 않고 멈춘다
+    with pytest.raises(ArchiveError, match="near_duplicate_changed"):
+        await merge_workspace(
+            db, blobs, other, second, near_duplicates={("core.experiences", exp): str(uuid4())}
+        )
+    # "멈추기" 정책에서도 사용자가 고른 건너뛰기는 겹침으로 세지 않는다 (다른 겹침 때문에 멈출 뿐)
+    with pytest.raises(ArchiveError, match="duplicates_found") as info:
+        await merge_workspace(
+            db, blobs, other, second, on_duplicate="fail", near_duplicates=both, dry_run=True
+        )
+    assert "core.experiences" not in str(info.value)
+
+
 # ---------------------------------------------------------------- 합친 뒤 승인 다시 확인 (c0024)
 
 
@@ -1926,6 +2173,8 @@ async def test_web_restore_jobs_are_durable_across_processes(db, env, tmp_path):
     await export_workspace(db, blobs, owner, out)
     data = out.read_bytes()
 
+    work = restore_worker(db, blobs, shared)  # worker도 같은 공유 폴더를 읽는다
+
     def process():
         app = FastAPI()
         app.include_router(
@@ -1951,7 +2200,7 @@ async def test_web_restore_jobs_are_durable_across_processes(db, env, tmp_path):
         assert r.status_code == 202
         r = await one.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
         assert r.status_code == 409 and r.json()["detail"] == "restore_busy"
-        done = await wait_job(one, jid, h)
+        done = await wait_job(one, jid, h, work)
         assert done["status"] == "verified" and done["report"]["rows_added"] > 0
 
     # 합치는 중에 프로세스가 죽었다: 상태는 applying, 생존 신호는 오래전
@@ -1973,11 +2222,11 @@ async def test_web_restore_jobs_are_durable_across_processes(db, env, tmp_path):
         # 올린 파일은 남아 있어 같은 작업을 다시 확인하고 합칠 수 있다
         r = await three.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
         assert r.status_code == 202
-        job = await wait_job(three, jid, h)
+        job = await wait_job(three, jid, h, work)
         assert job["status"] == "verified"
         body = {"on_duplicate": "skip", "archive_sha256": job["sha256"]}
         assert (await three.post(f"{path}/{jid}/apply", json=body, headers=h)).status_code == 202
-        job = await wait_job(three, jid, h)
+        job = await wait_job(three, jid, h, work)
         assert job["status"] == "done" and job["report"]["rows_added"] > 0
         assert list(shared.iterdir()) == []  # 합친 뒤 지운다
 
@@ -2014,3 +2263,182 @@ async def test_web_restore_jobs_are_durable_across_processes(db, env, tmp_path):
         assert r.status_code == 410 and r.json()["detail"] == "upload_missing"
         job = (await four.get(f"{path}/{job['id']}", headers=h)).json()
         assert (job["status"], job["error"]) == ("failed", "upload_missing")
+
+
+# ---------------------------------------------------------------- 웹 복원은 worker 큐에서 (c0027)
+
+
+async def test_web_restore_runs_in_the_worker_queue(db, env, tmp_path):
+    """확인·합치기는 큐 작업(restore)으로 worker가 돈다: 기다리는 동안은 끊김이 아니고 취소할 수 있다,
+    끊김으로 닫힌 작업은 worker가 나중에 집어도 돌지 않는다, 시작한 사람의 지금 역할로 합친다."""
+    from career_core.db.models import Job, RestoreJob
+    from career_core.usecases.restore_jobs import RESTORE_JOB
+
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    shared = tmp_path / "shared"
+    out = tmp_path / "a.tar.gz"
+    await export_workspace(db, blobs, owner, out)
+    data = out.read_bytes()
+    app = FastAPI()
+    app.include_router(
+        build_router(
+            CoreDeps(
+                identity=Tokens({"b": other}),
+                db=db,
+                blobs=blobs,
+                restore_dir=str(shared),
+                restore_stale_seconds=30,
+            )
+        )
+    )
+    work = restore_worker(db, blobs, shared)
+    h = {"Authorization": "Bearer b"}
+    raw = {**h, "Content-Type": "application/octet-stream"}
+    path = "/core/maintenance/restore"
+
+    async def queue(jid):
+        async with db.workspace_session(other.workspace_id) as s:
+            return list(
+                await s.scalars(
+                    select(Job.status)
+                    .where(Job.kind == RESTORE_JOB, Job.target_id == UUID(jid))
+                    .order_by(Job.created_at)
+                )
+            )
+
+    async def age(jid, **values):
+        async with db.workspace_session(other.workspace_id) as s:
+            await s.execute(update(RestoreJob).where(RestoreJob.id == UUID(jid)).values(**values))
+
+    long_ago = datetime.now(UTC) - timedelta(hours=1)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as client:
+        jid = (await client.post(path, content=data, headers=raw)).json()["id"]
+        r = await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
+        assert (r.status_code, r.json()["phase"]) == (202, "queued")
+        assert await queue(jid) == ["queued"]
+        # worker가 바빠 오래 기다려도 끊긴 것이 아니다 (큐에 있다)
+        await age(jid, heartbeat_at=long_ago)
+        job = (await client.get(f"{path}/{jid}", headers=h)).json()
+        assert (job["status"], job["phase"]) == ("verifying", "queued")
+        # 기다리는 작업은 지울 수 있다 (큐 작업도 닫는다)
+        assert (await client.delete(f"{path}/{jid}", headers=h)).status_code == 204
+        assert await queue(jid) == ["failed"]
+        assert (await client.get(f"{path}/{jid}", headers=h)).status_code == 404
+        assert await work() == 0
+
+        # worker가 확인을 돌리고 보고를 쓴다 (시작한 사람 = started_by)
+        jid = (await client.post(path, content=data, headers=raw)).json()["id"]
+        await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
+        job = await wait_job(client, jid, h, work)
+        assert job["status"] == "verified" and job["report"]["rows_added"] > 0
+        assert await queue(jid) == ["done"]
+        async with db.workspace_session(other.workspace_id) as s:
+            row = await s.get(RestoreJob, UUID(jid))
+            assert row.started_by == other.subject_id and row.runner is None
+
+        # worker가 집었다 죽었다 (lease도 지남): 읽는 쪽이 끊김으로 닫고, 나중에 다시 집혀도 돌지 않는다
+        body = {"on_duplicate": "skip", "archive_sha256": job["sha256"]}
+        assert (await client.post(f"{path}/{jid}/apply", json=body, headers=h)).status_code == 202
+        async with db.workspace_session(other.workspace_id) as s:
+            await s.execute(
+                update(Job)
+                .where(Job.kind == RESTORE_JOB, Job.target_id == UUID(jid), Job.status == "queued")
+                .values(status="running", locked_until=long_ago)
+            )
+        await age(jid, heartbeat_at=long_ago, runner="pid0-gone", phase="insert")
+        job = (await client.get(f"{path}/{jid}", headers=h)).json()
+        assert (job["status"], job["error"]) == ("failed", "interrupted")
+        async with db.workspace_session(other.workspace_id) as s:
+            await s.execute(
+                update(Job)
+                .where(Job.kind == RESTORE_JOB, Job.target_id == UUID(jid), Job.status == "running")
+                .values(status="queued", available_at=long_ago)
+            )
+        before = await table_counts(db, other.workspace_id)
+        assert await work() == 1  # 집었지만 닫힌 작업이라 그대로 끝낸다
+        assert await table_counts(db, other.workspace_id) == before
+        assert (await client.get(f"{path}/{jid}", headers=h)).json()["error"] == "interrupted"
+
+        # 시작한 사람이 그 사이 이 공간 구성원이 아니면 worker가 거부한다 (실행 때 역할을 다시 본다)
+        r = await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
+        assert r.status_code == 202
+        await age(jid, started_by=uuid4())
+        job = await wait_job(client, jid, h, work)
+        assert (job["status"], job["error"]) == ("failed", "forbidden")
+
+
+async def test_web_restore_near_duplicate_choices(db, env, tmp_path):
+    """확인 보고의 비슷한 행 쌍을 합치기 요청에서 고른다: 보고에 없는 쌍은 409, 고른 쌍은 기존 행으로."""
+    from career_core.usecases.export import merge_workspace
+
+    owner, other, blobs = env["owner"], env["other"], env["blobs"]
+    first = tmp_path / "first.tar.gz"
+    await export_workspace(db, blobs, owner, first)
+    await merge_workspace(db, blobs, other, first)
+    exp = str(env["a"]["experience"])
+    async with db.workspace_session(owner.workspace_id) as s:
+        await s.execute(
+            text("UPDATE core.experiences SET title = title || ' (고침)' WHERE id = :e"), {"e": exp}
+        )
+    second = tmp_path / "second.tar.gz"
+    await export_workspace(db, blobs, owner, second)
+    shared = tmp_path / "shared"
+    app = FastAPI()
+    app.include_router(
+        build_router(
+            CoreDeps(identity=Tokens({"b": other}), db=db, blobs=blobs, restore_dir=str(shared))
+        )
+    )
+    work = restore_worker(db, blobs, shared)
+    h = {"Authorization": "Bearer b"}
+    path = "/core/maintenance/restore"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as client:
+        r = await client.post(
+            path,
+            content=second.read_bytes(),
+            headers={**h, "Content-Type": "application/octet-stream"},
+        )
+        jid = r.json()["id"]
+        await client.post(f"{path}/{jid}/verify", json={"on_duplicate": "skip"}, headers=h)
+        job = await wait_job(client, jid, h, work)
+        rep = job["report"]
+        [pair] = rep["near_duplicates"]
+        assert pair["table"] == "core.experiences" and pair["incoming_id"] == exp
+        assert pair["decision"] == "keep_both" and rep["near_duplicates_total"] == 1
+        assert pair["columns"] == ["title"]
+        verified_added = rep["rows_added"]
+
+        body = {"on_duplicate": "skip", "archive_sha256": job["sha256"]}
+        wrong = {**pair, "existing_id": str(uuid4())}
+        r = await client.post(
+            f"{path}/{jid}/apply", json={**body, "near_duplicates": [wrong]}, headers=h
+        )
+        assert r.status_code == 409 and r.json()["detail"] == "near_duplicate_unknown"
+        choice = {k: pair[k] for k in ("table", "incoming_id", "existing_id")}
+        r = await client.post(
+            f"{path}/{jid}/apply",
+            json={**body, "near_duplicates": [{**choice, "decision": "skip_incoming"}]},
+            headers=h,
+        )
+        assert r.status_code == 202 and r.json()["near_choices"] == [choice]
+        job = await wait_job(client, jid, h, work)
+        assert job["status"] == "done", job
+        done = job["report"]
+        tables = {t["name"]: t for t in done["tables"]}
+        assert tables["core.experiences"]["added"] == 0
+        assert tables["core.experiences"]["skipped_by"]["near_duplicate"] == 1
+        assert done["near_duplicates"][0]["decision"] == "skip_incoming"
+        assert done["rows_added"] < verified_added
+    titles = {e.title for e in await brain.list_experiences(db, other)}
+    assert not any(t.endswith("(고침)") for t in titles)
+
+
+def test_restore_timing_checks():
+    """신호 간격·끊김 판정의 기본은 2초·60초, 판정은 간격의 3배 이상이어야 한다."""
+    from career_core.usecases.restore_jobs import HEARTBEAT_SECONDS, STALE_SECONDS, check_timing
+
+    assert (HEARTBEAT_SECONDS, STALE_SECONDS) == (2.0, 60.0)
+    check_timing(2, 60)
+    for bad in ((0, 60), (2, 5)):
+        with pytest.raises(ValueError):
+            check_timing(*bad)

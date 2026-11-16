@@ -1020,6 +1020,9 @@ class RestoreJob(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # c0027: 확인·합치기를 시작한 사람 (worker가 이 사람으로 합친다), 고른 비슷한 행 쌍
+    started_by: Mapped[UUID | None] = mapped_column(default=None)
+    near_choices: Mapped[list | None] = mapped_column(JSONB(none_as_null=True), default=None)
 
 
 # ---------------------------------------------------------------- c0025: 공고 가져오기 비용 확인
