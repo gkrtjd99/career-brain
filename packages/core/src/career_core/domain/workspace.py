@@ -46,6 +46,15 @@ ACTION_SCOPES: dict[str, str] = {
     # O09 학습. 경험 후보로 올리기도 study.write (주장은 확인 대기로만 생긴다).
     "study.read": "read",
     "study.write": "draft-write",
+    # O08 실행·승인. 승인 결정은 사람만 (agent actor는 approve 범위를 쓰지 못한다).
+    "runs.read": "read",
+    "runs.start": "draft-write",
+    "runs.control": "draft-write",
+    "approvals.read": "read",
+    "approvals.request": "draft-write",
+    "approvals.decide": "approve",
+    # 승인 묶음을 가진 제출은 편집자·AI도 실행할 수 있다 (승인 자체는 사람이 이미 했다).
+    "applications.submit_approved": "draft-write",
 }
 
 

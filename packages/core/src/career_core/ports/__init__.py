@@ -13,16 +13,31 @@ from uuid import UUID
 
 from career_core.llm.types import EmbeddingCompletion, ModelCompletion, ModelRequest
 
+ACTOR_HUMAN = "human"
+ACTOR_AGENT = "agent"
+APPROVE_SCOPE = "approve"
+
 
 @dataclass(frozen=True, slots=True)
 class ActorContext:
-    """인증 결과. workspace는 요청 body가 아니라 IdentityResolver가 확정한다."""
+    """인증 결과. workspace는 요청 body가 아니라 IdentityResolver가 확정한다.
+
+    ``kind``: 같은 토큰이라도 AI 클라이언트(MCP)나 자동 실행을 거치면 ``agent``다.
+    agent는 ``approve`` 범위를 쓸 수 없다 (AI는 승인을 요청할 수 있지만 스스로 승인하지 않는다).
+    """
 
     subject_id: UUID
     workspace_id: UUID
     scopes: frozenset[str] = field(default_factory=frozenset)
+    kind: str = ACTOR_HUMAN
+
+    @property
+    def is_human(self) -> bool:
+        return self.kind == ACTOR_HUMAN
 
     def has_scope(self, scope: str) -> bool:
+        if scope == APPROVE_SCOPE and not self.is_human:
+            return False
         return scope in self.scopes
 
 
@@ -163,6 +178,9 @@ class DenyAllEgressPolicy:
 
 
 __all__ = [
+    "ACTOR_AGENT",
+    "ACTOR_HUMAN",
+    "APPROVE_SCOPE",
     "ActorContext",
     "AuditSink",
     "BlobStore",

@@ -147,3 +147,20 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 선택 연결(`requirement_id`, `assessment_id`, 후보의 `attempt_id`)은 `ON DELETE SET NULL (칸)` — 부모가 지워져도 `workspace_id`는 그대로 둔다 (PostgreSQL 15+).
 - 학습 테이블은 `claims`·`experiences`에 쓰지 않는다. 예외는 사용자가 직접 올린 후보 1건이며 `extracted`로만 생긴다.
 - 상세: `docs/architecture/study.md`.
+
+## 실행·승인 (c0010)
+
+계획 문서 §7의 `runs, run_events, approvals`. 모두 RLS FORCE, 공간 복합 FK. `outbox`는 아직 두지 않았다 (부수효과가 모두 DB 안의 멱등 usecase라서, `docs/architecture/runs.md`).
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `runs` | 실행 1건. `workflow`, `status`(queued/running/waiting_approval/interrupted/cancelled/failed/done), 재개 위치 `step`·`position`, `result`, `stop_requested`(cancel/interrupt), 한도 대기 `wait_reason`·`waits`·`retry_at`, `approval_id`, `error_code`, 비용 `cost_usd`·`cost_unknown`·`model_calls`, `resumes`, 시작한 actor의 `actor_kind`·`actor_scopes`, `idempotency_key` (`(workspace_id, idempotency_key)` UNIQUE). 끝 상태 ⇔ `finished_at` (`ck_runs_finished`), failed ⇒ `error_code` | `SELECT, INSERT, UPDATE` |
+| `run_events` | 실행 사건 (`seq`, `kind` status/step/wait/resumed/error, 그때의 `status`·`step`, `code`, 짧은 `data`). `(run_id, seq)` UNIQUE | **SELECT, INSERT** |
+| `approvals` | 승인 1건. 행위·대상·`target_version`·`payload_hash`(sha256)·`payload`·`summary`·만료, 요청자와 `requested_via`(human/agent), 결정자와 `decided_via`, 사용 `used_at`·`used_result_id`, 무효 사유. `(workspace_id, idempotency_key)` UNIQUE | `SELECT, INSERT, UPDATE` |
+
+- `ck_approvals_human_decision`: `approved`·`used`면 `decided_by`·`decided_at`이 있고 `decided_via = 'human'`. AI(agent)가 승인 상태를 만들 길이 DB에도 없다.
+- trigger `approvals_binding_immutable`: 행위·대상·대상 버전·내용·요청자·만료·공간은 만든 뒤 바꿀 수 없고, 닫힌 승인(used/rejected/invalidated/expired)은 다시 열 수 없다.
+- 실행 ↔ 승인은 서로 선택 연결(`ON DELETE SET NULL (칸)`). 실행·승인은 앱 role이 지울 수 없다 (기록).
+- 작업 큐 행은 `core.jobs(kind = 'run', target_id = runs.id)`. 승인 대기·중단 중에는 작업 행이 없다 (결정·재개 때 새로 넣는다).
+- 원문은 넣지 않는다. 입력·위치·결과·사건에는 ID·번호·짧은 코드만.
+- 상세: `docs/architecture/runs.md`, MCP: `docs/architecture/mcp.md`.

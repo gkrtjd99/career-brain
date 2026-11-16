@@ -185,6 +185,13 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_posting_routes(router, deps, authorize)
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
+    # O08 실행·승인·MCP. MCP는 같은 identity로 인증하고 같은 PermissionPolicy를 쓴다.
+    from career_core.interfaces.http.runs import add_approval_routes, add_run_routes
+    from career_core.interfaces.mcp.http import add_mcp_routes
+
+    add_run_routes(router, deps, authorize)
+    add_approval_routes(router, deps, authorize)
+    add_mcp_routes(router, deps)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 
