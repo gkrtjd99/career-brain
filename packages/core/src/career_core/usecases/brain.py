@@ -432,7 +432,8 @@ async def attach_span(db: Database, actor: ActorContext, claim_id: UUID, span_id
             raise NotFound("claim")
         await _attach_span(s, actor, claim, span_id)
         # 본인 진술로 확인된 주장에 원문 근거가 붙으면 자료로 확인된 상태로 올라간다.
-        if claim.status == ClaimStatus.SELF_CONFIRMED:
+        # 상태를 올리는 것도 확인 행위라 approve 권한이 있을 때만.
+        if claim.status == ClaimStatus.SELF_CONFIRMED and can_confirm(actor):
             claim.status = ClaimStatus.EVIDENCE_SUPPORTED.value
         return claim.status
 
@@ -504,5 +505,8 @@ async def set_claim_status(
         claim = await s.get(Claim, claim_id)
         if claim is None:
             raise NotFound("claim")
+        # 확인된 주장을 뒤집거나 폐기하는 것은 확인과 같은 무게다. 폐기는 되돌릴 수 없다.
+        if claim.status in CONFIRMED_STATUSES and not can_confirm(actor):
+            raise ClaimRuleError("confirm_requires_approve")
         claim.status = status.value
         return claim.status

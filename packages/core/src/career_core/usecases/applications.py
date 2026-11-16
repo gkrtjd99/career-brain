@@ -66,6 +66,7 @@ from career_core.llm import ChatMessage, ModelRequest
 from career_core.llm.gateway import ModelGateway
 from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound
+from career_core.usecases.data_classes import claim_data_classes, restricted_claims
 from career_core.usecases.extraction import parse_model_json
 
 SUGGEST_PURPOSE = "doc_suggest"
@@ -907,7 +908,7 @@ async def suggest_edits(
     block_ids: Sequence[str] | None = None,
     instruction: str | None = None,
 ) -> SuggestResult:
-    """모델에게 최소 수정안을 받는다 (용도 `doc_suggest`, 자료 등급 private).
+    """모델에게 최소 수정안을 받는다 (용도 `doc_suggest`, 자료 등급은 근거 원본을 따른다).
 
     코드가 원문·연결 근거와 대조해 사실을 바꾼 수정안은 `rejected`로 남긴다(사유와 함께).
     수정안은 문서에도 브레인에도 바로 들어가지 않는다. 사용자가 적용해야 새 revision이 된다.
@@ -930,7 +931,14 @@ async def suggest_edits(
         orgs = (await s.execute(select(Experience.organization))).scalars()
         known_orgs = sorted({o for o in orgs if o} | set(ctx.other_companies) | {ctx.company or ""})
         rev_id = rev.id
-    evidence = {bid: [c.text for c in b.claims if c.confirmed] for bid, b in inputs.items()}
+        # restricted 원본에서 온 근거는 밖으로 보내지 않는다 (사실 대조는 로컬에서 그대로 쓴다).
+        sent_ids = {c.id for b in inputs.values() for c in b.claims if c.confirmed}
+        blocked = await restricted_claims(s, sent_ids)
+        data_classes = await claim_data_classes(s, sent_ids - blocked)
+    evidence = {
+        bid: [c.text for c in b.claims if c.confirmed and c.id not in blocked]
+        for bid, b in inputs.items()
+    }
     data = {
         "company": ctx.company,
         "job_title": ctx.job_title,
@@ -945,7 +953,7 @@ async def suggest_edits(
         messages=(ChatMessage("user", f"<data>\n{json.dumps(data, ensure_ascii=False)}\n</data>"),),
         system=SUGGEST_SYSTEM_PROMPT,
         max_output_tokens=4000,
-        data_classes=frozenset({"private"}),
+        data_classes=data_classes,
     )
     result = await gateway.run(actor, SUGGEST_PURPOSE, request)
     call_id = UUID(result.call_id)

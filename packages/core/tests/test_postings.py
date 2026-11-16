@@ -532,3 +532,109 @@ def test_responsive_copies_and_related_list_are_dropped():
     page = extract_page(html, "https://board.example.test/archives/9")
     assert page.main_text.count("합성 공고 요건 3번") == 1
     assert "가상기업1" not in page.main_text
+
+
+async def test_compressed_bomb_is_capped():
+    import gzip
+
+    bomb = gzip.compress(b"<p>" + b"a" * (8 * 1024 * 1024) + b"</p>")
+    assert len(bomb) < 64 * 1024
+
+    async def stream(data):
+        for i in range(0, len(data), 4096):
+            yield data[i : i + 4096]
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            content=stream(bomb),
+            headers={"content-type": "text/html", "content-encoding": "gzip"},
+        )
+
+    fetcher = HttpFetcher(
+        transport=httpx.MockTransport(handler), resolver=fake_resolve, max_bytes=1024 * 1024
+    )
+    result = await fetcher.fetch("https://jobs.example.test/b/1")
+    assert result.code == "too_large"
+    small = gzip.compress(JSON_LD_PAGE.encode())
+
+    def ok(request):
+        return httpx.Response(
+            200,
+            content=stream(small),
+            headers={"content-type": "text/html", "content-encoding": "gzip"},
+        )
+
+    fetcher = HttpFetcher(transport=httpx.MockTransport(ok), resolver=fake_resolve)
+    page = await fetcher.fetch("https://jobs.example.test/b/1")
+    assert "백엔드 개발자" in page.text
+
+
+async def test_body_size_limit_rejects_before_reading():
+    from career_core.interfaces.http.limits import BodySizeLimit
+    from fastapi import Request
+
+    app = FastAPI()
+    seen = []
+
+    @app.post("/up")
+    async def up(request: Request):
+        seen.append(len(await request.body()))
+        return {"ok": True}
+
+    limited = BodySizeLimit(app, max_bytes=1000)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(limited), base_url="http://t") as c:
+        assert (await c.post("/up", content=b"x" * 500)).status_code == 200
+        assert (await c.post("/up", content=b"x" * 5000)).status_code == 413
+
+        async def chunks():
+            for _ in range(10):
+                yield b"x" * 500
+
+        assert (await c.post("/up", content=chunks())).status_code == 413
+    assert seen == [500]
+
+
+def _chromium_ready() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False
+    try:
+        with sync_playwright() as pw:
+            pw.chromium.launch().close()
+    except Exception:  # noqa: BLE001
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _chromium_ready(), reason="playwright chromium not installed")
+async def test_browser_never_reaches_internal_addresses():
+    """Chromium은 직접 나가지 않는다: 하위 요청·리다이렉트·스크립트 요청 모두 검사된 fetcher를 거친다."""
+    from career_core.adapters.web_fetch import BrowserFetcher
+
+    seen: list[str] = []
+    page = """<html><body><main><h1>합성 공고</h1><p>본문</p>
+    <img src="http://internal.example.test/pixel.png">
+    <script>fetch('http://internal.example.test/secret').catch(()=>{});
+    fetch('https://jobs.example.test/api', {method: 'POST', body: 'x'}).catch(()=>{});
+    document.body.insertAdjacentHTML('beforeend', '<p id=js>스크립트로 그린 글</p>');</script>
+    </main></body></html>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.headers["host"]
+        seen.append(f"{request.method} {host}{request.url.path}")
+        if host == "redirect.example.test":
+            return httpx.Response(302, headers={"location": "http://internal.example.test/admin"})
+        return httpx.Response(200, html=page)
+
+    fetcher = BrowserFetcher(
+        transport=httpx.MockTransport(handler), resolver=fake_resolve, screenshot=False
+    )
+    result = await fetcher.fetch("https://jobs.example.test/b/1")
+    assert "스크립트로 그린 글" in result.text  # 렌더링은 된다
+    assert not any("internal" in s for s in seen)
+    assert not any(s.startswith("POST") for s in seen)
+    blocked = await fetcher.fetch("https://redirect.example.test/p")
+    assert blocked.code == "blocked_address"
+    assert not any("internal" in s for s in seen)

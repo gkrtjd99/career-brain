@@ -42,6 +42,7 @@ from career_core.usecases.brain import (
     _statement,
     can_confirm,
 )
+from career_core.usecases.data_classes import claim_data_classes, restricted_claims
 from career_core.usecases.extraction import parse_model_json
 from career_core.usecases.index_queue import request_index
 
@@ -160,10 +161,11 @@ async def get_interview(db: Database, actor: ActorContext, session_id: UUID) -> 
 async def add_ai_questions(
     db: Database, gateway: ModelGateway, actor: ActorContext, session_id: UUID, *, count: int = 3
 ) -> list[UUID]:
-    """지금까지의 경험·주장·답을 보고 보충 질문을 만든다. 자료 등급은 private로 본다."""
+    """지금까지의 경험·주장·답을 보고 보충 질문을 만든다. 자료 등급은 주장 근거 원본을 따르고, restricted 주장은 빼고 보낸다."""
     count = max(1, min(count, MAX_AI_QUESTIONS))
     view = await get_interview(db, actor, session_id)
     context: dict = {"experience": None, "claims": [], "asked": [], "answers": []}
+    data_classes = frozenset({"private"})
     async with db.workspace_session(actor.workspace_id) as s:
         if view.experience_id:
             exp = await s.get(Experience, view.experience_id)
@@ -175,15 +177,19 @@ async def add_ai_questions(
             }
             claims = (
                 await s.execute(
-                    select(Claim.statement, Claim.status, Claim.contribution).where(
+                    select(Claim.id, Claim.statement, Claim.status, Claim.contribution).where(
                         Claim.experience_id == view.experience_id,
                         Claim.status != ClaimStatus.RETIRED,
                     )
                 )
             ).all()
+            # restricted 원본에서 온 주장은 질문 만들기에 보내지 않는다.
+            blocked = await restricted_claims(s, [c.id for c in claims])
+            claims = [c for c in claims if c.id not in blocked]
+            data_classes = await claim_data_classes(s, [c.id for c in claims])
             context["claims"] = [
-                {"statement": st, "status": status, "contribution": contrib}
-                for st, status, contrib in claims
+                {"statement": c.statement, "status": c.status, "contribution": c.contribution}
+                for c in claims
             ]
     context["asked"] = [q.prompt for q in view.questions]
     context["answers"] = [
@@ -199,7 +205,7 @@ async def add_ai_questions(
         ),
         system=QUESTION_SYSTEM_PROMPT,
         max_output_tokens=2000,
-        data_classes=frozenset({"private"}),
+        data_classes=data_classes,
     )
     result = await gateway.run(actor, INTERVIEW_PURPOSE, request)
     try:

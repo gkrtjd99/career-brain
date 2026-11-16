@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from career_core.adapters.blobstore import LocalBlobStore
 from career_core.db import Database
 from career_core.interfaces.http import CoreDeps, build_router
+from career_core.interfaces.http.limits import MULTIPART_OVERHEAD, BodySizeLimit
 from career_core.llm.gateway import ModelGateway
 from fastapi import FastAPI
 
@@ -28,6 +29,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await db.dispose()
 
     app = FastAPI(title="career-brain (personal)", lifespan=lifespan)
+    # 업로드가 처리 함수에 닿기 전에 크기를 막는다 (Starlette는 본문을 먼저 다 받아 둔다).
+    app.add_middleware(BodySizeLimit, max_bytes=settings.max_upload_bytes + MULTIPART_OVERHEAD)
     deps = CoreDeps(
         identity=PersonalTokenResolver(db),
         db=db,

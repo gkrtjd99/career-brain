@@ -180,7 +180,9 @@ class ModelGateway:
             )
             raise
 
-        cost, basis = self._cost(plan, completion)
+        cost, basis = self._bound_unknown(
+            plan, *self._cost(plan, completion), prompt_chars, request.max_output_tokens
+        )
         call_id = await self._record(
             actor,
             purpose,
@@ -228,6 +230,21 @@ class ModelGateway:
             if spent >= budget.monthly_usd:
                 return "budget_exceeded"
         return None
+
+    def _bound_unknown(
+        self, plan: _Plan, cost: Cost, basis: str, prompt_chars: int, max_output: int
+    ) -> tuple[Cost, str]:
+        """종량제인데 제공자가 사용량을 안 줬으면 요청 기준 상한 추정을 비용으로 남긴다.
+
+        비용을 비워 두면 월 사용액 합계에서 빠져 예산 상한이 작동하지 않는다.
+        """
+        if plan.endpoint.billing != BILLING_METERED or basis != "unknown":
+            return cost, basis
+        micro = self._estimate_micro_usd(prompt_chars, max_output, plan)
+        if micro <= 0:
+            return cost, basis
+        usd = Decimal(micro) / Decimal(1_000_000)
+        return Cost(usd, cost.refs, (*cost.notes, "estimated_from_request")), "estimated"
 
     def _estimate_micro_usd(self, prompt_chars: int, max_output: int, plan: _Plan) -> int:
         price = (
@@ -332,7 +349,7 @@ class ModelGateway:
                 actor, purpose, plan, status="error", error_code=type(exc).__name__, latency=started
             )
             raise
-        cost, basis = self._cost(plan, completion)
+        cost, basis = self._bound_unknown(plan, *self._cost(plan, completion), chars, 0)
         call_id = await self._record(
             actor,
             purpose,

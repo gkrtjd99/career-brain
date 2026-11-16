@@ -26,11 +26,20 @@ class UploadResult:
     deduplicated: bool
 
 
-async def _existing(db: Database, workspace_id: UUID, sha256: str) -> UploadResult | None:
+_STRICTNESS = {DataClass.PUBLIC: 0, DataClass.PRIVATE: 1, DataClass.RESTRICTED: 2}
+
+
+async def _existing(
+    db: Database, workspace_id: UUID, sha256: str, data_class: DataClass
+) -> UploadResult | None:
     async with db.workspace_session(workspace_id) as s:
         version = await s.scalar(select(SourceVersion).where(SourceVersion.sha256 == sha256))
         if version is None:
             return None
+        # 같은 파일을 더 엄격한 등급으로 다시 올리면 등급을 올린다 (낮추지는 않는다).
+        source = await s.get(Source, version.source_id)
+        if _STRICTNESS[data_class] > _STRICTNESS[DataClass(source.data_class)]:
+            source.data_class = data_class.value
         run_id = await s.scalar(
             select(ParseRun.id).where(
                 ParseRun.source_version_id == version.id,
@@ -65,7 +74,7 @@ async def upload_source(
     sha256 = hashlib.sha256(data).hexdigest()
     ws = actor.workspace_id
 
-    if found := await _existing(db, ws, sha256):
+    if found := await _existing(db, ws, sha256, dc):
         return found
 
     # 파일 쓰기는 DB 트랜잭션 밖에서. 내용 주소라 중복 쓰기는 무해하다.
@@ -108,7 +117,7 @@ async def upload_source(
                 await s.flush()
     except IntegrityError:
         # 동시에 같은 파일이 올라온 경우: 먼저 커밋된 쪽을 돌려준다.
-        if found := await _existing(db, ws, sha256):
+        if found := await _existing(db, ws, sha256, dc):
             return found
         raise
     return UploadResult(source.id, version.id, run.id, deduplicated=False)

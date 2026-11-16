@@ -117,3 +117,7 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 - 스트리밍, 도구 호출, 구조화 출력, 이미지 입력 (O04 이후 필요할 때 `ModelRequest`를 넓힌다).
 - OpenAI Responses API (Chat Completions만 쓴다. 12시간 캐시 쓰기 내역은 Responses API에만 있다).
 - 동시 호출 예산 경합: 개인용은 사전 확인 방식이라 동시에 여러 호출이 출발하면 한도를 조금 넘을 수 있다. 서비스는 `BudgetPolicy`로 예약·정산한다.
+
+## 사용량을 안 주는 종량제 응답
+
+제공자가 사용량(`usage`)을 돌려주지 않으면 요청 기준 상한 추정(글자 수를 토큰으로, 최대 출력 토큰)을 비용으로 기록한다 (`cost_basis = estimated`, 메모 `estimated_from_request`). 비용을 비워 두면 월 사용액에서 빠져 예산 상한이 작동하지 않기 때문이다.

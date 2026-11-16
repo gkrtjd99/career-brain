@@ -303,6 +303,8 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
                 new = await brain.set_claim_status(db, actor, claim_id, _target)
             except brain.NotFound as exc:
                 raise _not_found() from exc
+            except ClaimRuleError as exc:
+                raise _rule(exc) from exc
             return StatusOut(id=claim_id, status=new)
 
         router.add_api_route(
