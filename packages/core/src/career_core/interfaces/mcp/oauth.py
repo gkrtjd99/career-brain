@@ -10,24 +10,42 @@
   그 연결이 가리키는 (공간, actor)를 쓴다. 연결은 공간 소유자가 만든다 (``personal-api oauth-link``).
 - 범위: 토큰 ``scope``를 역할 범위로 옮기고 **현재 역할 범위와 교집합**만 쓴다. ``approve``·``workspace-admin``은
   토큰으로 줄 수 없다. actor는 항상 ``agent``다 (MCP).
-- 토큰을 다른 곳으로 전달하지 않는다 (token passthrough 금지).
+- 토큰을 다른 곳으로 전달하지 않는다 (token passthrough 금지). 예외는 설정한 인가 서버의 introspection
+  주소 하나다 (그 토큰을 발급한 곳이 유효한지 답한다).
 
-하지 않는 것: 인가 서버, 동적 클라이언트 등록, 토큰 introspection(불투명 토큰), 토큰 교환. API 토큰
-(``cbp_…``)이 기본이고 이 기능은 설정했을 때만 켜진다.
+c0019 보강:
+
+- 불투명 토큰 introspection (RFC 7662, 선택): ``introspection_url``을 설정하면 JWT가 아닌 토큰(또는 JWKS를
+  설정하지 않았으면 모든 토큰)을 인가 서버에 물어본다. ``active``·``iss``·``aud``·``exp``·``sub``를 JWT와
+  같은 규칙으로 본다. 결과는 짧게(기본 60초, 만료 전까지만) 캐시한다. 그래서 인가 서버에서 폐기한 토큰은
+  캐시 시간 안에 막힌다. 이 설치의 API 토큰 접두어(``local_token_prefixes``)는 보내지 않는다.
+- 폐기 목록·토큰 기록: 받은 토큰마다 ``core.oauth_tokens``에 ``jti``(없으면 sha256)를 남긴다. 소유자가 폐기한
+  토큰과 끊은 연결의 토큰은 거부한다. 같은 ``jti``가 다른 연결로 오면 거부한다.
+- ``require_jti``: 켜면 ``jti`` 없는 토큰을 거부한다 (토큰 하나만 골라 폐기할 수 있게).
+
+하지 않는 것: 인가 서버, 동적 클라이언트 등록, 토큰 교환, 한 번만 쓰는 토큰(액세스 토큰은 만료까지 요청마다
+다시 보내므로 재사용 자체는 정상이다. 탈취한 토큰의 재전송을 막으려면 DPoP(RFC 9449) 같은 소유 증명이
+필요하다, ``docs/architecture/mcp.md``). API 토큰(``cbp_…``)이 기본이고 이 기능은 설정했을 때만 켜진다.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from sqlalchemy import select, text
 
 from career_core.db import Database, Membership
+from career_core.db.models import OAuthIdentity
 from career_core.domain.workspace import scopes_for_role
 from career_core.ports import ACTOR_AGENT, ActorContext
 
@@ -65,18 +83,37 @@ class OAuthConfig:
 
     resource: str
     issuer: str
-    jwks_url: str
+    # JWT 서명 확인용. introspection만 쓰면 비워도 된다 (둘 중 하나는 있어야 한다).
+    jwks_url: str | None = None
     # 없으면 resource. 인가 서버가 다른 값을 aud로 넣는다면 그 값 (그래도 이 자원 전용이어야 한다)
     audience: str | None = None
     algorithms: tuple[str, ...] = DEFAULT_ALGORITHMS
     scope_map: Mapping[str, frozenset[str]] = field(default_factory=lambda: dict(DEFAULT_SCOPE_MAP))
     leeway_seconds: int = 60
     resource_name: str = "career-brain"
+    # RFC 7662 introspection (선택). 클라이언트 인증은 client_secret_basic.
+    introspection_url: str | None = None
+    introspection_client_id: str | None = None
+    introspection_client_secret: str | None = field(default=None, repr=False)
+    introspection_cache_seconds: int = 60
+    # True면 jti 없는 토큰을 거부한다 (토큰 하나씩 폐기할 수 있게)
+    require_jti: bool = False
+    # 이 설치의 다른 토큰 접두어(예: API 토큰 "cbp_"). 이런 토큰은 인가 서버로 보내지 않는다.
+    local_token_prefixes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _check_url("resource", self.resource)
         _check_url("issuer", self.issuer)
-        _check_url("jwks_url", self.jwks_url)
+        if not self.jwks_url and not self.introspection_url:
+            raise OAuthConfigError("set jwks_url or introspection_url")
+        if self.jwks_url:
+            _check_url("jwks_url", self.jwks_url)
+        if self.introspection_url:
+            _check_url("introspection_url", self.introspection_url)
+            if not self.introspection_client_id or not self.introspection_client_secret:
+                raise OAuthConfigError("introspection needs a client id and secret")
+        if not 0 <= self.introspection_cache_seconds <= 600:
+            raise OAuthConfigError("introspection_cache_seconds must be between 0 and 600")
         if "none" in {a.lower() for a in self.algorithms} or not self.algorithms:
             raise OAuthConfigError("algorithms must not be empty or include 'none'")
         for scope, granted in self.scope_map.items():
@@ -147,6 +184,8 @@ class JwtVerifier:
             ) from exc
         self.config = config
         if jwks_client is None:
+            if not config.jwks_url:
+                raise OAuthConfigError("jwks_url is not set")
             from jwt import PyJWKClient
 
             jwks_client = PyJWKClient(config.jwks_url, cache_keys=True, lifespan=300, timeout=10)
@@ -175,25 +214,158 @@ class JwtVerifier:
             return None
 
 
-class OAuthIdentityResolver:
-    """외부 JWT → ``ActorContext``. 공간은 (issuer, sub) 연결이 정한다. 실패하면 None."""
+def _audiences(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [v for v in value if isinstance(v, str)]
+    return []
 
-    def __init__(self, db: Database, config: OAuthConfig, verifier: JwtVerifier | None = None):
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+class IntrospectionVerifier:
+    """RFC 7662 토큰 introspection. 활성 토큰의 클레임(``iss``·``aud``·``exp``·``sub``·``scope`` 등)을 돌려준다.
+
+    JWT 검증과 같은 규칙: ``active = true``, ``iss``가 있으면 설정한 issuer, ``aud``에 이 자원(필수),
+    ``exp``·``nbf``(여유 포함), ``sub`` 필수. 결과는 토큰 sha256을 키로 짧게 캐시한다 (거부는 캐시하지 않음).
+    """
+
+    MAX_CACHE = 1024
+
+    def __init__(
+        self,
+        config: OAuthConfig,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        clock: Any = time.time,
+    ) -> None:
+        if not config.introspection_url:
+            raise OAuthConfigError("introspection_url is not set")
+        self.config = config
+        self._transport = transport
+        self._clock = clock
+        self._cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+        self.calls = 0
+
+    def _check(self, data: Any) -> dict[str, Any] | None:
+        cfg = self.config
+        if not isinstance(data, dict) or data.get("active") is not True:
+            return None
+        if data.get("iss") is not None and data.get("iss") != cfg.issuer:
+            return None
+        if cfg.expected_audience not in _audiences(data.get("aud")):
+            return None
+        now = self._clock()
+        exp, nbf = _number(data.get("exp")), _number(data.get("nbf"))
+        if exp is not None and exp + cfg.leeway_seconds <= now:
+            return None
+        if nbf is not None and nbf - cfg.leeway_seconds > now:
+            return None
+        if not isinstance(data.get("sub"), str) or not data["sub"]:
+            return None
+        return data
+
+    async def verify(self, token: str) -> dict[str, Any] | None:
+        cfg = self.config
+        key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        now = self._clock()
+        hit = self._cache.get(key)
+        if hit is not None:
+            if hit[0] > now:
+                return hit[1]
+            self._cache.pop(key, None)
+        self.calls += 1
+        try:
+            async with httpx.AsyncClient(
+                transport=self._transport, timeout=10, follow_redirects=False
+            ) as client:
+                r = await client.post(
+                    cfg.introspection_url or "",
+                    data={"token": token, "token_type_hint": "access_token"},
+                    auth=(cfg.introspection_client_id or "", cfg.introspection_client_secret or ""),
+                    headers={"Accept": "application/json"},
+                )
+            data = r.json() if r.status_code == 200 else None
+        except (httpx.HTTPError, ValueError) as exc:
+            log.info("oauth introspection failed: %s", type(exc).__name__)
+            return None
+        claims = self._check(data)
+        if claims is None:
+            return None
+        ttl = float(cfg.introspection_cache_seconds)
+        exp = _number(claims.get("exp"))
+        if exp is not None:
+            ttl = min(ttl, exp - now)
+        if ttl > 0:
+            self._cache[key] = (now + ttl, claims)
+            while len(self._cache) > self.MAX_CACHE:
+                self._cache.popitem(last=False)
+        return claims
+
+
+def _is_jwt(credential: str) -> bool:
+    return credential.count(".") == 2
+
+
+class OAuthIdentityResolver:
+    """외부 액세스 토큰 → ``ActorContext``. 공간은 (issuer, sub) 연결이 정한다. 실패하면 None.
+
+    JWT 모양이면 JWKS로(설정했을 때), 그 밖에는 introspection으로(설정했을 때) 확인한다. 그 뒤 연결을
+    찾고, 공간 문맥에서 토큰 기록·폐기 목록(c0019)을 확인한다.
+    """
+
+    def __init__(
+        self,
+        db: Database,
+        config: OAuthConfig,
+        verifier: JwtVerifier | None = None,
+        introspector: IntrospectionVerifier | None = None,
+    ):
         self.db = db
         self.config = config
-        self.verifier = verifier or JwtVerifier(config)
+        self.verifier = verifier or (JwtVerifier(config) if config.jwks_url else None)
+        self.introspector = introspector or (
+            IntrospectionVerifier(config) if config.introspection_url else None
+        )
+        # 마지막 거부 사유 (시험·로그용, 토큰 내용은 없음)
+        self.last_rejection: str | None = None
+
+    async def _claims(self, credential: str) -> tuple[dict[str, Any] | None, str]:
+        if any(credential.startswith(p) for p in self.config.local_token_prefixes):
+            return None, "local_token"
+        if _is_jwt(credential) and self.verifier is not None:
+            return await self.verifier.verify(credential), "jwt"
+        if self.introspector is not None:
+            return await self.introspector.verify(credential), "introspection"
+        return None, "unsupported"
+
+    def _reject(self, reason: str) -> None:
+        self.last_rejection = reason
+        log.info("oauth token rejected: %s", reason)
 
     async def resolve(self, credential: str) -> ActorContext | None:
-        if credential.count(".") != 2:
-            return None  # JWT가 아님 (API 토큰 등)
-        claims = await self.verifier.verify(credential)
+        from career_core.usecases.oauth_identities import record_token_use, token_ref
+
+        self.last_rejection = None
+        claims, via = await self._claims(credential)
         if claims is None:
+            self.last_rejection = via if via in ("local_token", "unsupported") else "invalid"
             return None
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
+            self._reject("no_subject")
+            return None
+        if self.config.require_jti and not isinstance(claims.get("jti"), str):
+            self._reject("jti_required")
             return None
         granted = granted_scopes(claims, self.config.scope_map)
         if not granted:
+            self._reject("no_scope")
             return None
         async with self.db.system_session() as s:
             row = (
@@ -203,15 +375,41 @@ class OAuthIdentityResolver:
                 )
             ).first()
         if row is None:
+            self._reject("not_linked")
             return None
+        ref, ref_kind = token_ref(credential, claims.get("jti"))
+        exp = _number(claims.get("exp"))
         async with self.db.workspace_session(row.workspace_id) as s:
             role = await s.scalar(
                 select(Membership.role).where(Membership.actor_id == row.actor_id)
             )
-        if role is None:
+            identity_id = await s.scalar(
+                select(OAuthIdentity.id).where(
+                    OAuthIdentity.issuer == self.config.issuer,
+                    OAuthIdentity.subject == subject,
+                    OAuthIdentity.revoked_at.is_(None),
+                )
+            )
+            if role is None or identity_id is None:
+                self._reject("not_linked")
+                return None
+            verdict = await record_token_use(
+                s,
+                workspace_id=row.workspace_id,
+                identity_id=identity_id,
+                issuer=self.config.issuer,
+                subject=subject,
+                ref=ref,
+                ref_kind=ref_kind,
+                via=via,
+                expires_at=datetime.fromtimestamp(exp, UTC) if exp is not None else None,
+            )
+        if verdict != "ok":
+            self._reject(verdict)
             return None
         scopes = scopes_for_role(role) & granted
         if not scopes:
+            self._reject("no_scope")
             return None
         return ActorContext(row.actor_id, row.workspace_id, scopes, kind=ACTOR_AGENT)
 
@@ -238,6 +436,7 @@ def add_metadata_routes(app_or_router: Any, config: OAuthConfig) -> None:
 __all__ = [
     "DEFAULT_SCOPE_MAP",
     "METADATA_PATH",
+    "IntrospectionVerifier",
     "JwtVerifier",
     "McpOAuth",
     "OAuthConfig",

@@ -29,6 +29,12 @@ class Settings:
     oauth_issuer: str | None = None
     oauth_jwks_url: str | None = None
     oauth_audience: str | None = None
+    # 불투명 토큰 introspection (RFC 7662, 선택). 비밀은 환경변수로만.
+    oauth_introspection_url: str | None = None
+    oauth_client_id: str | None = None
+    oauth_client_secret: str | None = None
+    # jti 없는 외부 토큰 거부 (토큰 하나씩 폐기할 수 있게)
+    oauth_require_jti: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -48,4 +54,9 @@ class Settings:
             oauth_issuer=os.environ.get("CAREER_OAUTH_ISSUER") or None,
             oauth_jwks_url=os.environ.get("CAREER_OAUTH_JWKS_URL") or None,
             oauth_audience=os.environ.get("CAREER_OAUTH_AUDIENCE") or None,
+            oauth_introspection_url=os.environ.get("CAREER_OAUTH_INTROSPECTION_URL") or None,
+            oauth_client_id=os.environ.get("CAREER_OAUTH_CLIENT_ID") or None,
+            oauth_client_secret=os.environ.get("CAREER_OAUTH_CLIENT_SECRET") or None,
+            oauth_require_jti=os.environ.get("CAREER_OAUTH_REQUIRE_JTI", "0").lower()
+            in ("1", "true", "yes", "on"),
         )

@@ -457,7 +457,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - ~~학습: 복습 마감 기준을 사용자 표시 시간대의 하루 끝으로 (지금은 UTC 시각 비교, `until` 파라미터로 조정).~~ → 해결 (c0013 `study_settings.timezone`, 기본 `Asia/Seoul`, `tz` 파라미터, `until`은 덮어쓰기로 유지).
 - 학습: 표시 시간대를 공간 공용 설정(다른 화면의 날짜 표시)으로 넓히기. 지금은 학습 마감·D-day에만 쓴다.
 - ~~학습: 시험 일정의 오늘 화면 D-day, 학습 항목 삭제·병합, 공고에서 빠진 요건(`current: false`) 정리.~~ → 해결 (`assessments/upcoming`, 항목 `merge`·`DELETE`(고치지 않는 기록이 있으면 409), `requirements/cleanup`, `study.md`).
-- 실행(O08): `outbox` 테이블 — 알림·외부 전송처럼 DB 밖 부수효과가 생길 때 (지금은 모든 단계가 DB 안의 멱등 usecase).
+- ~~실행(O08): `outbox` 테이블 — 알림·외부 전송처럼 DB 밖 부수효과가 생길 때 (지금은 모든 단계가 DB 안의 멱등 usecase).~~ → 보류 (DB 밖으로 나가는 되돌릴 수 없는 쓰기가 아직 없다: 모든 단계가 같은 트랜잭션의 멱등 usecase이고 모델 호출은 읽기형이다. 필요해지는 때와 설계(같은 트랜잭션 INSERT + dispatcher job, `dedupe_key`, 지수 대기, 승인 소비와 같은 트랜잭션)는 `runs.md` "Outbox — 보류". 첫 외부 알림·웹훅·실제 제출 기능과 함께 만든다).
 - ~~실행(O08): AI 장기 작업 workflow (문서별 수정안 일괄, 인터뷰 질문 묶음) — `StepContext.model()`로 비용이 실행에 쌓인다. 수정안은 재개 시 중복 생성을 막을 멱등 키(`document_suggestions`에 `idempotency_key`)가 먼저 필요하다.~~ → 해결 (수정안: `document_suggestions.idempotency_key`, workflow `suggest_document_batch`. 인터뷰 질문: c0016 workflow `interview_question_batch`. 둘 다 재개 시 중복 없음 시험).
 - ~~실행(O08): 웹 화면 — 오늘 화면 "승인 요청", 시스템 화면 실행 목록·사건·취소/중단/재개 (API는 있음).~~ → 해결 (`/system` 실행·승인 탭, 오늘 화면 "승인 요청" 카드, `web.md`).
 - ~~실행(O08): 실행 중 단계 heartbeat로 lease 연장 (지금은 단계가 lease 300초 안에 끝난다고 가정)~~ → 해결 (`run_once`가 처리 중 lease의 1/3마다 연장, lease를 잃은 worker는 결과를 덮지 않음, `runs.md`).
@@ -493,9 +493,14 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 내보내기(후속): 웹 복원 업로드 자체의 진행 표시 (지금은 `fetch` 본문이라 업로드 중 진행률이 없다, 서버 처리 단계부터 보임). 큰 파일은 XHR `upload.onprogress` 또는 조각 업로드.
 - 내보내기(후속): 합치기의 키 없는 표는 "같은 내용"(기본 키 밖 모든 칸)으로만 겹침을 찾는다 — 시각·메모 하나만 달라도 다른 행으로 더해진다. 표별 내용 키(`EXTRA_MERGE_KEYS`)를 더 정하거나 비슷한 행을 보여 주고 고르게.
 - 내보내기(후속): 합치기 중에는 승인 즉시 무효 trigger를 끈다(`career.restoring`). 넣은 열린 승인은 조회·결정 때 해시 확인이 막지만, 기존 승인이 넣은 문서·단계 때문에 무효가 되어야 하는 경우는 합친 뒤 다음 변경 때까지 열려 있다. 합친 지원에 붙은 열린 승인을 commit 전에 무효로 바꾸는 단계.
-- 승인(후속): 무효화 trigger의 칸 목록은 `submission_target`과 손으로 맞춘다. 새 승인 행위가 생기면 행위별 trigger 또는 대상 버전 칸(`target_version` 계산을 DB 함수로) 검토.
-- MCP(후속): OAuth 불투명 토큰 introspection(RFC 7662), 토큰 폐기 목록, `jti` 재사용 감지, 연결 관리 웹 화면 (지금은 `personal-api oauth-link`). 감사 기록 보존 기간·정리.
-- 실행(후속): 시스템 화면 실시간 갱신(SSE) — 지금은 활성 실행이 있을 때 몇 초마다 다시 읽는다.
+- ~~승인(후속): 무효화 trigger의 칸 목록은 `submission_target`과 손으로 맞춘다. 새 승인 행위가 생기면 행위별 trigger 또는 대상 버전 칸(`target_version` 계산을 DB 함수로) 검토.~~ → 해결 (c0019 `core.application_target_version`: 대상 버전 계산을 DB 함수 하나로, 앱 확인과 trigger가 같은 함수를 부른다. trigger는 칸 목록 없이 다시 계산해 비교. `BEGIN ATOMIC` 본문의 `pg_depend`로 "읽는 표마다 trigger"를 시험. 칸 목록 시험·저장 칸 방식보다 나은 이유는 `runs.md`).
+- ~~MCP(후속): OAuth 불투명 토큰 introspection(RFC 7662), 토큰 폐기 목록, `jti` 재사용 감지, 연결 관리 웹 화면 (지금은 `personal-api oauth-link`). 감사 기록 보존 기간·정리.~~ → 해결 (선택 introspection + 60초 캐시, API 토큰은 보내지 않음. c0019 `oauth_tokens`: 본 토큰 기록·`jti` 폐기, 연결 끊기, 다른 연결의 같은 `jti` 거부, `CAREER_OAUTH_REQUIRE_JTI`. 일회용 `jti`는 bearer 액세스 토큰에 맞지 않아 하지 않음(`mcp.md`). `/system` "원격 연결" 탭. 감사 보존 `CAREER_AUDIT_RETENTION_DAYS`(기본 180, 0 = 보관) + SECURITY DEFINER `core.purge_audit_events`(공간 문맥·최소 7일), 주기 유지보수 단계).
+- ~~실행(후속): 시스템 화면 실시간 갱신(SSE) — 지금은 활성 실행이 있을 때 몇 초마다 다시 읽는다.~~ → 해결 (`GET /core/live` SSE, c0019 `notify_state` trigger(표 이름만) → 프로세스당 LISTEN 하나 → 공간 문맥에서 다시 읽어 바뀐 경우만 이벤트. 같은 Bearer 규칙·주기적 재확인, LISTEN 없으면 5초 서버 확인, 웹은 끊기면 다시 읽기로).
+- MCP(후속): DPoP(RFC 9449) 소유 증명으로 탈취 토큰 재전송 막기 — 인가 서버·MCP 클라이언트 지원이 먼저 필요하다.
+- MCP(후속): JWT는 인가 서버에서 폐기해도 여기 폐기 목록에 넣거나 만료될 때까지 통한다. 필요하면 JWT도 introspection으로 확인하는 설정(요청마다 인가 서버 호출, 캐시) 추가.
+- MCP(후속): introspection 캐시는 프로세스 메모리라 worker·API 프로세스마다 따로다 (최대 60초 반영 지연). 여러 프로세스면 캐시 시간을 줄인다.
+- 실행(후속): SSE 연결마다 힌트가 올 때 요약 쿼리를 한 번씩 한다 (연결 수 × 변경 수). 화면을 여는 사람이 많아지는 서비스는 공간별로 묶어 한 번만 읽고 나눠 주기. 웹의 오늘 화면 "승인 요청" 카드도 같은 스트림을 쓰게 넓히기.
+- 승인(후속): 새 승인 행위가 생기면 그 대상의 `<kind>_target_version` 함수와 `approvals_recheck` trigger, 같은 꼴의 `pg_depend` 시험을 더한다 (`runs.md`).
 - ~~운영: 미확정 공고 초안 정리(`purge_unconfirmed`)·`pg_dump`를 주기 실행하는 내장 스케줄 (지금은 버튼·cron)~~ → 해결 (`serve`·`worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`마다 모든 공간 정리, advisory lock. `pg_dump`는 앱 밖 cron/systemd timer: `backup.md`).
 - 운영: 알림이 없는 경우 — lease가 끝난 `running` 작업(죽은 worker), worker 시작 전에 예약된 미래 작업 — 는 fallback 확인(기본 30초) 때 집힌다. 더 빨라야 하면 시작 때 다음 예정 시각 조회 함수를 둔다.
 - 운영: 주기 유지보수는 worker마다 간격마다 한 번씩 돈다 (lock은 동시 실행만 막는다, 멱등이라 결과는 같음). worker가 많아지면 마지막 실행 시각을 DB에 두고 간격 안이면 건너뛰기. 유지보수 화면에 마지막 자동 정리 시각 표시.

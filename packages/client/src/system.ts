@@ -199,6 +199,8 @@ export interface AuditEvent {
 export interface AuditPage {
   events: AuditEvent[];
   last_24h: { tool: string; calls: number; errors: number }[];
+  /** 보존 기간(일). 0 = 계속 보관 (c0019) */
+  retention_days?: number;
 }
 
 export interface DownloadedFile {

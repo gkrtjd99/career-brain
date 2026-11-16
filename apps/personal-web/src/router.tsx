@@ -152,7 +152,7 @@ export const studyItemRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/StudyItem"), "StudyItemPage"),
 });
 
-const SYSTEM_TABS: SystemTab[] = ["runs", "approvals", "maintenance", "audit"];
+const SYSTEM_TABS: SystemTab[] = ["runs", "approvals", "maintenance", "audit", "oauth"];
 export const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system",

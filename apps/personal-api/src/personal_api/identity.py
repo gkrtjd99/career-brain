@@ -136,7 +136,9 @@ MCP_PATH = "/api/core/mcp"
 def mcp_oauth_from_settings(settings, db: Database):
     """``CAREER_OAUTH_ISSUER``가 있으면 원격 MCP용 외부 JWT 검증을 켠다. 없으면 None (API 토큰만).
 
-    필요한 값: ``CAREER_PUBLIC_URL``(자원 주소의 앞부분), ``CAREER_OAUTH_JWKS_URL``.
+    필요한 값: ``CAREER_PUBLIC_URL``(자원 주소의 앞부분), 그리고 ``CAREER_OAUTH_JWKS_URL``(JWT) 또는
+    ``CAREER_OAUTH_INTROSPECTION_URL`` + ``CAREER_OAUTH_CLIENT_ID``·``CAREER_OAUTH_CLIENT_SECRET``(불투명 토큰).
+    API 토큰(``cbp_``)은 인가 서버로 보내지 않는다.
     """
     if not settings.oauth_issuer:
         return None
@@ -147,14 +149,21 @@ def mcp_oauth_from_settings(settings, db: Database):
         OAuthIdentityResolver,
     )
 
-    if not settings.public_url or not settings.oauth_jwks_url:
+    introspection = getattr(settings, "oauth_introspection_url", None)
+    if not settings.public_url or not (settings.oauth_jwks_url or introspection):
         raise OAuthConfigError(
-            "CAREER_OAUTH_ISSUER needs CAREER_PUBLIC_URL and CAREER_OAUTH_JWKS_URL"
+            "CAREER_OAUTH_ISSUER needs CAREER_PUBLIC_URL and CAREER_OAUTH_JWKS_URL "
+            "(or CAREER_OAUTH_INTROSPECTION_URL)"
         )
     config = OAuthConfig(
         resource=settings.public_url.rstrip("/") + MCP_PATH,
         issuer=settings.oauth_issuer,
         jwks_url=settings.oauth_jwks_url,
         audience=settings.oauth_audience,
+        introspection_url=introspection,
+        introspection_client_id=getattr(settings, "oauth_client_id", None),
+        introspection_client_secret=getattr(settings, "oauth_client_secret", None),
+        require_jti=bool(getattr(settings, "oauth_require_jti", False)),
+        local_token_prefixes=(TOKEN_PREFIX,),
     )
     return McpOAuth(config=config, resolver=OAuthIdentityResolver(db, config))

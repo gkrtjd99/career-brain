@@ -79,8 +79,13 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 - **무효화**: 조회·결정·사용 때 만료면 `expired`, 대상이 바뀌었으면 `invalidated`. 실행이 취소되면 그 실행의 열린 승인도 `invalidated`(`run_cancelled`).
 - **즉시 무효화 (c0014)**: 대상이 바뀌는 **그 트랜잭션 안에서** 열린 승인(`pending`·`approved`)을 `invalidated`로 닫는다 (`invalid_reason`: `target_changed`, 대상이 지워지면 `target_missing`). 그 승인을 기다리던 실행은 바로 `queued`로 깨어나고(`approval_invalidated` / `approval_expired` 이벤트, `run` job) 다음 단계에서 실패 처리한다.
   - **왜 DB trigger인가**: 대상 칸을 바꾸는 곳이 여러 usecase(문서 저장·지원 상태·공고 확정·변경 반영)이고 다른 작업자·직접 SQL·관리 작업도 있다. usecase hook은 하나만 빠뜨려도 열린 승인이 남는다. trigger는 쓰는 쪽과 상관없이 같은 트랜잭션에서 걸리고, 롤백되면 무효화도 같이 롤백된다.
-  - 대상 칸: `applications`(상태·공고), `application_documents`(추가·삭제, 현재 revision·글자/바이트 제한·세는 기준·문항·소속 지원), `job_postings`(확정 버전·확정 값·변경 대기). 목록은 `usecases/applications.py::submission_target`과 같다. 제목처럼 대상 버전에 없는 칸은 승인을 닫지 않는다.
-  - **뒷받침**: 조회·결정·사용 때의 해시 비교는 그대로 둔다. trigger 목록에서 빠진 칸이 생겨도 사용 순간 다시 계산한 대상 버전이 다르면 쓰지 않는다 (시험: trigger를 끈 연결로 바꿔도 `submit`이 `target_changed`로 막힌다).
+  - **대상 버전은 한 곳에서 (c0019)**: DB 함수 `core.application_target_version(app)`이 제출 승인의 대상 버전 해시를 계산한다. 앱의 조회·결정·사용 확인(`submission_target`)과 즉시 무효화 trigger가 **같은 함수**를 부른다. 칸: 지원 상태, 문서별 ID·현재 revision·본문 해시·글자/바이트 제한·세는 기준·문항, 공고 ID·확정 버전·확정 값·변경 대기(정렬). 제목처럼 함수에 없는 칸은 승인을 닫지 않는다.
+  - trigger(`approvals_recheck`, `applications`·`application_documents`·`document_revisions`·`job_postings`)는 칸 목록을 따로 두지 않는다. 행이 바뀌면 그 지원에 열린 승인이 있을 때만 함수로 다시 계산해 요청 때 버전과 다르면 닫는다 (지원이 없어졌으면 `target_missing`). 그래서 c0014처럼 trigger의 칸 목록을 `submission_target`과 손으로 맞출 일이 없다.
+  - **왜 이 방식인가** (검토한 셋): ① 칸 목록 시험(파이썬 `submission_target`에 칸이 늘면 실패) — 시험이 목록을 하나 더 만들 뿐이고, 해시에 칸을 더하면서 시험 목록만 고치면 그대로 통과한다. ② 대상 버전을 행에 저장하는 칸 + trigger 갱신 — 저장값과 계산값이 또 갈라질 수 있다. ③ **계산 자체를 DB 함수 하나로**(채택) — 판정에 쓰는 값이 정의상 하나다. 함수 본문이 `BEGIN ATOMIC`(SQL 표준 본문)이라 PostgreSQL이 읽는 표·칸을 `pg_depend`에 적고, 시험이 "함수가 읽는 표마다 다시 계산 trigger가 있다"를 카탈로그로 확인한다 (`test_approvals_mcp.py::test_version_function_reads_only_tables_that_recheck`). 함수가 새 표를 읽게 바꾸고 trigger를 잊으면 그 시험이 실패한다. 읽는 칸을 지우려 해도 의존성 때문에 DB가 막는다.
+  - 비용: 열린 승인이 없으면 `EXISTS` 한 번으로 끝난다. 열린 승인이 있는 지원의 문서 저장·공고 변경 때만 해시를 다시 만든다.
+  - c0019로 올리면 버전 형식이 바뀐다 (파이썬 정규 JSON → `jsonb::text`의 sha256). 그때 열린 제출 승인은 `target_changed`로 닫히고 기다리던 실행은 깨어나 실패 처리된다. 다시 요청하면 된다.
+  - 새 승인 행위가 생기면: 그 대상의 `<kind>_target_version` 함수(`BEGIN ATOMIC`)와 다시 계산 trigger를 같은 방식으로 두고, `ApprovalBinder.version`이 그 함수를 부른다. 시험도 같은 꼴로 하나 더.
+  - **뒷받침**: 조회·결정·사용 때의 해시 비교는 그대로 둔다. trigger가 꺼진 채 바뀐 변경도 사용 순간 다시 계산한 대상 버전이 다르면 쓰지 않는다 (시험: trigger를 끈 연결로 바꿔도 `submit`이 `target_changed`로 막힌다).
   - `consume_approval`은 `used`로 바꾼 뒤 바로 flush한다. 같은 트랜잭션의 제출(지원 상태 변경)이 방금 쓴 승인을 다시 무효로 만들지 않게.
   - 복원(`restore_workspace`)이 행을 넣는 동안은 트랜잭션 로컬 설정 `career.restoring = on`으로 멈춘다 (묶음의 승인 상태 그대로).
 - **변경 비교**: `GET /core/approvals/{id}/diff` → `{approval, requested, current, target_changed, changes[]}`. `requested`는 요청 때 저장한 요약, `current`는 지금 대상으로 다시 만든 요약(대상이 없으면 null). `changes`는 칸별 차이이고 문서 목록은 `document_id`로 짝짓는다 (`path` 예: `documents[<id>].revision`, `label`은 문서 제목). 웹 `/system?tab=approvals`가 이 비교를 보여 주고, 결정할 때 본 승인의 `payload_hash`를 보낸다.
@@ -107,10 +112,51 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 | `GET /core/approvals?status=pending` · `GET /core/approvals/{id}` | `approvals.read` |
 | `GET /core/approvals/{id}/diff` (요청 때 요약 ↔ 지금 대상) | `approvals.read` |
 | `POST /core/approvals/{id}/approve` · `/reject` `{payload_hash?, note?}` | `approvals.decide` (사람) |
+| `GET /core/live?max_seconds=` (SSE, 실행·승인 상태 알림) | `runs.read` (+ 승인은 `approvals.read`) |
 
 다른 공간의 실행·승인 ID는 404다 (RLS). 같은 경로를 MCP 도구가 같은 usecase로 쓴다: `docs/architecture/mcp.md`.
 
+## 실시간 갱신 (SSE, c0019)
+
+시스템 화면은 실행·승인 상태를 `GET /core/live`(Server-Sent Events)로 받는다. 구현: `interfaces/http/live.py`.
+
+```text
+runs·approvals 변경 ─▶ trigger notify_state (문장마다) ─▶ NOTIFY career_state, 'runs' | 'approvals'
+                                                          │ 프로세스마다 LISTEN 연결 하나 (StateHints)
+SSE 연결 ─▶ 힌트를 받으면 그 공간 문맥(RLS)에서 요약값(행 수·updated_at 합·최댓값)을 다시 읽고
+           바뀐 경우에만  event: runs / event: approvals  ─▶ 웹이 해당 목록을 다시 읽는다
+```
+
+- **알림 내용**: 표 이름뿐이다. `LISTEN`은 권한 검사가 없어 어떤 DB 역할이든 들을 수 있으므로 공간·대상 ID를 넣지 않는다 (c0015 작업 알림과 같은 규칙). 다른 공간의 변경도 힌트로는 오지만 다시 읽은 요약값이 같으면 아무것도 보내지 않는다. 그래서 다른 공간의 활동 시각도 이벤트로 드러나지 않는다. 이벤트 데이터도 그 공간 요약값(불투명 문자열)뿐이고 내용은 기존 API로 읽는다.
+- **인증**: 다른 경로와 같은 `Authorization: Bearer` 토큰·`IdentityResolver`·권한. 토큰을 URL에 넣지 않는다. 브라우저 `EventSource`는 헤더를 붙일 수 없어 웹은 `fetch` 스트림으로 읽는다(`packages/client/src/live.ts`). 연결 중에도 15초마다 토큰을 다시 확인해 폐기되면 `event: unauthorized`를 보내고 닫는다.
+- **연결 수명**: `max_seconds`(기본 300, 최대 3600) 뒤 `event: bye`로 닫고 클라이언트가 다시 붙는다 (프록시 유휴 시간). 15초마다 `: ping` 주석. 붙자마자 `event: ready {channels, listening}`.
+- **fallback**: 알림은 힌트일 뿐이다. 서버는 LISTEN 중이면 30초, LISTEN이 안 되면(PgBouncer transaction 모드 등) 5초마다 요약값을 다시 본다. 웹은 스트림이 붙어 있는 동안 실행 목록의 몇 초 간격 다시 읽기를 끄고, 끊기면 예전처럼 다시 읽으면서 1초→30초 간격으로 다시 붙어 본다. 401·403이면 다시 붙지 않고 다시 읽기만 한다.
+- 힌트가 몰려 오면(한 실행의 여러 단계) 0.2초 묶어 한 번 다시 읽는다.
+- 시험: `test_approvals_mcp.py` (토큰 규칙, 다른 공간에 이벤트 없음, LISTEN 없을 때 주기 확인, 폐기 시 종료, 알림 내용에 ID 없음, 실제 LISTEN으로 이벤트).
+
+## Outbox — 보류 (평가, c0019)
+
+지금은 두지 않는다. 모든 단계의 부수효과가 **DB 안의 멱등 usecase**(공고 저장, 승인 요청, 제출본 고정, 수정안)이고 실행 위치(`step`, `position`)와 같은 트랜잭션에 기록된다. DB 밖으로 나가는 것은 모델 호출뿐인데, 모델 호출은 "결과를 받아 DB에 쓰는" 읽기형 호출이라 다시 해도 바깥 상태가 바뀌지 않는다(비용만 다시 든다 — 비용 보정은 plan §18).
+
+**필요해지는 때**: 되돌릴 수 없고 다시 하면 안 되는 **DB 밖 쓰기**가 단계에 생길 때. 예: 메일·메신저 알림, 웹훅, 외부 캘린더 등록, 채용 사이트에 실제 제출. 이때 "DB에 상태를 쓰고 → 바깥에 보냄" 사이에서 죽으면 보낸 것과 기록이 어긋난다 (보냈는데 기록이 없거나, 기록했는데 안 보냄).
+
+**설계 (그때 만들 것)**:
+
+```text
+단계 트랜잭션: 상태 변경 + INSERT core.outbox(id, workspace_id, kind, target_id, dedupe_key, payload_ref, status='pending', attempts, available_at)
+  └─ commit (둘 다 되거나 둘 다 안 됨)
+dispatcher(worker의 job kind 'outbox'): claim (SKIP LOCKED) → 바깥에 보냄(멱등 키 = dedupe_key) → status='sent', sent_at
+  ├─ 일시 오류: attempts+1, available_at = 지수 대기 (작업 큐와 같은 규칙)
+  └─ 영구 오류·한도 초과: status='failed' + 실행 사건, 사람에게 보임
+```
+
+- 표: 공간 범위 + FORCE RLS, 앱 역할 `SELECT, INSERT, UPDATE`. `(workspace_id, dedupe_key)` UNIQUE. 내용 원문 대신 ID·참조만 (`payload_ref`), 비밀은 넣지 않는다.
+- 깨우기: `core.jobs`처럼 `NOTIFY` trigger(종류·초만, ID 없음) + fallback 확인. 별도 큐를 만들지 않고 기존 작업 큐 행(`kind='outbox'`)으로 보낼 수도 있다 — 보내는 일이 적으면 이쪽이 단순하다.
+- 바깥 쪽 멱등: 받는 쪽이 멱등 키를 받으면 `dedupe_key`를 넘긴다. 못 받으면 "최소 한 번"이 한계이므로 화면에 그 사실을 적는다.
+- 승인과의 관계: 바깥 전송이 승인 대상이면 `consume_approval`과 outbox INSERT가 같은 트랜잭션이어야 한다 (승인을 쓰고 안 보내거나, 안 쓰고 보내는 경우 없음).
+- 내보내기: 보낸 기록은 내보내고, 대기 중인 것은 복원 때 다시 보내지 않도록 `pending_work`처럼 따로 다룬다.
+
 ## 하지 않은 것
 
-- outbox 테이블: 지금 단계의 부수효과는 모두 DB 안의 멱등 usecase라 따로 두지 않았다. 알림·외부 전송처럼 DB 밖 부수효과가 생기면 추가한다 (plan §18).
+- outbox 테이블: 위 "Outbox — 보류" (DB 밖 부수효과가 생길 때).
 - LangGraph 체크포인트: 단계가 짧고 상태가 ID 몇 개라 `position` JSON으로 충분하다.

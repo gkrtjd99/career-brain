@@ -67,6 +67,8 @@ class CoreDeps:
     mcp_oauth: Any = None
     # 웹 복원(묶음 올리기) 상한. 앱의 BodySizeLimit도 그 경로만 이 값으로 (interfaces.http.restore).
     max_restore_bytes: int = 2 * 1024 * 1024 * 1024
+    # 시스템 화면 SSE의 상태 변경 힌트 (interfaces.http.live.StateHints). 없으면 DB 주소로 LISTEN.
+    live: Any = None
 
 
 class WorkspaceOut(BaseModel):
@@ -211,6 +213,12 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     from career_core.interfaces.http.audit import add_audit_routes
 
     add_audit_routes(router, deps, authorize)
+    # c0019: 원격 MCP OAuth 연결·토큰 관리, 시스템 화면 실시간 갱신(SSE)
+    from career_core.interfaces.http.live import add_live_routes
+    from career_core.interfaces.http.oauth import add_oauth_routes
+
+    add_oauth_routes(router, deps, authorize)
+    add_live_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 
