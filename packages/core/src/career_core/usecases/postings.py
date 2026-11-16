@@ -12,14 +12,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from career_core.adapters.ats import API_ADAPTERS, PAGE_ADAPTERS, from_json_ld
 from career_core.adapters.html_extract import (
@@ -33,14 +35,19 @@ from career_core.adapters.pdf_render import (
     MAX_RENDER_PAGES,
     PdfRenderError,
     PdfRenderUnavailable,
+    RenderedPages,
+    pick_pages,
     render_pages,
 )
 from career_core.adapters.web_fetch import FetchedPage, FetchFailure
 from career_core.db import Database, Job, JobFetchRun, JobPosting, JobPostingVersion
 from career_core.db.base import utcnow
+from career_core.db.models import JobFetchConfirmation
 from career_core.domain.postings import (
     LIST_FIELDS,
+    MAX_CHOICE_OPTIONS,
     REVIEW_FIELDS,
+    STRUCTURED_ONLY_FIELDS,
     FetchError,
     FetchStatus,
     FieldName,
@@ -54,7 +61,7 @@ from career_core.domain.postings import (
 )
 from career_core.llm import ChatMessage, ImageInput, ModelCallError, ModelDenied, ModelRequest
 from career_core.llm.gateway import ModelGateway
-from career_core.ports import ActorContext, BlobStore, ParseError
+from career_core.ports import ACTOR_AGENT, ActorContext, BlobStore, ParseError
 from career_core.usecases.brain import NotFound
 from career_core.usecases.extraction import find_quote, parse_model_json
 from career_core.usecases.parsing import StepOutcome
@@ -69,6 +76,11 @@ MAX_TEXT_CHARS = 30_000
 MIN_MAIN_TEXT = 200  # 이보다 짧으면 동적 페이지로 보고 브라우저를 시도한다
 UNCONFIRMED_DAYS = 7
 MAX_MANUAL_CHARS = 60_000
+# 스캔 PDF 비전 호출: 예상 최대 비용(USD)이 이 금액을 넘으면 사람의 확인을 기다린다 (c0025). None = 묻지 않음
+DEFAULT_VISION_CONFIRM_USD = Decimal("0.10")
+PDF_OCR_MAX_OUTPUT = 6000
+# 예상 출력: 쪽마다 이만큼 (빽빽한 한국어 공고 한 쪽 근처). 최대는 PDF_OCR_MAX_OUTPUT
+OCR_OUTPUT_TOKENS_PER_PAGE = 1200
 
 FIELDS = [f.value for f in FieldName]
 
@@ -207,8 +219,8 @@ def verify_llm_fields(raw: dict[str, Any], text: str) -> tuple[dict, int]:
     dropped = 0
     for name in FIELDS:
         value = raw.get(name)
-        if value is None:
-            continue
+        if value is None or name in STRUCTURED_ONLY_FIELDS:
+            continue  # 선택형 문항은 구조화 데이터에서만 받는다 (모델 출력은 버린다)
         try:
             if name in LIST_FIELDS:
                 items = []
@@ -480,6 +492,8 @@ class PostingDeps:
     gateway: ModelGateway | None = None
     browser: Any = None  # BrowserFetcher | None
     blobs: BlobStore | None = None
+    # 종량제 비전 호출(스캔 PDF)의 예상 최대 비용이 이 금액을 넘으면 확인을 기다린다. None이면 묻지 않는다
+    vision_confirm_usd: Decimal | None = DEFAULT_VISION_CONFIRM_USD
 
 
 def content_hash(text: str) -> str:
@@ -511,7 +525,7 @@ async def extract_fields(
     notes: list[str] = list(structured.notes) if structured else []
     call_id = None
     page_type = "posting"
-    missing = [f for f in FIELDS if f not in fields]
+    missing = [f for f in FIELDS if f not in fields and f not in STRUCTURED_ONLY_FIELDS]
     if missing and deps.gateway is not None and text:
         request = ModelRequest(
             messages=(ChatMessage("user", f"<posting>\n{text[:MAX_TEXT_CHARS]}\n</posting>"),),
@@ -575,8 +589,12 @@ async def process_fetch(deps: PostingDeps, ws: UUID, run_id: UUID) -> StepOutcom
 
     result = await deps.fetcher.fetch(url)
     if isinstance(result, FetchFailure):
-        # 봇 차단은 우회하지 않는다. 어느 차단 화면인지만 남기고 직접 붙여넣기로 안내한다.
-        blocked = result.code == FetchError.BOT_BLOCKED and result.detail
+        # 봇 차단은 우회하지 않는다. 어느 차단 화면인지(모르면 본 흔적)만 남기고 직접 붙여넣기로 안내한다.
+        notes: list[str] = []
+        if result.code == FetchError.BOT_BLOCKED and result.detail:
+            notes = [f"bot_blocked_by:{result.detail}"]
+        elif result.code == FetchError.MAYBE_BOT_BLOCKED and result.detail:
+            notes = [f"bot_block_signs:{result.detail}"]
         return await _finish_run(
             db,
             ws,
@@ -584,7 +602,7 @@ async def process_fetch(deps: PostingDeps, ws: UUID, run_id: UUID) -> StepOutcom
             status=FetchStatus.FAILED.value,
             error_code=result.code,
             http_status=result.status,
-            notes=[f"bot_blocked_by:{result.detail}"] if blocked else [],
+            notes=notes,
         )
     if result.body is not None:  # PDF·이미지 공고
         if result.content_type == "application/pdf":
@@ -739,8 +757,14 @@ async def _process_scanned_pdf(
             db, ws, run_id, manual, result.status, "pdf_no_text", "vision_route_missing"
         )
     try:
+        # 긴 스캔 공고: 빈 쪽을 빼고 앞쪽 + 마지막 쪽을 고른다 (잉크 비율, adapters/pdf_render.py)
+        pick = await asyncio.to_thread(pick_pages, data, max_pages=MAX_RENDER_PAGES)
         rendered = await asyncio.to_thread(
-            render_pages, data, max_pages=MAX_RENDER_PAGES, max_image_bytes=MAX_IMAGE_BYTES
+            render_pages,
+            data,
+            max_pages=MAX_RENDER_PAGES,
+            max_image_bytes=MAX_IMAGE_BYTES,
+            pages=pick.pages,
         )
     except PdfRenderUnavailable:
         return await _failed(
@@ -757,10 +781,30 @@ async def _process_scanned_pdf(
     request = ModelRequest(
         messages=(ChatMessage("user", "Transcribe the text on these job posting PDF pages."),),
         system=PDF_OCR_PROMPT,
-        max_output_tokens=6000,
+        max_output_tokens=PDF_OCR_MAX_OUTPUT,
         data_classes=frozenset({"public"}),  # 공개 공고 PDF
         images=tuple(ImageInput("image/png", png) for png in rendered.images),
     )
+    estimate = vision_estimate(gateway, rendered, request)
+    pick_notes = ["pdf_pages_read:" + ",".join(str(i + 1) for i in rendered.pages)]
+    if pick.blank:
+        pick_notes.append(f"pdf_blank_pages:{len(pick.blank)}")
+    if estimate is not None:
+        pick_notes.append(f"vision_estimate_usd:{_usd_note(estimate.max_usd)}")
+    threshold = deps.vision_confirm_usd
+    if (
+        threshold is not None
+        and estimate is not None
+        and estimate.metered
+        and (estimate.max_usd is None or estimate.max_usd > threshold)
+    ):
+        # 상한을 넘는 비전 호출은 사람이 확인한 것(같은 파일·같은 쪽·그 금액 이하)만 한 번 쓴다
+        if not await _take_confirmation(db, ws, posting_id, run_id, digest, estimate):
+            await _ask_confirmation(
+                db, ws, posting_id, run_id, digest, estimate, threshold, result.status, pick_notes
+            )
+            return StepOutcome(done=True)
+        pick_notes.append("vision_confirmed")
     try:
         read = await gateway.run(actor, VISION_PURPOSE, request)
     except ModelDenied as exc:
@@ -788,9 +832,251 @@ async def _process_scanned_pdf(
         adapter=PDF_ADAPTER,
         digest=digest,
         screenshot=rendered.images[0],  # 첫 쪽 이미지: 화면에서 원본과 대조용
-        notes=[f"pdf_rendered:{len(rendered.images)}/{rendered.pages_total}", "ocr_pdf_by_model"],
+        notes=[
+            f"pdf_rendered:{len(rendered.images)}/{rendered.pages_total}",
+            "ocr_pdf_by_model",
+            *pick_notes,
+        ],
         fallback_call_id=UUID(read.call_id),
     )
+
+
+# --- 비전 비용 확인 (c0025) -----------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class VisionEstimate:
+    """스캔 PDF 비전 호출 한 번의 예상. 토큰은 추정값, USD는 단가표 기준 (모르면 None)."""
+
+    pages: tuple[int, ...]  # 1부터
+    pages_total: int
+    images: int
+    input_tokens: int
+    output_tokens: int  # 예상 출력
+    max_output_tokens: int
+    usd: Decimal | None  # 예상
+    max_usd: Decimal | None  # 출력이 상한까지 나올 때
+    endpoint: str
+    model: str
+    billing: str
+
+    @property
+    def metered(self) -> bool:
+        return self.billing == "metered"
+
+
+def image_tokens(width: int, height: int) -> int:
+    """이미지 한 장의 입력 토큰 추정. 제공자 공식 중 큰 값 (넘치게 잡는다).
+
+    Anthropic: 가로×세로/750. OpenAI(고해상도): 2048px 안으로, 짧은 변 768px로 줄인 뒤 512px 타일마다
+    170 + 기본 85.
+    """
+    if width <= 0 or height <= 0:
+        return 0
+    anthropic = math.ceil(width * height / 750)
+    s = min(1.0, 2048 / max(width, height))
+    w, h = width * s, height * s
+    s = min(1.0, 768 / min(w, h))
+    w, h = w * s, h * s
+    openai = 85 + 170 * math.ceil(w / 512) * math.ceil(h / 512)
+    return max(anthropic, openai)
+
+
+def vision_estimate(
+    gateway: ModelGateway, rendered: RenderedPages, request: ModelRequest
+) -> VisionEstimate | None:
+    """그린 쪽 이미지로 비전 호출 비용을 미리 센다 (호출·장부 기록 없음). 라우트가 없으면 None."""
+    prompt = len(request.system or "") + sum(len(m.content) for m in request.messages)
+    input_tokens = sum(image_tokens(w, h) for w, h in rendered.sizes) + prompt
+    images = max(1, len(rendered.images))
+    out = min(request.max_output_tokens, OCR_OUTPUT_TOKENS_PER_PAGE * images)
+    expected = gateway.estimate_cost(VISION_PURPOSE, input_tokens=input_tokens, output_tokens=out)
+    worst = gateway.estimate_cost(
+        VISION_PURPOSE, input_tokens=input_tokens, output_tokens=request.max_output_tokens
+    )
+    if expected is None or worst is None:
+        return None
+    return VisionEstimate(
+        pages=tuple(i + 1 for i in rendered.pages),
+        pages_total=rendered.pages_total,
+        images=len(rendered.images),
+        input_tokens=input_tokens,
+        output_tokens=out,
+        max_output_tokens=request.max_output_tokens,
+        usd=expected.usd,
+        max_usd=worst.usd,
+        endpoint=expected.endpoint,
+        model=expected.model,
+        billing=expected.billing,
+    )
+
+
+def _usd_note(value: Decimal | None) -> str:
+    return "unknown" if value is None else f"{value.quantize(Decimal('0.0001'))}"
+
+
+async def _take_confirmation(
+    db: Database, ws: UUID, posting_id: UUID, run_id: UUID, digest: str, est: VisionEstimate
+) -> bool:
+    """사람이 확인한 요청 중 같은 파일·같은 쪽·확인한 금액 이하인 것이 있으면 ``used``로 바꾸고 True."""
+    async with db.workspace_session(ws) as s:
+        rows = (
+            await s.scalars(
+                select(JobFetchConfirmation)
+                .where(
+                    JobFetchConfirmation.posting_id == posting_id,
+                    JobFetchConfirmation.status == "confirmed",
+                    JobFetchConfirmation.content_digest == digest,
+                )
+                .order_by(JobFetchConfirmation.decided_at.desc())
+                .with_for_update()
+            )
+        ).all()
+        for row in rows:
+            if list(row.pages) != list(est.pages) or row.model != est.model:
+                continue
+            if est.max_usd is None:
+                if row.max_usd is not None:
+                    continue  # 금액을 알고 확인했는데 지금은 모른다: 다시 묻는다
+            elif row.max_usd is not None and est.max_usd > row.max_usd:
+                continue  # 확인한 금액보다 비싸면 다시 묻는다
+            row.status = "used"
+            row.used_run_id = run_id
+            return True
+    return False
+
+
+async def _ask_confirmation(
+    db: Database,
+    ws: UUID,
+    posting_id: UUID,
+    run_id: UUID,
+    digest: str,
+    est: VisionEstimate,
+    threshold: Decimal,
+    http_status: int | None,
+    notes: list[str],
+) -> None:
+    async with db.workspace_session(ws) as s:
+        # 같은 공고의 옛 확인 요청(아직 결정하지 않은 것)은 새 요청으로 바뀐다
+        await s.execute(
+            update(JobFetchConfirmation)
+            .where(
+                JobFetchConfirmation.posting_id == posting_id,
+                JobFetchConfirmation.status == "pending",
+            )
+            .values(status="superseded")
+        )
+        s.add(
+            JobFetchConfirmation(
+                id=uuid4(),
+                workspace_id=ws,
+                posting_id=posting_id,
+                fetch_run_id=run_id,
+                content_digest=digest,
+                pages=list(est.pages),
+                pages_total=est.pages_total,
+                images=est.images,
+                input_tokens=est.input_tokens,
+                output_tokens=est.output_tokens,
+                estimated_usd=est.usd,
+                max_usd=est.max_usd,
+                threshold_usd=threshold,
+                endpoint=est.endpoint,
+                model=est.model,
+            )
+        )
+        run = await s.get(JobFetchRun, run_id)
+        run.status = FetchStatus.NEEDS_CONFIRMATION.value
+        run.http_status = http_status
+        run.notes = ["pdf_no_text", *notes]
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmationView:
+    id: UUID
+    status: str
+    pages: list[int]
+    pages_total: int
+    images: int
+    input_tokens: int
+    output_tokens: int
+    estimated_usd: str | None
+    max_usd: str | None
+    threshold_usd: str
+    endpoint: str
+    model: str
+    created_at: datetime
+    decided_at: datetime | None
+
+
+def _money(v: Decimal | None) -> str | None:
+    return None if v is None else str(v.quantize(Decimal("0.000001")))
+
+
+def _confirmation_view(c: JobFetchConfirmation) -> ConfirmationView:
+    return ConfirmationView(
+        c.id,
+        c.status,
+        list(c.pages),
+        c.pages_total,
+        c.images,
+        c.input_tokens,
+        c.output_tokens,
+        _money(c.estimated_usd),
+        _money(c.max_usd),
+        _money(c.threshold_usd) or "0",
+        c.endpoint,
+        c.model,
+        c.created_at,
+        c.decided_at,
+    )
+
+
+async def decide_fetch_confirmation(
+    db: Database, actor: ActorContext, posting_id: UUID, run_id: UUID, *, accept: bool
+) -> UUID | None:
+    """확인 대기 가져오기(``needs_confirmation``)를 결정한다. 사람만 (AI 에이전트는 비용을 승인하지 않는다).
+
+    - 확인: 확인 요청을 ``confirmed``로 두고 가져오기를 다시 큐에 넣어 그 실행 ID를 돌려준다. 다시 받은
+      파일이 같고 고른 쪽이 같고 예상 금액이 확인한 금액 이하일 때만 비전을 부른다 (한 번만 쓴다).
+    - 거절: 요청을 ``declined``, 실행을 ``needs_manual_check``(``vision_declined``)로 끝내고 None.
+    """
+    if actor.kind == ACTOR_AGENT:
+        raise PostingRuleError("human_confirmation_required")
+    async with db.workspace_session(actor.workspace_id) as s:
+        posting = await s.get(JobPosting, posting_id)
+        if posting is None:
+            raise NotFound("posting")
+        row = await s.scalar(
+            select(JobFetchConfirmation)
+            .where(
+                JobFetchConfirmation.posting_id == posting_id,
+                JobFetchConfirmation.fetch_run_id == run_id,
+            )
+            .with_for_update()
+        )
+        if row is None:
+            raise NotFound("confirmation")
+        if row.status != "pending":
+            raise PostingRuleError("confirmation_not_pending")
+        row.status = "confirmed" if accept else "declined"
+        row.decided_by = actor.subject_id
+        row.decided_at = utcnow()
+        if not accept:
+            run = await s.get(JobFetchRun, run_id)
+            run.status = FetchStatus.FAILED.value
+            run.error_code = FetchError.NEEDS_MANUAL_CHECK.value
+            run.notes = [*run.notes, "vision_declined"]
+            return None
+        pending = await s.scalar(
+            select(JobFetchRun.id).where(
+                JobFetchRun.posting_id == posting_id, JobFetchRun.status == FetchStatus.PENDING
+            )
+        )
+        if pending:
+            return pending
+        return await _queue_fetch(s, actor, posting_id)
 
 
 OCR_PROMPT = """\
@@ -1003,7 +1289,41 @@ async def add_manual_text(
 # --- 확인·확정 ----------------------------------------------------------------------
 
 
+def _validate_choices(value: Any) -> list[dict]:
+    """선택형 문항 고치기 (사용자 입력): 질문·보기 글, 필수 여부만. 모양이 틀리면 거부."""
+    if not isinstance(value, list):
+        raise PostingRuleError("invalid_application_questions")
+    out = []
+    for q in value[:30]:
+        if not isinstance(q, dict) or not str(q.get("prompt", "")).strip():
+            raise PostingRuleError("invalid_application_questions")
+        options = q.get("options", [])
+        if not isinstance(options, list) or not all(isinstance(o, str) for o in options):
+            raise PostingRuleError("invalid_application_questions")
+        required = q.get("required")
+        if required is not None and not isinstance(required, bool):
+            raise PostingRuleError("invalid_application_questions")
+        source_type = q.get("source_type")
+        if source_type is not None and (
+            not isinstance(source_type, int) or isinstance(source_type, bool)
+        ):
+            raise PostingRuleError("invalid_application_questions")
+        out.append(
+            {
+                "prompt": " ".join(str(q["prompt"]).split())[:1000],
+                "required": required,
+                "options": [" ".join(o.split())[:200] for o in options if o.strip()][
+                    :MAX_CHOICE_OPTIONS
+                ],
+                "source_type": source_type,
+            }
+        )
+    return out
+
+
 def _validate_value(name: str, value: Any) -> Any:
+    if name == FieldName.APPLICATION_QUESTIONS:
+        return _validate_choices(value)
     if name in LIST_FIELDS:
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise PostingRuleError(f"invalid_{name}")
@@ -1130,6 +1450,8 @@ class FetchRunView:
     candidates: list[dict]
     notes: list[str]
     created_at: datetime
+    # c0025: 비전 비용 확인 요청 (needs_confirmation 실행, 결정한 뒤에도 남는다)
+    confirmation: ConfirmationView | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1259,6 +1581,16 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
             .scalars()
             .all()
         )
+        asks = {
+            c.fetch_run_id: _confirmation_view(c)
+            for c in (
+                await s.scalars(
+                    select(JobFetchConfirmation).where(
+                        JobFetchConfirmation.fetch_run_id.in_([r.id for r in runs])
+                    )
+                )
+            ).all()
+        }
     return PostingView(
         p.id,
         p.canonical_url,
@@ -1280,6 +1612,7 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
                 r.candidates,
                 r.notes,
                 r.created_at,
+                asks.get(r.id),
             )
             for r in runs
         ],

@@ -314,3 +314,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - API: `GET/PUT /core/workspace-settings` (`settings.read` = read, `settings.write` = draft-write). 준 칸만 바꾼다. `GET/PUT /core/study/settings`는 같은 시간대를 읽고 쓴다.
 - 키워드 검색용 SECURITY DEFINER 함수(trigram 색인 사용)는 시험했지만 넣지 않았다 (2글자 한국어 낱말은 색인 이득이 없고, 소유자가 superuser가 아니면 RLS가 그대로 적용된다. `search.md` "RLS 아래 trigram 색인").
 - 상세: `docs/architecture/study.md`(시간대·별칭), `docs/architecture/applications.md`(문서 검사의 별칭), `docs/architecture/models.md`(판정 모델).
+
+## 스캔 PDF 비전 비용 확인 (c0025)
+
+`c0025_mcp_ops_postings` (`down_revision = c0021`. 병렬 작업의 c0022–c0024와 합칠 때 다시 잇는다). 같은 작업 묶음의 나머지(JWT introspection·캐시 시간, SSE 공간별 묶어 읽기, 토큰 이름·만료 연장, 그리팅 선택형 문항, 모르는 봇 확인 화면)는 스키마를 바꾸지 않는다 — 선택형 문항은 기존 `job_postings.fields`·`job_posting_versions.extracted` JSON의 새 키 `application_questions`, 토큰 변경은 `personal.api_tokens`의 기존 칸(`label`·`expires_at`, 앱 role에 UPDATE가 이미 있어 `p0003` 불필요).
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `job_fetch_runs.status` | CHECK에 `needs_confirmation` 추가 (`ck_job_fetch_runs_status`) | 그대로 |
+| `job_fetch_confirmations` (새 표) | 확인 요청 한 건: `posting_id`·`fetch_run_id`(실행당 하나, `uq_job_fetch_confirmations_run`)·`used_run_id`(확인을 쓴 실행, SET NULL), `status` (`pending`·`confirmed`·`declined`·`used`·`superseded`), `content_digest`(`pdf:<sha256>`, 원본 바이트 해시만), `pages`(읽을 쪽 1부터, 64개 이하), `pages_total`·`images`·`input_tokens`·`output_tokens`(추정), `estimated_usd`·`max_usd`(단가를 모르면 NULL)·`threshold_usd`, `endpoint`·`model`, `decided_by`·`decided_at` (CHECK: 결정한 상태만 `decided_at`이 있다) | `SELECT, INSERT, UPDATE` |
+
+- RLS FORCE (`workspace_isolation`), 공간 복합 FK(`posting_id`·`fetch_run_id` CASCADE). 지우기 권한은 없다: 공고를 지울 때(미확정 초안 정리 포함) CASCADE로만 사라진다.
+- 공간을 넘는 조회가 없어 SECURITY DEFINER 함수는 없다.
+- 내보내기·복원 대상이 자동으로 된다 (`test_export.py`). 원문 토큰·키·PDF 바이트는 들어 있지 않다.
+- downgrade: 표를 지우고 `needs_confirmation` 실행을 `failed`/`needs_manual_check`로 돌린 뒤 CHECK를 되돌린다 (FORCE RLS는 소유자에게도 걸리므로 그동안만 `NO FORCE`, c0021과 같은 방식).
+- 흐름·규칙: `postings.md` "스캔 PDF 쪽 고르기·비용 확인".

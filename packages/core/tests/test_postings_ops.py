@@ -462,3 +462,426 @@ async def test_html_extraction_runs_off_the_event_loop(db, env, monkeypatch):
     monkeypatch.setattr(uc, "extract_page", spy)
     await fetch(db, env, "https://fakeco.career.greetinghr.com/ko/o/7001", vision=False)
     assert seen and all(name != loop_thread for name in seen)
+
+
+# --- c0025: 긴 스캔 공고 쪽 고르기 · 비전 비용 확인 ------------------------------------------
+
+
+def mixed_pdf(pattern: str) -> bytes:
+    """쪽마다 ``x``(사각형을 그린 쪽) 또는 ``.``(빈 쪽). 글자는 없다 (스캔본 흉내)."""
+    pages = len(pattern)
+    kids = " ".join(f"{3 + 2 * i} 0 R" for i in range(pages))
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {pages} >>".encode(),
+    ]
+    for i, mark in enumerate(pattern):
+        content = f"0 g 72 72 {200 + i * 10} 100 re f".encode() if mark == "x" else b""
+        objs.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {4 + 2 * i} 0 R >>".encode()
+        )
+        objs.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for n, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += f"{n} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    return bytes(out)
+
+
+needs_renderer = pytest.mark.skipif(
+    not pdf_render.renderer_available(), reason="pdf-render extra not installed"
+)
+
+
+def test_choose_pages_keeps_front_pages_and_the_last_one():
+    ink = dict.fromkeys(range(10), 0.05)
+    assert pdf_render.choose_pages(ink, 4) == ((0, 1, 2, 9), ())
+    ink[1] = ink[9] = 0.0  # 빈 쪽은 뺀다: 마지막 글 있는 쪽이 끝쪽
+    assert pdf_render.choose_pages(ink, 4) == ((0, 2, 3, 8), (1, 9))
+    assert pdf_render.choose_pages({0: 0.1, 1: 0.0, 2: 0.2}, 4) == ((0, 2), (1,))
+    # 모두 빈 쪽이면 앞쪽부터 (모델이 NO_TEXT로 답한다)
+    assert pdf_render.choose_pages(dict.fromkeys(range(6), 0.0), 4)[0] == (0, 1, 2, 3)
+    assert pdf_render.choose_pages(ink, 1) == ((0,), (1, 9))
+    assert pdf_render.choose_pages({}, 4) == ((), ())
+
+
+@needs_renderer
+def test_pick_pages_measures_ink_on_real_pages():
+    pick = pdf_render.pick_pages(mixed_pdf("x.xx.xxx"), max_pages=4)
+    assert pick.pages_total == 8 and pick.blank == (1, 4)
+    assert pick.pages == (0, 2, 3, 7)
+    assert pick.ink[1] < pdf_render.BLANK_INK_RATIO <= pick.ink[0]
+    rendered = pdf_render.render_pages(mixed_pdf("x.xx.xxx"), pages=pick.pages)
+    assert rendered.pages == (0, 2, 3, 7) and len(rendered.sizes) == 4
+    assert all(png_size(img) == size for img, size in zip(rendered.images, rendered.sizes))
+
+
+def test_image_token_estimate_is_the_larger_provider_formula():
+    assert uc.image_tokens(1236, 1600) == -(-1236 * 1600 // 750)  # Anthropic 쪽이 크다
+    assert uc.image_tokens(0, 10) == 0
+    assert uc.image_tokens(100, 100) == 85 + 170  # 작은 이미지는 OpenAI 기본+타일 하나
+
+
+METERED = (
+    '[endpoints.oa]\npreset = "openai"\ndata_classes = ["public"]\n'
+    '[routes]\ndefault = "oa/gpt-6.1-sol"\njob_extract_image = "oa/gpt-6.1-sol"\n'
+)
+
+
+def metered_deps(db, env, tmp_path, threshold):
+    from career_core.adapters.blobstore import LocalBlobStore
+
+    gw = ModelGateway(
+        db,
+        parse_models_config(METERED),
+        PriceBook.load(),
+        client_factory=lambda ep, key: env["model"],
+        env={"OPENAI_API_KEY": "k"},
+    )
+    fetcher = HttpFetcher(
+        transport=httpx.MockTransport(env["site"].handler), resolver=fake_resolve, max_bytes=1 << 20
+    )
+    return uc.PostingDeps(
+        db=db,
+        fetcher=fetcher,
+        gateway=gw,
+        blobs=LocalBlobStore(tmp_path),
+        vision_confirm_usd=threshold,
+    )
+
+
+async def test_gateway_estimate_cost_uses_the_price_book(db, env, tmp_path):
+    from decimal import Decimal
+
+    deps = metered_deps(db, env, tmp_path, None)
+    est = deps.gateway.estimate_cost(
+        "job_extract_image", input_tokens=100_000, output_tokens=10_000
+    )
+    assert (est.endpoint, est.model, est.metered) == ("oa", "gpt-6.1-sol", True)
+    assert est.usd == Decimal("0.20") + Decimal("0.10")  # 입력 $2/1M, 출력 $10/1M
+    # 긴 입력은 단가 구간을 따른다 (272,001 토큰부터 $4/$15)
+    big = deps.gateway.estimate_cost("job_extract_image", input_tokens=300_000, output_tokens=0)
+    assert big.usd == Decimal("1.20")
+    sub = env["make"]().gateway.estimate_cost("job_extract_image", input_tokens=10, output_tokens=0)
+    assert sub.billing == "subscription" and not sub.metered
+
+
+@needs_renderer
+async def test_expensive_scan_waits_for_confirmation_then_reads_once(db, env, tmp_path):
+    from decimal import Decimal
+
+    env["site"].routes[("scan.fake.test", "/long8.pdf")] = (
+        200,
+        {},
+        "application/pdf",
+        mixed_pdf("x.xx.xxx"),
+    )
+    deps = metered_deps(db, env, tmp_path, Decimal("0.01"))
+    actor = env["actor"]
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long8.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    view = await uc.get_posting(db, actor, r.posting_id)
+    run = view.runs[0]
+    # 비전을 부르기 전에 멈춘다: 모델 호출·장부·버전 없음
+    assert run.status == "needs_confirmation" and env["model"].requests == []
+    assert view.latest is None
+    c = run.confirmation
+    assert c.status == "pending" and c.pages == [1, 3, 4, 8] and c.pages_total == 8
+    assert c.images == 4 and c.input_tokens > 4 * 2000
+    assert Decimal(c.estimated_usd) < Decimal(c.max_usd) and Decimal(c.max_usd) > Decimal("0.01")
+    assert c.threshold_usd == "0.010000" and c.model == "gpt-6.1-sol"
+    assert "pdf_pages_read:1,3,4,8" in run.notes and "pdf_blank_pages:2" in run.notes
+    summary = next(p for p in await uc.list_postings(db, actor) if p.id == r.posting_id)
+    assert summary.last_fetch_status == "needs_confirmation"
+    async with db.workspace_session(actor.workspace_id) as s:
+        assert (await s.execute(select(ModelCall))).first() is None
+
+    # AI 에이전트는 비용을 승인하지 않는다
+    agent = ActorContext(actor.subject_id, actor.workspace_id, kind="agent")
+    with pytest.raises(uc.PostingRuleError):
+        await uc.decide_fetch_confirmation(db, agent, r.posting_id, run.id, accept=True)
+    # 사람이 확인 → 다시 가져오기 → 같은 파일·같은 쪽이면 한 번만 읽는다
+    new_run = await uc.decide_fetch_confirmation(db, actor, r.posting_id, run.id, accept=True)
+    assert new_run is not None and new_run != run.id
+    with pytest.raises(uc.PostingRuleError):  # 두 번 결정하지 않는다
+        await uc.decide_fetch_confirmation(db, actor, r.posting_id, run.id, accept=True)
+    await run_until_idle(db, posting_handlers(deps))
+    view = await uc.get_posting(db, actor, r.posting_id)
+    done = view.runs[0]
+    assert done.id == new_run and done.status == "done" and view.latest.adapter == "pdf"
+    assert "vision_confirmed" in done.notes and "pdf_rendered:4/8" in done.notes
+    ocr = [q for q in env["model"].requests if q.images]
+    assert len(ocr) == 1 and len(ocr[0].images) == 4
+    assert view.runs[1].confirmation.status == "used"
+
+    # 다른 파일(내용이 바뀜)은 확인을 다시 받는다 — 확인은 한 번만 쓴다
+    env["site"].routes[("scan.fake.test", "/long8.pdf")] = (
+        200,
+        {},
+        "application/pdf",
+        mixed_pdf("xxxxxxxx"),
+    )
+    await uc.refetch(db, actor, r.posting_id)
+    await run_until_idle(db, posting_handlers(deps))
+    view = await uc.get_posting(db, actor, r.posting_id)
+    assert view.runs[0].status == "needs_confirmation"
+    assert view.runs[0].confirmation.pages == [1, 2, 3, 8]
+    assert len([q for q in env["model"].requests if q.images]) == 1
+
+
+@needs_renderer
+async def test_declined_or_cheap_scans(db, env, tmp_path):
+    from decimal import Decimal
+
+    actor = env["actor"]
+    deps = metered_deps(db, env, tmp_path, Decimal("0.01"))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    run = (await uc.get_posting(db, actor, r.posting_id)).runs[0]
+    assert run.status == "needs_confirmation"
+    assert await uc.decide_fetch_confirmation(db, actor, r.posting_id, run.id, accept=False) is None
+    run = (await uc.get_posting(db, actor, r.posting_id)).runs[0]
+    assert (run.status, run.error_code) == ("failed", "needs_manual_check")
+    assert run.notes[-1] == "vision_declined" and run.confirmation.status == "declined"
+    assert env["model"].requests == []
+
+    # 상한 아래면 묻지 않고 읽는다 (예상 비용은 메모에 남는다)
+    cheap = metered_deps(db, env, tmp_path, Decimal(5))
+    [r2] = await uc.save_urls(db, actor, ["https://scan.fake.test/scan.pdf"])
+    await run_until_idle(db, posting_handlers(cheap))
+    run = (await uc.get_posting(db, actor, r2.posting_id)).runs[0]
+    assert run.status == "done" and run.confirmation is None
+    assert any(n.startswith("vision_estimate_usd:0.0") for n in run.notes)
+    assert "pdf_pages_read:1,2" in run.notes
+
+
+@needs_renderer
+async def test_subscription_endpoints_do_not_ask(db, env):
+    # 구독 프록시는 쓴 만큼 돈이 나가지 않는다: 확인 없이 읽고 정가 환산 예상만 남긴다
+    view, deps, _ = await fetch(db, env, "https://scan.fake.test/long.pdf")
+    assert deps.vision_confirm_usd is not None
+    assert view.runs[0].status == "done"
+    assert any(n.startswith("vision_estimate_usd:") for n in view.runs[0].notes)
+
+
+@needs_renderer
+async def test_confirmation_routes(db, env, tmp_path):
+    from decimal import Decimal
+
+    from career_core.interfaces.http import CoreDeps, build_router
+    from fastapi import FastAPI
+
+    actor = env["actor"]
+    deps = metered_deps(db, env, tmp_path, Decimal("0.01"))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    run_id = (await uc.get_posting(db, actor, r.posting_id)).runs[0].id
+
+    class Tokens:
+        async def resolve(self, credential):
+            from career_core.domain.workspace import Role, scopes_for_role
+
+            if credential == "viewer":
+                return ActorContext(actor.subject_id, actor.workspace_id, frozenset({"read"}))
+            if credential == "owner":
+                return ActorContext(
+                    actor.subject_id, actor.workspace_id, scopes_for_role(Role.OWNER)
+                )
+            return None
+
+    app = FastAPI()
+    app.include_router(build_router(CoreDeps(identity=Tokens(), db=db)), prefix="/api")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://t") as c:
+        base = f"/api/core/job-postings/{r.posting_id}"
+        detail = (await c.get(base, headers={"Authorization": "Bearer viewer"})).json()
+        conf = detail["runs"][0]["confirmation"]
+        assert conf["status"] == "pending" and conf["max_usd"] and conf["pages"] == [1, 2, 3, 6]
+        url = f"{base}/fetch-runs/{run_id}/confirm"
+        assert (await c.post(url, headers={"Authorization": "Bearer viewer"})).status_code == 403
+        res = await c.post(url, headers={"Authorization": "Bearer owner"})
+        assert res.status_code == 202 and res.json()["status"] == "pending"
+        again = await c.post(url, headers={"Authorization": "Bearer owner"})
+        assert (again.status_code, again.json()["detail"]) == (409, "confirmation_not_pending")
+        missing = f"{base}/fetch-runs/{r.posting_id}/decline"
+        assert (await c.post(missing, headers={"Authorization": "Bearer owner"})).status_code == 404
+
+
+# --- c0025: 그리팅 선택형 문항 ------------------------------------------------------------
+
+
+async def test_greeting_choice_questions_become_a_separate_field(db, env):
+    view, _, _ = await fetch(
+        db, env, "https://fakeco.career.greetinghr.com/ko/o/7001", vision=False
+    )
+    v = view.latest
+    choices = v.extracted["application_questions"]
+    assert choices["value"] == [
+        {
+            "prompt": "이 공고를 처음 본 곳을 골라 주세요",
+            "required": True,
+            "options": ["합성 채널 A", "합성 채널 B"],
+            "source_type": 400,
+        },
+        {
+            "prompt": "합성 질문: 해외 근무가 가능한가요?",
+            "required": True,
+            "options": ["예", "아니요"],
+            "source_type": 200,
+        },
+    ]
+    assert choices["evidence"] == {
+        "kind": "structured",
+        "ref": "greeting:opening.questionnairesInfo[0,2].question·need·optionItems",
+    }
+    # 자기소개서 문항에는 섞이지 않는다
+    assert next(q["prompt"] for q in v.extracted["questions"]["value"]).startswith("지원 동기")
+    # 확정하면 그대로 저장되고, 사용자가 고칠 수도 있다 (모양 검사)
+    await uc.confirm_posting(db, env["actor"], view.id)
+    saved = await uc.get_posting(db, env["actor"], view.id)
+    assert saved.fields["application_questions"][1]["options"] == ["예", "아니요"]
+    with pytest.raises(uc.PostingRuleError):
+        await uc.confirm_posting(
+            db,
+            env["actor"],
+            view.id,
+            overrides={"application_questions": [{"prompt": "x", "options": [1]}]},
+        )
+    await uc.confirm_posting(
+        db,
+        env["actor"],
+        view.id,
+        overrides={
+            "application_questions": [{"prompt": " 합성  질문 ", "options": ["가", " 나 "]}]
+        },
+    )
+    saved = await uc.get_posting(db, env["actor"], view.id)
+    assert saved.fields["application_questions"] == [
+        {"prompt": "합성 질문", "required": None, "options": ["가", "나"], "source_type": None}
+    ]
+    assert saved.evidence["application_questions"]["kind"] == "user"
+
+
+def test_greeting_choices_ignore_bad_shapes():
+    from career_core.adapters.ats import _greeting_choices
+
+    data = {
+        "questionnairesInfo": [
+            {"type": 200, "question": "보기 없음", "optionItems": []},
+            {"type": 400, "question": "  ", "optionItems": [{"item": "가"}]},
+            {"type": 100, "question": "서술형", "optionItems": [{"item": "가"}]},
+            {"type": True, "question": "불 type", "optionItems": [{"item": "가"}]},
+            {
+                "type": 200,
+                "question": "합성 선택",
+                "need": "yes",
+                "optionItems": [{"item": " 가 "}, {"id": 3}, None, "나", {"item": ""}],
+            },
+            {"type": 400, "question": "items만", "items": [{"item": "다"}]},
+        ]
+    }
+    assert _greeting_choices(data) == (
+        [
+            {"prompt": "합성 선택", "required": None, "options": ["가", "나"], "source_type": 200},
+            {"prompt": "items만", "required": None, "options": ["다"], "source_type": 400},
+        ],
+        [4, 5],
+    )
+
+
+async def test_llm_never_fills_structured_only_fields(db, env):
+    # 모델이 선택형 문항을 내도 받지 않는다 (구조화 데이터에서만)
+    out, dropped = uc.verify_llm_fields(
+        {"application_questions": [{"prompt": "합성", "options": ["가"]}]}, "합성 본문"
+    )
+    assert out == {} and dropped == 0
+
+
+# --- c0025: 모르는 서비스의 봇 확인 화면 ------------------------------------------------------
+
+UNKNOWN_CHALLENGE = (
+    "<html><head><title>One moment</title></head><body>"
+    "<script>document.cookie='vfy=1;path=/';setTimeout(function(){location.reload()},900);</script>"
+    "</body></html>"
+)
+CAPTCHA_PAGE = (
+    '<html><body><h1>Security check</h1><div class="g-recaptcha" data-sitekey="synthetic"></div>'
+    '<script src="https://www.example.test/recaptcha/api.js"></script></body></html>'
+)
+HUMAN_CHECK_KO = (
+    "<html><body><p>비정상적인 트래픽이 감지되었습니다. 자동 입력 방지 문자를 입력해 주세요.</p>"
+    "<script src='/assets/guard.js'></script></body></html>"
+)
+SPA_SHELL = (
+    "<html><head><script src='/static/app.js'></script></head><body><div id='root'></div>"
+    "<noscript>You need to enable JavaScript to run this app.</noscript></body></html>"
+)
+NORMAL_WITH_CAPTCHA_SCRIPT = (
+    "<html><body><h1>합성 백엔드 개발자</h1>"
+    + "<p>합성 회사의 주문 시스템을 함께 만들 개발자를 찾습니다. 담당 업무와 자격 요건은 아래와 같습니다.</p>"
+    * 4
+    + "<script src='https://www.example.test/recaptcha/api.js'></script></body></html>"
+)
+
+
+def test_unknown_challenge_signs():
+    from career_core.adapters.web_fetch import challenge_signs
+
+    assert challenge_signs(429, UNKNOWN_CHALLENGE) == ("js_challenge", "tiny_body_script")
+    assert challenge_signs(200, UNKNOWN_CHALLENGE) == ("js_challenge",)
+    assert challenge_signs(403, CAPTCHA_PAGE)[0] == "captcha"
+    assert challenge_signs(200, CAPTCHA_PAGE) == ("captcha",)
+    assert "phrase" in challenge_signs(503, HUMAN_CHECK_KO)
+    # 보통의 SPA 껍데기·캡차 스크립트만 있는 보통 페이지·진짜 요청 한도는 확인 화면이 아니다
+    assert challenge_signs(200, SPA_SHELL) == ()
+    assert challenge_signs(200, NORMAL_WITH_CAPTCHA_SCRIPT) == ()
+    assert challenge_signs(429, "Too Many Requests") == ()
+    assert challenge_signs(404, CAPTCHA_PAGE) == ()
+    # "geolocation =" 같은 대입은 다시 불러오기가 아니다
+    assert challenge_signs(200, "<script>document.cookie='a=1'; geolocation = 3;</script>") == ()
+
+
+async def test_unknown_challenges_say_maybe_blocked_and_are_not_retried(db, env):
+    site = env["site"]
+    HOSTS["guard.fake.test"] = "93.184.216.40"
+    site.routes.update(
+        {
+            ("guard.fake.test", "/a"): (429, {}, "text/html", UNKNOWN_CHALLENGE),
+            ("guard.fake.test", "/b"): (200, {}, "text/html", UNKNOWN_CHALLENGE),
+            ("guard.fake.test", "/c"): (403, {}, "text/html", CAPTCHA_PAGE),
+            ("guard.fake.test", "/d"): (429, {"retry-after": "5"}, "text/plain", "slow down"),
+        }
+    )
+
+    class NoBrowser:
+        calls = 0
+
+        async def fetch(self, url):
+            NoBrowser.calls += 1
+            raise AssertionError("확인 화면을 브라우저로 다시 열지 않는다")
+
+    deps = env["make"](vision=False)
+    deps = uc.PostingDeps(
+        db=db, fetcher=deps.fetcher, gateway=deps.gateway, blobs=deps.blobs, browser=NoBrowser()
+    )
+    urls = [f"https://guard.fake.test/{p}" for p in "abcd"]
+    results = await uc.save_urls(db, env["actor"], urls)
+    await run_until_idle(db, posting_handlers(deps))
+    runs = [(await uc.get_posting(db, env["actor"], r.posting_id)).runs[0] for r in results]
+    assert [r.error_code for r in runs] == [
+        "maybe_bot_blocked",
+        "maybe_bot_blocked",
+        "maybe_bot_blocked",
+        "rate_limited",
+    ]
+    assert runs[0].notes == ["bot_block_signs:js_challenge,tiny_body_script"]
+    assert runs[2].notes == ["bot_block_signs:captcha,tiny_body_script"]
+    assert NoBrowser.calls == 0 and env["model"].requests == []
+    # 요청은 URL마다 한 번 (다시 시도·우회 없음)
+    paths = [p for h, p, _, _ in site.requests if h == "guard.fake.test"]
+    assert sorted(paths) == ["/a", "/b", "/c", "/d"]

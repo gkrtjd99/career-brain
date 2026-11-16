@@ -5,6 +5,7 @@ import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { createClient } from "@career-brain/client";
 import { ErrorText, PageHeader } from "../components/common";
+import { TokenExpiryNotice } from "../components/TokenExpiryNotice";
 import { TokensSection } from "../components/TokensSection";
 import { WorkspaceSettingsSection } from "../components/settings/WorkspaceSettingsSection";
 import { api, setToken, useToken } from "../lib/api";
@@ -117,6 +118,7 @@ export function SettingsPage() {
         </Section>
 
         {me.data?.scopes.includes("workspace-admin") ? <TokensSection /> : null}
+        {me.data && !me.data.scopes.includes("workspace-admin") ? <TokenExpiryNotice inSettings /> : null}
 
         {me.isSuccess ? <DocumentSettingsSection /> : null}
         {me.isSuccess ? <WorkspaceSettingsSection /> : null}

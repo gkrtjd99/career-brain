@@ -53,9 +53,19 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 `questionnaireId`, `question`, `type`, `need`(필수), `description`, `maxLength`, `items`/`optionItems`(선택형 보기), `isDirectly`.
 
 - **`type = 100`(서술형)만** 자기소개서 문항(`QUESTIONS`)으로 넣는다: `prompt` = `question`(공백 정리, 1000자 상한), `char_limit` = `maxLength`(1~100000 정수일 때만, 아니면 비움).
-- `200`·`400`(선택형: 보기 고르기) 등은 넣지 않는다. 자기소개서가 아니고 보기를 문서로 쓸 일이 없다.
+- `200`·`400`(선택형: 보기 고르기)은 자기소개서 문항에 넣지 않고 별도 항목 `application_questions`로 둔다 (아래). 그 밖의 종류는 넣지 않는다.
 - 근거는 구조화 경로 `greeting:opening.questionnairesInfo[<번호들>].question·maxLength` (원래 배열 번호). 문항은 20개 상한, 모양이 이상한 항목(문자열 아닌 질문, 빈 질문)은 건너뛴다.
 - 문항이 없거나 서술형이 하나도 없으면 구조화 항목을 만들지 않는다.
+
+### 그리팅 선택형 문항 (`application_questions`, c0025)
+
+지원서에서 보기를 고르는 문항(`type 200`·`400`)을 구조화 항목 `application_questions`로 둔다: `[{prompt, required, options[], source_type}]`.
+
+- `prompt` = `question`(공백 정리, 1000자 상한), `required` = `need`(참/거짓일 때만, 아니면 null), `options` = `optionItems`(없으면 `items`)의 보기 글자 (문자열이거나 `{item: 글}`인 것만, 공백 정리·200자 상한, 50개 상한). 보기가 하나도 없는 문항은 건너뛴다. 문항은 20개 상한.
+- 근거는 구조화 경로 `greeting:opening.questionnairesInfo[<번호들>,<번호들>].question·need·optionItems` (원래 배열 번호).
+- **구조화 데이터에서만 온다** (`STRUCTURED_ONLY_FIELDS`): LLM에게 묻지 않고(빠진 항목 목록에도 없다), LLM이 이 이름으로 답해도 버린다. 확정 화면에서 손으로 고치는 항목이 아니라(`POSTING_FIELDS`에 없다) 공고 화면에 읽기 전용 "지원서 선택형 문항"으로 보이고, 확정하면 다른 항목처럼 `fields`·`evidence`에 들어간다.
+- 하나 고르기·여러 개 고르기는 구분하지 않는다 (`source_type`에 원래 번호만. 공개 자료에서 두 번호의 뜻을 확인하지 못했다).
+- fixture는 합성이다 (`test_postings_ops.py`).
 
 ### 추가 요청 규칙
 
@@ -78,6 +88,21 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 - 브라우저 렌더링(`CAREER_BROWSER_FETCH`)으로 받은 응답도 같은 규칙으로 판단한다 (응답 헤더 중 판단에 쓰는 몇 개만 넘긴다).
 - 사용자는 공고 글을 직접 붙여넣거나, 화면 캡처·PDF를 올린다.
 
+### 모르는 확인 화면 (`maybe_bot_blocked`, c0025)
+
+위 표의 업체 표시는 없지만 확인 화면처럼 보이면 `maybe_bot_blocked`("자동 요청이 막혔을 수 있음 — 직접 붙여넣기")로 끝낸다. 확실하지 않으므로 `bot_blocked`가 아니고, 요청 한도(`rate_limited`)도 아니다 (`adapters/web_fetch.py::challenge_signs`).
+
+| 흔적 (`notes`의 `bot_block_signs:<…>`) | 내용 |
+|---|---|
+| `captcha` | 캡차 위젯(`g-recaptcha`·`h-captcha`·`cf-turnstile` 클래스 등). 403·429·503이면 캡차 스크립트 주소만으로도 |
+| `phrase` | 사람 확인 문구 ("checking your browser", "verify you are human" 등) |
+| `js_challenge` | 쿠키를 심고 페이지를 다시 부르는 스크립트, 이름에 challenge가 든 스크립트·폼 |
+| `tiny_body_script` | 보이는 글이 200자 미만인데 스크립트만 있다 (403·429·503일 때만) |
+
+- 403·429·503: 흔적 하나면 `maybe_bot_blocked`. 순서는 알려진 업체(`bot_blocked`) → 로그인(401·407, 로그인 글이 있는 403) → 모르는 확인 화면 → 429 `rate_limited` → 그 밖의 오류.
+- 200(HTML만): 보이는 글이 200자 미만이고 `captcha`·`phrase`·`js_challenge` 중 하나가 있을 때만 (캡차 스크립트를 불러오는 보통 페이지, 스크립트로 그리는 SPA와 구분). 이런 페이지는 브라우저 렌더링으로 다시 열지 않는다 (렌더링은 확인 화면을 푸는 다른 경로라서).
+- 위와 같이 **우회하지 않는다**.
+
 ## PDF·이미지 공고
 
 `HttpFetcher`는 `application/pdf`, `image/png|jpeg|webp|gif`를 바이트로 넘긴다 (`FetchedPage.body`). 선언한 형식과 파일 머리(매직 바이트)가 맞아야 하고, `application/octet-stream`이면 파일 머리로 판단한다. 크기 상한은 HTML과 같다 (6MB). 버전의 `method`는 그대로 `http`, `adapter`가 `pdf`/`image`다 (migration 없음).
@@ -85,9 +110,25 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 - **PDF**: 원본 자료와 같은 로컬 파서(`PdfTextParser`, pypdf, 300쪽 상한)로 글자를 꺼내 본문 경로(LLM 인용 확인)로 넘긴다. 외부 전송은 LLM 추출 하나뿐이다. `notes`에 `pdf_pages:<글자 있는 쪽>/<전체 쪽>`. 암호·손상 파일은 `pdf_unreadable:<코드>`. 글자가 없으면(스캔본) 아래 스캔 PDF 경로.
 - **스캔 PDF** (`pdf_no_text`): 쪽을 이미지로 바꿔 이미지 공고와 같은 비전 경로(`job_extract_image`, 자료 등급 `public`)로 보낸다.
   - 렌더러는 선택 설치 `career-core[pdf-render]` (pypdfium2, 휠 ~4MB·설치 ~8MB, 의존성 없음, BSD-3/Apache-2.0). 이미지 라이브러리 없이 회색조 비트맵을 표준 라이브러리(zlib)로 PNG로 쓴다 (`adapters/pdf_render.py`).
-  - 상한: 앞 **4쪽**, 150dpi, 쪽마다 긴 변 1600px·전체 1600×1600px 이하로 줄여 그린다. PNG 하나가 5MB를 넘으면 거기서 멈춘다. 폼·주석은 그리지 않는다. PDFium은 스레드 안전하지 않아 프로세스 안에서 한 번에 하나만 그린다 (`asyncio.to_thread` + 잠금).
+  - 상한: **4쪽**(아래 쪽 고르기), 150dpi, 쪽마다 긴 변 1600px·전체 1600×1600px 이하로 줄여 그린다. PNG 하나가 5MB를 넘으면 거기서 멈춘다. 폼·주석은 그리지 않는다. PDFium은 스레드 안전하지 않아 프로세스 안에서 한 번에 하나만 그린다 (`asyncio.to_thread` + 잠금).
   - 라우트부터 본다: 없으면 그리지도 않고 `needs_manual_check` + `pdf_no_text`, `vision_route_missing`. 렌더러가 없으면 `pdf_no_text`, `pdf_render_missing` (화면: "스캔 PDF를 읽으려면 pdf-render 설치"), 그리기 실패는 `pdf_render_failed:<코드>`.
-  - 성공하면 `notes`에 `pdf_rendered:<보낸 쪽>/<전체 쪽>`, `ocr_pdf_by_model`. 버전 `adapter`는 `pdf`, 첫 쪽 이미지를 스크린샷 칸에 둔다. 같은 파일(`pdf:<sha256>`)을 다시 가져오면 모델을 부르지 않는다.
+  - 성공하면 `notes`에 `pdf_rendered:<보낸 쪽>/<전체 쪽>`, `pdf_pages_read:<쪽들>`, (있으면) `pdf_blank_pages:<수>`, `ocr_pdf_by_model`. 버전 `adapter`는 `pdf`, 첫 쪽 이미지를 스크린샷 칸에 둔다. 같은 파일(`pdf:<sha256>`)을 다시 가져오면 모델을 부르지 않는다.
+
+### 스캔 PDF 쪽 고르기·비용 확인 (c0025)
+
+**쪽 고르기** (`adapters/pdf_render.py::pick_pages`): 앞 60쪽(+ 마지막 쪽)을 긴 변 96px 회색조로 작게 그려 어두운 점(밝기 200 미만)의 비율을 잰다. 0.4% 미만이면 빈 쪽으로 보고 뺀다. 남은 쪽이 4쪽 이하면 모두, 넘으면 **앞 3쪽 + 마지막 쪽** (마감·지원 방법·문의가 끝에 있는 공고가 많다). 모두 빈 쪽이면 앞 4쪽 (모델이 글자 없음으로 답한다). 고른 쪽만 150dpi로 그린다.
+
+**예상 비용** (`usecases/postings.py::vision_estimate`): 고른 쪽 이미지 크기로 입력 토큰을 어림한다 — 이미지마다 Anthropic 식(`가로×세로/750`)과 OpenAI 타일 식(512px 타일 170 + 85) 중 큰 값, 더하기 안내문. 출력은 쪽마다 1200 토큰(상한 6000). 금액은 게이트웨이의 `estimate_cost`(라우트의 단가·구간 그대로, 호출하지 않는다): 예상(`estimated_usd`)과 출력이 상한까지 나올 때(`max_usd`).
+
+**확인** (`needs_confirmation`):
+
+1. 종량제(`billing = metered`) 엔드포인트이고 `max_usd`가 `CAREER_VISION_CONFIRM_USD`(기본 0.10 USD)를 넘거나 단가를 모르면, 모델을 부르지 않고 실행을 `needs_confirmation`으로 멈춘다. `core.job_fetch_confirmations`에 쪽·이미지 수·토큰·금액·모델·파일 해시를 남긴다 (원본 바이트 없음). 같은 공고의 앞선 대기 요청은 `superseded`. `notes`: `pdf_no_text`, `pdf_pages_read:…`, `pdf_blank_pages:N`, `vision_estimate_usd:<최대|unknown>`.
+2. 구독(`subscription`)·로컬 엔드포인트는 묻지 않는다 (호출마다 돈이 나가지 않는다). `CAREER_VISION_CONFIRM_USD=off`면 묻지 않는다.
+3. 웹 공고 화면에 예상(읽을 쪽, 토큰, 금액, 기준)이 보이고 **확인하고 읽기** → `POST /api/core/job-postings/<id>/fetch-runs/<run>/confirm` (202, 같은 주소로 새 가져오기를 넣는다. 이미 대기 중인 가져오기가 있으면 그것) 또는 **읽지 않기** → `.../decline` (실행은 `failed`/`needs_manual_check` + `vision_declined`, 직접 붙여넣기). 사람(웹·HTTP 토큰)만, `jobs.write`. MCP 등 에이전트는 403 `human_confirmation_required`, 이미 결정한 요청은 409 `confirmation_not_pending`.
+4. 새 가져오기는 확인한 요청 중 **같은 파일 해시·같은 쪽·같은 모델이고 금액이 확인한 최대 이하**인 것을 한 번만 쓴다 (`used`, `notes`에 `vision_confirmed`). 파일이 바뀌었거나 더 비싸면 다시 묻는다.
+5. 오늘 화면의 "가져오기 확인" 목록에 "비용 확인"으로 보인다.
+
+추정은 이미지 읽기 호출만이다. 그 뒤의 항목 추출(`job_extract`)은 기존 예산·장부 규칙을 따른다.
 - **이미지(포스터)**: `models.toml`에 `job_extract_image` 라우트를 **명시**했을 때만 게이트웨이로 보낸다 (default 라우트로 넘어가지 않는다: 비전을 못 하는 모델로 보내지 않게). 자료 등급 `public`(공개 공고), 게이트웨이의 egress·단가·예산·장부 규칙 그대로. 제공자 SDK를 직접 부르지 않는다 (`ModelRequest.images`).
   1. 모델이 이미지의 글자를 그대로 옮긴다 (번역·요약 금지, 이미지 속 지시는 무시).
   2. 옮긴 글이 버전 본문이 되고, 항목은 같은 LLM 인용 확인을 거친다. `notes`에 `ocr_by_model` (화면: "AI가 읽은 글, 원본과 대조").
@@ -133,6 +174,8 @@ JSON-LD 보정: 날짜만 있는 값(`2026-12-31`)은 날짜로 둔다 (자정 �
 - ~~스캔 PDF: 쪽을 이미지로 바꿔 비전 경로로 넘기기~~ → 해결 (위 "스캔 PDF", `pdf-render` extra)
 - ~~Workday·Cloudflare 앞단 사이트의 429를 봇 차단으로 구분~~ → 해결 (`bot_blocked`)
 - ~~그리팅 `questionnairesInfo` 구조화~~ → 해결 (서술형만)
-- 스캔 PDF 비전 비용: 쪽 수만큼 이미지가 간다 (최대 4장). 쪽이 많은 스캔 공고는 앞 4쪽만 읽는다 → 필요하면 쪽 선택.
-- 그리팅 선택형 문항(보기)은 넣지 않는다. 지원서 작성 화면에서 보여 줄 필요가 생기면 별도 항목으로.
+- ~~스캔 PDF 비전 비용: 쪽 수만큼 이미지가 간다 (최대 4장). 쪽이 많은 스캔 공고는 앞 4쪽만 읽는다 → 필요하면 쪽 선택.~~ → 해결 (c0025, 위 "쪽 고르기·비용 확인")
+- ~~그리팅 선택형 문항(보기)은 넣지 않는다.~~ → 해결 (c0025, `application_questions`. 하나/여러 개 고르기 구분은 후속)
+- ~~모르는 업체의 봇 확인 화면~~ → 해결 (c0025, `maybe_bot_blocked`)
+- 비용 확인은 이미지 읽기 호출만 추정한다. 뒤의 `job_extract` 호출까지 합친 추정은 후속.
 - 초안 정리(`purge_unconfirmed`)를 주기적으로 돌리는 유지보수 루프

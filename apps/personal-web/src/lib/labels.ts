@@ -63,6 +63,7 @@ export const FETCH_STATUS: Record<FetchStatus, { label: string; tone: BadgeTone 
   done: { label: "가져옴", tone: "ok" },
   listing: { label: "목록 페이지", tone: "warn" },
   failed: { label: "가져오기 실패", tone: "danger" },
+  needs_confirmation: { label: "비용 확인 필요", tone: "warn" },
 };
 
 /** 가져오기 실패 사유. 실패는 마감이 아니다. */
@@ -71,6 +72,7 @@ export const FETCH_ERROR: Record<string, string> = {
   login_required: "로그인이 필요한 페이지",
   rate_limited: "요청이 너무 많아 거절됨",
   bot_blocked: "사이트가 자동 요청을 막음 — 직접 붙여넣기",
+  maybe_bot_blocked: "자동 요청이 막혔을 수 있음 — 직접 붙여넣기",
   needs_manual_check: "직접 확인 필요",
   blocked_address: "내부 주소라 차단함",
   too_large: "페이지가 너무 큼",
@@ -119,6 +121,16 @@ const VISION_NOTE: Record<string, string> = {
   pdf_no_text: "PDF에 글자가 없음 (스캔본으로 보임)",
   pdf_render_missing: "스캔 PDF: 쪽 이미지 렌더러(pdf-render 선택 설치)가 없어 읽지 않음",
   ocr_pdf_by_model: "스캔 PDF의 쪽 이미지를 AI가 읽어 본문으로 썼습니다. 원본 PDF와 대조해 확인하세요.",
+  vision_confirmed: "예상 비용을 확인한 뒤 읽음",
+  vision_declined: "예상 비용 확인에서 읽지 않기로 함",
+};
+
+/** 모르는 봇 확인 화면의 흔적 (bot_block_signs:captcha,js_challenge) */
+const BOT_SIGN: Record<string, string> = {
+  captcha: "캡차",
+  phrase: "사람 확인 문구",
+  js_challenge: "확인 스크립트",
+  tiny_body_script: "빈 본문 + 스크립트",
 };
 
 /** 가져오기 메모 (`llm_dropped:3` 처럼 값이 붙는다) */
@@ -133,6 +145,17 @@ export function noteLabel(note: string): string {
       return `스캔 PDF 쪽 이미지로 읽음: ${rest.join(":")}`;
     case "bot_blocked_by":
       return `자동 요청 확인 화면(${arg})이 막음 · 우회하지 않음`;
+    case "bot_block_signs":
+      return `자동 요청 확인 화면일 수 있음 (${(arg ?? "")
+        .split(",")
+        .map((s) => BOT_SIGN[s] ?? s)
+        .join(", ")}) · 우회하지 않음`;
+    case "pdf_pages_read":
+      return `읽은 쪽: ${arg}`;
+    case "pdf_blank_pages":
+      return `빈 쪽 ${arg}개는 건너뜀`;
+    case "vision_estimate_usd":
+      return arg === "unknown" ? "이미지 읽기 예상 비용: 단가 모름" : `이미지 읽기 예상 비용(최대): $${arg}`;
     case "pdf_unreadable":
       return `PDF를 읽지 못함: ${arg}`;
     case "vision_denied":
@@ -174,6 +197,8 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_deadline: "마감은 2026-12-31 또는 2026-12-31T18:00 꼴이어야 합니다.",
   invalid_posted_at: "게시일은 2026-12-31 꼴이어야 합니다.",
   invalid_url: "URL 형식이 아닙니다.",
+  confirmation_not_pending: "이미 결정한 확인 요청입니다.",
+  human_confirmation_required: "비용 확인은 사람만 할 수 있습니다.",
   models_not_configured: "모델이 설정되지 않았습니다 (models.toml).",
   budget_exceeded: "월 예산을 넘어 호출하지 않았습니다.",
   no_route: "이 작업에 연결된 모델이 없습니다.",

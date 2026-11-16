@@ -45,6 +45,9 @@ class OAuthConfigOut(BaseModel):
     jwks: bool
     introspection: bool
     require_jti: bool
+    # c0025: JWT도 introspection으로 확인하는지, introspection 캐시 시간(초) = 인가 서버 폐기 반영 지연 상한
+    introspect_jwt: bool = False
+    introspection_cache_seconds: int | None = None
 
 
 class OAuthLinkOut(BaseModel):
@@ -98,6 +101,10 @@ def add_oauth_routes(router: APIRouter, deps, authorize) -> None:
         jwks=bool(cfg and cfg.jwks_url),
         introspection=bool(cfg and cfg.introspection_url),
         require_jti=bool(cfg and cfg.require_jti),
+        introspect_jwt=bool(cfg and cfg.introspect_jwt),
+        introspection_cache_seconds=(
+            cfg.introspection_cache_seconds if cfg and cfg.introspection_url else None
+        ),
     )
     Owner = Annotated[ActorContext, Depends(authorize("oauth.link"))]
 

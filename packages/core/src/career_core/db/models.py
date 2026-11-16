@@ -985,3 +985,43 @@ class WorkspaceSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0025: 공고 가져오기 비용 확인
+
+
+class JobFetchConfirmation(Base):
+    """스캔 PDF 비전 호출 전 예상 비용 확인 (c0025).
+
+    예상 비용이 상한을 넘으면 가져오기 실행(``fetch_run_id``)을 ``needs_confirmation``으로 멈추고 이 행을
+    ``pending``으로 남긴다. 사람이 확인하면 ``confirmed`` → 다음 가져오기가 같은 파일(``content_digest``)·
+    같은 쪽·그 상한 이하일 때만 한 번 쓰고 ``used``(``used_run_id``). 거절 ``declined``, 새 확인 요청이
+    생기면 옛 것은 ``superseded``. 금액은 USD, 토큰 수는 추정값이다.
+    """
+
+    __tablename__ = "job_fetch_confirmations"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    fetch_run_id: Mapped[UUID]
+    used_run_id: Mapped[UUID | None] = mapped_column(default=None)
+    kind: Mapped[str] = mapped_column(Text, default="vision_cost")
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    content_digest: Mapped[str] = mapped_column(Text)
+    pages: Mapped[list] = mapped_column(JSONB, default=list)  # 읽을 쪽 (1부터)
+    pages_total: Mapped[int] = mapped_column(Integer)
+    images: Mapped[int] = mapped_column(Integer)
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    estimated_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), default=None)
+    max_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), default=None)
+    threshold_usd: Mapped[Decimal] = mapped_column(Numeric(18, 10))
+    endpoint: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    decided_by: Mapped[UUID | None] = mapped_column(default=None)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

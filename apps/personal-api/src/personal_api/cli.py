@@ -96,6 +96,7 @@ def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
                 # 동적 페이지용 브라우저는 선택 설치. 없으면 직접 붙여넣기로 안내한다.
                 browser=BrowserFetcher() if settings.browser_fetch else None,
                 blobs=deps.blobs,
+                vision_confirm_usd=settings.vision_confirm_usd,
             )
         ),
     }

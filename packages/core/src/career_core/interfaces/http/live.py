@@ -4,8 +4,9 @@
 
     runs·approvals 변경 ─▶ trigger(c0019) ─▶ NOTIFY career_state, 'runs' | 'approvals'
                                               │ (프로세스마다 LISTEN 연결 하나: StateHints)
-    SSE 연결마다 ─▶ 힌트를 받으면 **그 공간 문맥(RLS)** 에서 요약값(행 수·updated_at)을 다시 읽고
+    SSE 연결마다 ─▶ 힌트를 받으면 **그 공간 문맥(RLS)** 의 요약값(행 수·updated_at)을 묻고
                   바뀐 경우에만 ``event: runs`` / ``event: approvals``를 보낸다 ─▶ 웹이 목록을 다시 읽는다
+                  (요약 쿼리는 ``WorkspaceSummaries``가 공간별로 묶는다: 힌트 하나에 공간마다 한 번)
 
 - 알림 내용은 표 이름뿐이다. LISTEN은 어떤 역할이든 할 수 있으므로 공간·대상 ID를 넣지 않는다. 다른 공간의
   변경도 힌트로는 오지만, 다시 읽은 요약값이 같으면 아무것도 보내지 않는다 (다른 공간의 활동 시각도 새지
@@ -18,15 +19,22 @@
   간격(30초)으로 요약값을 다시 본다. 연결은 ``max_seconds``(기본 300초) 뒤 닫히고 클라이언트가 다시 붙는다
   (프록시 유휴 시간·토큰 재확인). 웹은 이 스트림이 끊기면 예전처럼 몇 초 간격 다시 읽기로 돌아간다.
 
+- 묶어 읽기 (c0025): 같은 프로세스에서 같은 공간을 보는 연결이 N개여도 힌트 하나에 요약 쿼리는 한 번이다.
+  연결은 "힌트를 받은 시각 이후에 시작한 쿼리"의 결과를 기다린다. 이미 그런 쿼리가 돌고 있으면 같이 기다리고,
+  끝난 결과가 그 시각 이후 것이면 그대로 쓴다. 결과는 공간 문맥(RLS)에서만 읽으므로 같은 공간 연결끼리만
+  나눈다. 승인 요약도 함께 읽지만 ``approvals.read``가 없는 연결에는 보내지 않는다.
+
 NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
 """
 
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager, suppress
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -55,16 +63,25 @@ _FINGERPRINT_SQL = {
     "approvals": "SELECT count(*), coalesce(sum(extract(epoch FROM updated_at)), 0), "
     "max(updated_at) FROM core.approvals",
 }
+# 두 표의 요약을 문장 하나로 (공간별 묶어 읽기: 힌트 하나 = 공간마다 쿼리 하나)
+_ALL_FINGERPRINTS_SQL = "SELECT * FROM " + " CROSS JOIN ".join(
+    f"({_FINGERPRINT_SQL[ch]}) AS {ch}" for ch in CHANNELS
+)
+# 주기 확인(힌트 없음)은 이만큼 지난 결과까지 같이 쓴다
+SHARE_PERIODIC_SECONDS = 1.0
 
 
 class Subscription:
-    """SSE 연결 하나가 받은 힌트(표 이름 집합)."""
+    """SSE 연결 하나가 받은 힌트(표 이름 집합)와 첫 힌트를 받은 시각(``time.monotonic``)."""
 
     def __init__(self) -> None:
         self._pending: set[str] = set()
         self._event = asyncio.Event()
+        self.first_hint_at: float | None = None
 
     def push(self, payload: str) -> None:
+        if not self._pending:
+            self.first_hint_at = time.monotonic()
         self._pending.add(payload if payload in CHANNELS else "*")
         self._event.set()
 
@@ -174,6 +191,70 @@ async def fingerprints(db, actor: ActorContext, channels: tuple[str, ...]) -> di
     return out
 
 
+async def workspace_fingerprints(db, workspace_id: UUID) -> dict[str, str]:
+    """그 공간(RLS)의 두 표 요약값을 문장 하나로 읽는다 (``WorkspaceSummaries``가 부른다)."""
+    async with db.workspace_session(workspace_id) as s:
+        row = tuple((await s.execute(text(_ALL_FINGERPRINTS_SQL))).one())
+    out: dict[str, str] = {}
+    for i, ch in enumerate(CHANNELS):
+        n, total, latest = row[3 * i : 3 * i + 3]
+        out[ch] = f"{n}:{total}:{latest.isoformat() if latest else '-'}"
+    return out
+
+
+class WorkspaceSummaries:
+    """프로세스 하나에서 공간별 요약 쿼리를 묶는다: 같은 공간의 연결들이 한 번 읽은 결과를 나눠 쓴다.
+
+    ``read(공간, since)``는 ``since`` 이후에 **시작한** 쿼리의 결과를 돌려준다. 돌고 있는 쿼리가 그 뒤에
+    시작했으면 같이 기다리고, 아니면 새로 시작한다. 그래서 같은 힌트를 받은 N개 연결은 쿼리 하나를 나눈다.
+    결과는 공간 문맥에서만 읽으므로 다른 공간과 섞이지 않는다. 오래된 항목은 읽을 때 지운다.
+    """
+
+    KEEP_SECONDS = 120.0
+
+    def __init__(self, db, *, clock=time.monotonic) -> None:
+        self.db = db
+        self._clock = clock
+        self._latest: dict[UUID, tuple[float, dict[str, str]]] = {}
+        self._inflight: dict[UUID, tuple[float, asyncio.Task[dict[str, str]]]] = {}
+        self.queries = 0  # 실제로 보낸 요약 쿼리 수 (시험·관찰용)
+
+    def _prune(self, now: float) -> None:
+        old = [ws for ws, (at, _) in self._latest.items() if at < now - self.KEEP_SECONDS]
+        for ws in old:
+            self._latest.pop(ws, None)
+
+    async def _query(self, workspace_id: UUID, started: float) -> dict[str, str]:
+        self.queries += 1
+        result = await workspace_fingerprints(self.db, workspace_id)
+        prev = self._latest.get(workspace_id)
+        if prev is None or prev[0] <= started:
+            self._latest[workspace_id] = (started, result)
+        return result
+
+    async def read(self, workspace_id: UUID, since: float) -> dict[str, str]:
+        latest = self._latest.get(workspace_id)
+        if latest is not None and latest[0] >= since:
+            return latest[1]
+        running = self._inflight.get(workspace_id)
+        if running is not None and running[0] >= since and not running[1].done():
+            # 한 연결이 끊겨(취소) 기다리기를 그만둬도 다른 연결의 쿼리는 계속된다
+            return await asyncio.shield(running[1])
+        now = self._clock()
+        self._prune(now)
+        task = asyncio.create_task(self._query(workspace_id, now), name="career-live-summary")
+        self._inflight[workspace_id] = (now, task)
+
+        def _done(t: asyncio.Task, ws: UUID = workspace_id) -> None:
+            if self._inflight.get(ws, (0.0, None))[1] is t:
+                self._inflight.pop(ws, None)
+            if not t.cancelled():
+                t.exception()  # 기다린 연결이 없어도 "never retrieved" 경고를 남기지 않는다
+
+        task.add_done_callback(_done)
+        return await asyncio.shield(task)
+
+
 def _event(name: str, data: dict[str, Any]) -> str:
     return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
@@ -186,6 +267,7 @@ def _bearer(request: Request) -> str:
 def add_live_routes(router: APIRouter, deps, authorize) -> StateHints | Any:
     """``deps.live``(힌트 공급자)가 없으면 DB 주소로 ``StateHints``를 만든다. 쓰는 공급자를 돌려준다."""
     hints = getattr(deps, "live", None) or StateHints(deps.db.engine.url)
+    summaries = WorkspaceSummaries(deps.db)
     unauthorized = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="authentication required",
@@ -216,7 +298,7 @@ def add_live_routes(router: APIRouter, deps, authorize) -> StateHints | Any:
             for ch in CHANNELS
             if ch == "runs" or deps.permissions.allows(actor, "approvals.read")
         )
-        first = await fingerprints(deps.db, actor, channels)
+        first = await summaries.read(actor.workspace_id, time.monotonic())
 
         async def stream() -> AsyncIterator[str]:
             loop = asyncio.get_running_loop()
@@ -234,6 +316,7 @@ def add_live_routes(router: APIRouter, deps, authorize) -> StateHints | Any:
                     if now >= deadline:
                         break
                     got = await sub.wait(min(deadline, next_ping, next_check) - now)
+                    hint_at = sub.first_hint_at if got else None
                     if got:
                         await asyncio.sleep(DEBOUNCE_SECONDS)
                         got |= sub.drain()
@@ -244,7 +327,13 @@ def add_live_routes(router: APIRouter, deps, authorize) -> StateHints | Any:
                                 yield _event("unauthorized", {})
                                 return
                             next_auth = now + REAUTH_SECONDS
-                        fresh = await fingerprints(deps.db, actor, channels)
+                        # 힌트를 받은 뒤 시작한 쿼리면 같은 공간 연결들과 나눠 쓴다
+                        since = (
+                            hint_at
+                            if hint_at is not None
+                            else time.monotonic() - SHARE_PERIODIC_SECONDS
+                        )
+                        fresh = await summaries.read(actor.workspace_id, since)
                         for ch in channels:
                             if fresh[ch] != state[ch]:
                                 yield _event(ch, {"v": fresh[ch]})
@@ -272,6 +361,8 @@ __all__ = [
     "STATE_CHANNEL",
     "StateHints",
     "Subscription",
+    "WorkspaceSummaries",
     "add_live_routes",
     "fingerprints",
+    "workspace_fingerprints",
 ]

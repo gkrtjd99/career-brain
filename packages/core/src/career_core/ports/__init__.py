@@ -198,6 +198,18 @@ class ApiTokenAdmin(Protocol):
 
     async def revoke(self, actor: ActorContext, token_id: UUID) -> bool: ...
 
+    # 선택 (c0025): 이름 바꾸기·만료 연장. 없는 구현이면 HTTP 경로(PATCH /core/tokens/{id})가 없다.
+    # async def update(self, actor, token_id, *, label: str | None, expires_days: int | None)
+    #     -> ApiTokenRecord | None   # 없으면 None, 규칙 위반은 ApiTokenUpdateError
+
+
+class ApiTokenUpdateError(ValueError):
+    """토큰 이름·만료 변경 거부. ``code``: ``token_revoked``·``token_expired``·``not_an_extension``."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
 
 class DenyAllPermissionPolicy:
     """주입이 빠졌을 때의 안전한 기본값."""
@@ -218,6 +230,7 @@ __all__ = [
     "ActorContext",
     "ApiTokenAdmin",
     "ApiTokenRecord",
+    "ApiTokenUpdateError",
     "AuditSink",
     "BlobStore",
     "BudgetPolicy",

@@ -26,6 +26,7 @@ import { Archive, ExternalLink, FileText, RefreshCw, Trash2, Plus } from "lucide
 import { useEffect, useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
+import { ChoiceQuestions, CostConfirmation } from "../components/postings/PostingExtras";
 import { useCreateApplication } from "./Applications";
 import { api } from "../lib/api";
 import { formatDateTime, formatDeadline } from "../lib/dates";
@@ -158,6 +159,7 @@ function PostingView({ p }: { p: Posting }) {
               아래에서 새 값을 확인하고 다시 저장하세요.
             </div>
           ) : null}
+          <ChoiceQuestions p={p} />
           {p.latest || p.status !== "draft" ? (
             <ReviewForm key={`${p.latest?.id}-${p.confirmed_version_id}-${p.saved_at}`} p={p} onEvidence={setEvidenceOf} onSaved={invalidate} />
           ) : null}
@@ -212,6 +214,7 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
         <Spinner /> 페이지를 가져오는 중입니다. worker가 켜져 있어야 합니다.
       </div>
     );
+  if (run.status === "needs_confirmation") return <CostConfirmation run={run} postingId={posting.id} />;
   if (run.status === "failed")
     return (
       <div className="rounded-lg border border-line bg-danger-soft px-3 py-2.5 text-[13px] text-danger">
@@ -222,6 +225,12 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
           <p className="mt-1 text-fg">
             사이트의 자동 요청 확인 화면(봇 차단)이 막았습니다. 우회하지 않으며, 다시 가져와도 같을 수 있습니다.
             브라우저에서 공고 본문을 복사해 아래에 붙여넣거나 캡처 이미지·PDF를 올려 주세요.
+          </p>
+        ) : null}
+        {run.error_code === "maybe_bot_blocked" ? (
+          <p className="mt-1 text-fg">
+            알려진 서비스는 아니지만 자동 요청 확인 화면(캡차·확인 스크립트)으로 보입니다. 막혔을 수 있으며
+            우회하지 않습니다. 브라우저에서 공고 본문을 복사해 아래에 붙여넣어 주세요.
           </p>
         ) : null}
       </div>
