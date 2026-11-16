@@ -1,6 +1,6 @@
 // 시스템 화면 "백업·유지보수" 탭: 저장된 자료, 내보내기, 웹 복원(합치기), 초안 정리.
 // System.tsx에서 떼어 낸 파일이다 (다른 탭과 따로 고칠 수 있게).
-import type { DuplicatePolicy, Maintenance, MergeReport, RestoreJob } from "@career-brain/client";
+import type { DuplicatePolicy, Maintenance, RestoreJob } from "@career-brain/client";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Select, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
@@ -9,6 +9,13 @@ import { errorText, Loaded } from "../common";
 import { api, ApiError } from "../../lib/api";
 import { formatDateTime, int } from "../../lib/format";
 import { bytes, saveBlob, systemErrorText } from "../../lib/systemLabels";
+import {
+  currentRestoreJob,
+  uploadRestoreWithProgress,
+  type MergeReportMore,
+  type RestoreJobMore,
+  type UploadProgress,
+} from "./restoreUpload";
 
 const RESTORE_ERROR: Record<string, string> = {
   too_large: "파일이 너무 큽니다.",
@@ -29,7 +36,8 @@ const RESTORE_ERROR: Record<string, string> = {
   deletions_workspace_mismatch: "삭제 기록이 묶음과 다른 공간의 것입니다.",
   not_an_archive: "내보내기 묶음(tar.gz)이 아닙니다.",
   format_unsupported: "career-brain 내보내기 묶음이 아닙니다.",
-  version_mismatch: "이 설치와 버전이 다른 묶음입니다. 같은 버전으로 맞춘 뒤 하세요.",
+  version_mismatch:
+    "이 설치가 바꿔 읽을 수 없는 버전의 묶음입니다 (이 설치보다 새 버전이거나, 그 사이 migration의 변환 단계가 없음). 같은 버전으로 맞춘 뒤 하세요.",
   schema_mismatch: "표 구성이 이 설치와 다릅니다.",
   hash_mismatch: "묶음이 손상됐습니다 (해시가 다름).",
   count_mismatch: "묶음이 손상됐습니다 (행 수가 다름).",
@@ -40,6 +48,10 @@ const RESTORE_ERROR: Record<string, string> = {
   verify_failed: "넣은 뒤 확인이 맞지 않아 되돌렸습니다.",
   upgrade_failed: "옛 형식 묶음을 바꾸지 못했습니다.",
   cancelled: "작업이 멈췄습니다.",
+  interrupted: "서버가 다시 시작되어 작업이 끊겼습니다. 아무것도 바뀌지 않았으니 다시 확인하세요.",
+  upload_missing: "올린 파일이 정리되어 없습니다. 파일을 다시 올리세요.",
+  upload_failed: "업로드가 끊겼습니다. 연결을 확인하고 다시 하세요.",
+  upload_cancelled: "업로드를 멈췄습니다.",
   internal_error: "서버 오류로 멈췄습니다. 서버 기록을 확인하세요.",
 };
 
@@ -87,7 +99,10 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
 }
 
 const short = (name: string) => name.replace(/^core\./, "");
-const running = (job: RestoreJob | undefined) => job?.status === "verifying" || job?.status === "applying";
+const running = (job: RestoreJob | RestoreJobMore | null | undefined) =>
+  job?.status === "verifying" || job?.status === "applying";
+const keyLabel = (k: string) =>
+  k === "id" ? "같은 ID" : k === "content" ? "같은 내용" : k.startsWith("same_except:") ? "같은 내용(상태·메모·시각 제외)" : k;
 
 export function MaintenanceTab() {
   const qc = useQueryClient();
@@ -239,13 +254,25 @@ function RestorePanel({ m }: { m: Maintenance }) {
   const [identity, setIdentity] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [upload, setUpload] = useState<UploadProgress | null>(null);
+  const abort = useRef<AbortController | null>(null);
   const key = ["restore-job", jobId] as const;
   const job = useQuery({
     queryKey: key,
-    queryFn: () => api.restoreJob(jobId!),
+    queryFn: () => api.restoreJob(jobId!) as Promise<RestoreJobMore>,
     enabled: jobId !== null,
     refetchInterval: (query) => (running(query.state.data) ? 1000 : false),
   });
+  // 화면을 다시 열면 이 공간의 지금 작업을 이어 본다 (작업 상태는 서버 DB에 있다)
+  const resumed = useQuery({ queryKey: ["restore-current"], queryFn: currentRestoreJob, refetchOnWindowFocus: false });
+  useEffect(() => {
+    const j = resumed.data;
+    if (j && jobId === null) {
+      qc.setQueryData(["restore-job", j.id], j);
+      setJobId(j.id);
+    }
+    // 서버에서 받은 작업이 바뀔 때만 (지금 보는 작업이 있으면 바꾸지 않는다)
+  }, [resumed.data]);
   const current = job.data;
   const encrypted = current?.encrypted ?? file?.name.endsWith(".age") ?? false;
   const secret = () => (encrypted && identity.trim() ? identity : undefined);
@@ -257,21 +284,31 @@ function RestorePanel({ m }: { m: Maintenance }) {
     }
   }, [current?.status, qc]);
 
-  const setJob = (j: RestoreJob) => {
+  const setJob = (j: RestoreJob | RestoreJobMore) => {
     setJobId(j.id);
     qc.setQueryData(["restore-job", j.id], j);
   };
   const check = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("파일을 고르세요.");
       let j = current;
+      // 이어 본 작업(파일을 고르지 않음)은 서버에 남은 파일로 다시 확인한다
+      const reuse = !file && j && j.status !== "done";
+      if (!file && !reuse) throw new Error("파일을 고르세요.");
       // 고른 파일이 올린 것과 다르면 새로 올린다 (실패한 작업은 같은 파일로 다시 확인할 수 있다)
-      if (!j || j.status === "done" || sent.current.archive !== file) {
+      if (file && (!j || j.status === "done" || sent.current.archive !== file)) {
         if (jobId) await api.discardRestore(jobId).catch(() => undefined);
-        j = await api.uploadRestore(file, file.name);
+        const ctl = new AbortController();
+        abort.current = ctl;
+        try {
+          j = await uploadRestoreWithProgress(file, file.name, setUpload, ctl.signal);
+        } finally {
+          abort.current = null;
+          setUpload(null);
+        }
         sent.current = { archive: file, deletions: null };
         setJob(j);
       }
+      if (!j) throw new Error("파일을 고르세요.");
       if (deletionLog && sent.current.deletions !== deletionLog) {
         j = await api.uploadRestoreDeletions(j.id, deletionLog);
         sent.current.deletions = deletionLog;
@@ -298,6 +335,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
       if (jobId && !running(current)) await api.discardRestore(jobId).catch(() => undefined);
     },
     onSettled: () => {
+      qc.setQueryData(["restore-current"], null); // 지운 작업을 다시 잇지 않게
       setJobId(null);
       setFile(null);
       setDeletionLog(null);
@@ -312,7 +350,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
 
   const busy = running(current) || check.isPending || apply.isPending;
   const locked = Boolean(current && current.status !== "failed");
-  const report = current?.report ?? null;
+  const report = (current?.report ?? null) as MergeReportMore | null;
 
   return (
     <div className="space-y-3">
@@ -378,7 +416,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
 
       <div className="flex flex-wrap gap-2">
         {current?.status !== "verified" && current?.status !== "done" ? (
-          <Button variant="primary" disabled={!file || busy} onClick={() => check.mutate()}>
+          <Button variant="primary" disabled={(!file && !current) || busy} onClick={() => check.mutate()}>
             {check.isPending || current?.status === "verifying" ? <Spinner /> : <Upload size={15} />}
             {current?.status === "failed" || current?.status === "uploaded" ? "다시 확인" : "올려서 확인"}
           </Button>
@@ -388,14 +426,17 @@ function RestorePanel({ m }: { m: Maintenance }) {
             {report.rows_added === 0 ? "더할 행 없음" : `${int(report.rows_added)}행 합치기`}
           </Button>
         ) : null}
-        {jobId || file ? (
+        {upload ? (
+          <Button onClick={() => abort.current?.abort()}>업로드 멈추기</Button>
+        ) : jobId || file ? (
           <Button disabled={running(current) || reset.isPending} onClick={() => reset.mutate()}>
             {current?.status === "done" ? "새로 하기" : "취소"}
           </Button>
         ) : null}
       </div>
 
-      {current ? <JobStatus job={current} /> : null}
+      {upload ? <UploadBar progress={upload} name={file?.name} /> : null}
+      {current && !upload ? <JobStatus job={current} /> : null}
       <Problem error={check.error ?? apply.error ?? job.error} />
       {report ? <ReportView report={report} /> : null}
 
@@ -417,7 +458,37 @@ function RestorePanel({ m }: { m: Maintenance }) {
   );
 }
 
-function JobStatus({ job }: { job: RestoreJob }) {
+function UploadBar({ progress, name }: { progress: UploadProgress; name: string | undefined }) {
+  const pct = progress.total > 0 ? Math.min(100, Math.round((progress.loaded / progress.total) * 100)) : 0;
+  return (
+    <Card className="space-y-1.5 px-3 py-2.5 text-[13px]">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="accent">올리는 중</Badge>
+        <span className="min-w-0 truncate text-muted">{name ?? "묶음"}</span>
+      </div>
+      <div>
+        <div className="flex justify-between gap-2 text-xs text-muted">
+          <span>{pct < 100 ? "서버로 보내는 중" : "서버가 받은 파일을 확인하는 중"}</span>
+          <span className="tabular-nums">
+            {bytes(progress.loaded)} / {bytes(progress.total)} · {pct}%
+          </span>
+        </div>
+        <div
+          className="mt-1 h-1.5 overflow-hidden rounded bg-subtle"
+          role="progressbar"
+          aria-label="업로드 진행"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+        >
+          <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function JobStatus({ job }: { job: RestoreJob | RestoreJobMore }) {
   const pct = job.total > 0 ? Math.min(100, Math.round((job.done / job.total) * 100)) : null;
   const unit = job.phase === "read" || job.phase === "decrypt" ? bytes : int;
   return (
@@ -456,7 +527,7 @@ function JobStatus({ job }: { job: RestoreJob }) {
   );
 }
 
-function StatusBadge({ job }: { job: RestoreJob }) {
+function StatusBadge({ job }: { job: RestoreJob | RestoreJobMore }) {
   switch (job.status) {
     case "uploaded":
       return <Badge tone="none">올림</Badge>;
@@ -473,7 +544,7 @@ function StatusBadge({ job }: { job: RestoreJob }) {
   }
 }
 
-function ReportView({ report }: { report: MergeReport }) {
+function ReportView({ report }: { report: MergeReportMore }) {
   const tables = report.tables.filter((t) => t.archive_rows > 0 && !(t.name in report.not_merged));
   return (
     <div className="space-y-2">
@@ -496,6 +567,14 @@ function ReportView({ report }: { report: MergeReport }) {
         </Field>
         {report.format_upgraded_from !== null ? (
           <Field label="형식">옛 형식 {report.format_upgraded_from} → 지금 형식으로 바꿔 읽음</Field>
+        ) : null}
+        {report.schema_converted_from ? (
+          <Field label="버전">옛 설치({report.schema_converted_from.join(", ")})의 묶음 → 지금 표 구성으로 바꿔 읽음</Field>
+        ) : null}
+        {report.approvals_invalidated ? (
+          <Field label="승인 요청">
+            {int(report.approvals_invalidated)}건 {report.dry_run ? "닫힘 예정" : "닫음"} (대상 지원이 바뀜 · 다시 요청)
+          </Field>
         ) : null}
       </Card>
       {report.notes.map((n) => (
@@ -537,7 +616,7 @@ function ReportView({ report }: { report: MergeReport }) {
               {Object.keys(t.skipped_by).length ? (
                 <div className="truncate text-[11px] text-muted">
                   {Object.entries(t.skipped_by)
-                    .map(([k, n]) => `${k === "id" ? "같은 ID" : k === "content" ? "같은 내용" : k} ${n}`)
+                    .map(([k, n]) => `${keyLabel(k)} ${n}`)
                     .join(" · ")}
                 </div>
               ) : null}

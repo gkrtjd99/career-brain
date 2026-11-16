@@ -314,3 +314,17 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - API: `GET/PUT /core/workspace-settings` (`settings.read` = read, `settings.write` = draft-write). 준 칸만 바꾼다. `GET/PUT /core/study/settings`는 같은 시간대를 읽고 쓴다.
 - 키워드 검색용 SECURITY DEFINER 함수(trigram 색인 사용)는 시험했지만 넣지 않았다 (2글자 한국어 낱말은 색인 이득이 없고, 소유자가 superuser가 아니면 RLS가 그대로 적용된다. `search.md` "RLS 아래 trigram 색인").
 - 상세: `docs/architecture/study.md`(시간대·별칭), `docs/architecture/applications.md`(문서 검사의 별칭), `docs/architecture/models.md`(판정 모델).
+
+## 웹 복원 작업 상태·옛 head 묶음 변환 (c0024)
+
+`down_revision = c0021` (c0022·c0023·c0025와 병렬로 만들었다. 합칠 때 순서를 다시 잇는다). 웹 복원 작업 상태를 프로세스 메모리에서 DB로 옮긴다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `restore_jobs` (새 표) | 웹 복원 작업 하나 = 올린 묶음 하나, 공간당 1행(`uq_restore_jobs_workspace`: 새 업로드가 옛 작업을 바꾼다). 상태 `status`(`ck_restore_jobs_status`: uploaded·verifying·verified·applying·done·failed), 단계·진행 수(`phase`·`done`·`total`), 파일 크기·sha256(`ck_restore_jobs_sha256`)·암호화 여부·표시용 이름, 삭제 기록 줄 수, 확인한 겹침 정책(`ck_restore_jobs_on_duplicate`), 확인·합치기 보고 `report`(JSONB 객체), 오류 코드·설명, 실행 중일 때 돌리는 프로세스 표시 `runner`와 생존 신호 `heartbeat_at` | `SELECT, INSERT, UPDATE, DELETE` |
+
+- 올린 파일 경로는 두지 않는다. 공유 폴더(`CAREER_RESTORE_DIR`) 안 `career-restore-upload-<작업 ID>`로 정해진다. age 신원은 저장하지 않는다.
+- 실행 중 작업은 돌리는 프로세스가 2초마다 진행과 `heartbeat_at`을 쓴다. 60초 넘게 신호가 없는 실행 중 작업은 읽는 쪽이 `failed`/`interrupted`로 닫는다 (재시작·죽은 프로세스). 상태 전이(확인·합치기 시작)는 `WHERE status = 이전 상태` 조건부 UPDATE 하나라서 두 프로세스가 같은 작업을 같이 시작하지 못한다.
+- RLS FORCE (`workspace_isolation`). 내보내기에서는 뺀다 (`EXCLUDED_TABLES`: 이 설치의 임시 파일을 가리키는 일시 상태). 묶음 변환 단계는 `no_data_change("c0024")`.
+- 같은 백로그 묶음의 코드 변경(migration 없음): 옛 core migration head 묶음 변환 `SCHEMA_STEPS`(c0019·c0020·c0024 바뀜 없음, c0021 `study_settings` → `workspace_settings`), 합치기 내용 키(`EXTRA_MERGE_KEYS`의 `SameExcept`), 합친 뒤 열린 승인 다시 확인(c0019 `recheck_application_approvals`). 상세 `docs/operations/backup.md`.
+- **새 migration 규칙**: 내보내는 표의 표·칸·타입을 바꾸는 migration은 `usecases/export.py`에 `@schema_step("cNNNN", …)`을, 바꾸지 않으면 `no_data_change("cNNNN", …)`을 같이 넣는다. `test_schema_steps_cover_every_migration`이 migration을 하나씩 올리며 확인한다. 합칠 새 표는 `EXTRA_MERGE_KEYS` 또는 `CONTENT_ONLY_TABLES`에 분류한다 (`test_merge_keys_cover_keyless_tables`).

@@ -191,6 +191,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_MODEL_DIR` | – (이미지: `/data/models`) | 로컬 임베딩 모델 파일 |
 | `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
 | `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |
+| `CAREER_RESTORE_DIR` | 시스템 임시 디렉터리 | 웹 복원 업로드를 받는 폴더. API 프로세스가 여럿이면 모두 보는 같은 폴더로 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)) |
 | `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
 | `CAREER_LOG_LEVEL` / `CAREER_ACCESS_LOG` | `info` / `1` | 로그 |
 | `CAREER_ENV_FILE` | `.env` | 로컬 실행 때 읽는 키 파일 (셸 변수가 우선) |

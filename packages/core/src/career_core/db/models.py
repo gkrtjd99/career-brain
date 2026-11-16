@@ -985,3 +985,36 @@ class WorkspaceSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0024: 웹 복원 작업
+
+
+class RestoreJob(Base):
+    """웹 복원 작업 하나 (공간마다 하나). 올린 파일은 공유 폴더에 있고 경로는 ID에서 정해진다.
+
+    실행 중이면 돌리는 프로세스가 ``heartbeat_at``을 고친다. 오래되면 읽는 쪽이 ``interrupted``로 닫는다.
+    """
+
+    __tablename__ = "restore_jobs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    actor_id: Mapped[UUID]
+    status: Mapped[str] = mapped_column(Text)
+    phase: Mapped[str | None] = mapped_column(Text, default=None)
+    done: Mapped[int] = mapped_column(BigInteger, default=0)
+    total: Mapped[int] = mapped_column(BigInteger, default=0)
+    bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(Text)
+    encrypted: Mapped[bool] = mapped_column(default=False)
+    filename: Mapped[str | None] = mapped_column(Text, default=None)
+    deletions: Mapped[int] = mapped_column(Integer, default=0)
+    on_duplicate: Mapped[str | None] = mapped_column(Text, default=None)
+    report: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True), default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+    error_detail: Mapped[str | None] = mapped_column(Text, default=None)
+    runner: Mapped[str | None] = mapped_column(Text, default=None)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
