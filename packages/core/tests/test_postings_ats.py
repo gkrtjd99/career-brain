@@ -713,7 +713,11 @@ async def test_pdf_edge_cases(db, env):
     await run_until_idle(db, posting_handlers(deps))
     views = [await uc.get_posting(db, env["actor"], r.posting_id) for r in results]
     scan, octet, fake = views
-    assert (scan.runs[0].error_code, scan.runs[0].notes) == ("needs_manual_check", ["pdf_no_text"])
+    # 스캔 PDF: 비전 라우트가 없으면 쪽을 그리지도 않고 직접 확인 (test_postings_ops.py: 라우트가 있을 때)
+    assert (scan.runs[0].error_code, scan.runs[0].notes) == (
+        "needs_manual_check",
+        ["pdf_no_text", "vision_route_missing"],
+    )
     assert octet.latest.adapter == "pdf"  # octet-stream이어도 파일 머리가 PDF면 받는다
     assert fake.runs[0].error_code == "unsupported_content"  # 선언과 내용이 다르면 거부
     assert "deadline" not in scan.fields and "deadline" not in fake.fields

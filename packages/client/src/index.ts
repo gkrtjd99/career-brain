@@ -1,9 +1,11 @@
 import { liveEndpoints } from "./live";
 import { systemEndpoints } from "./system";
+import { tokenEndpoints } from "./tokens";
 import type * as T from "./types";
 
 export * from "./live";
 export * from "./system";
+export * from "./tokens";
 export * from "./types";
 
 export interface ClientOptions {
@@ -506,6 +508,7 @@ export function createClient({
 
     ...systemEndpoints({ request, get, post }),
     ...liveEndpoints({ request, get, post }),
+    ...tokenEndpoints({ get, post }),
   };
 }
 

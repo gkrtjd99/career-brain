@@ -562,6 +562,7 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
                 "core.embeddings": 0,
                 "core.oauth_identities": 0,
                 "core.oauth_tokens": 0,
+                "core.maintenance_results": 0,
             }
         finally:
             await target.dispose()

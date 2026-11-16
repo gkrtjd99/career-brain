@@ -5,6 +5,7 @@ import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { createClient } from "@career-brain/client";
 import { ErrorText, PageHeader } from "../components/common";
+import { TokensSection } from "../components/TokensSection";
 import { api, setToken, useToken } from "../lib/api";
 import { useTheme, type ThemePref } from "../lib/theme";
 
@@ -113,6 +114,8 @@ export function SettingsPage() {
             </p>
           </Card>
         </Section>
+
+        {me.data?.scopes.includes("workspace-admin") ? <TokensSection /> : null}
 
         {me.isSuccess ? <DocumentSettingsSection /> : null}
 

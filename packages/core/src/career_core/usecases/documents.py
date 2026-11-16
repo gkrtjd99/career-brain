@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -313,9 +314,10 @@ async def export_document(
     async with db.workspace_session(actor.workspace_id) as s:
         own = await app_uc.own_contacts(s)
     paragraphs = [b.text for b in view.blocks]
-    data = render(fmt, view.title, paragraphs)
+    # 파일 쓰기(DOCX는 zip 압축)와 다시 읽어 검사하기는 동기 CPU 작업: 이벤트 루프를 막지 않게 스레드로
+    data = await asyncio.to_thread(render, fmt, view.title, paragraphs)
     try:
-        found: list[Finding] = inspect_export(fmt, data)
+        found: list[Finding] = await asyncio.to_thread(inspect_export, fmt, data)
     except ExportError as exc:
         raise DocumentRuleError(exc.code) from exc
     for b in view.blocks:

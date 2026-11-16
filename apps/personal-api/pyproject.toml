@@ -11,6 +11,7 @@ local-embed = ["career-core[local-embed]"]
 browser = ["career-core[browser]"]
 oauth = ["career-core[oauth]"]
 age = ["career-core[age]"]
+pdf-render = ["career-core[pdf-render]"]
 
 [build-system]
 requires = ["hatchling"]

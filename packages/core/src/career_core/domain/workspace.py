@@ -64,6 +64,9 @@ ACTION_SCOPES: dict[str, str] = {
     "oauth.link": "workspace-admin",
     # c0018 묶음을 기존 공간에 합치기 (웹 복원 포함). 공간 전체 자료를 쓰므로 소유자만.
     "workspace.restore": "workspace-admin",
+    # API 토큰 목록·발급·폐기 (personal-api 토큰, 원문·해시는 보이지 않는다). 소유자만.
+    "tokens.read": "workspace-admin",
+    "tokens.manage": "workspace-admin",
 }
 
 

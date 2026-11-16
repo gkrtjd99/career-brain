@@ -107,15 +107,18 @@ async def test_maintenance_command(settings, capsys):
 def test_token_subcommands_parse(monkeypatch):
     seen = {}
 
-    async def fake(settings, action, *, token_id=None, label=None):
-        seen.update(action=action, token_id=token_id, label=label)
+    async def fake(settings, action, *, token_id=None, label=None, expires_days=None):
+        seen.update(action=action, token_id=token_id, label=label, expires_days=expires_days)
         return 0
 
     monkeypatch.setattr(cli, "_token", fake)
     with pytest.raises(SystemExit) as exc:
         cli.main(["token", "issue", "--label", "phone"])
     assert exc.value.code == 0
-    assert seen == {"action": "issue", "token_id": None, "label": "phone"}
+    assert seen == {"action": "issue", "token_id": None, "label": "phone", "expires_days": None}
+    with pytest.raises(SystemExit):
+        cli.main(["token", "issue", "--expires-days", "30"])
+    assert seen["expires_days"] == 30
     with pytest.raises(SystemExit):
         cli.main(["token", "revoke", "1234"])
     assert seen["action"] == "revoke" and seen["token_id"] == "1234"

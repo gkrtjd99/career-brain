@@ -69,6 +69,8 @@ class CoreDeps:
     max_restore_bytes: int = 2 * 1024 * 1024 * 1024
     # 시스템 화면 SSE의 상태 변경 힌트 (interfaces.http.live.StateHints). 없으면 DB 주소로 LISTEN.
     live: Any = None
+    # API 토큰 관리 (ports.ApiTokenAdmin). 없으면 /core/tokens 경로를 등록하지 않는다.
+    tokens: Any = None
 
 
 class WorkspaceOut(BaseModel):
@@ -219,6 +221,11 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
 
     add_oauth_routes(router, deps, authorize)
     add_live_routes(router, deps, authorize)
+
+    if deps.tokens is not None:
+        from career_core.interfaces.http.tokens import add_token_routes
+
+        add_token_routes(router, deps, authorize)
     if deps.blobs is not None:
         _add_source_routes(router, deps, authorize)
 

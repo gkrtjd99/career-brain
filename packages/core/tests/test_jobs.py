@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import threading
 import time
 from datetime import timedelta
 from uuid import uuid4
@@ -318,7 +319,8 @@ async def test_maintenance_loop_runs_on_interval_and_can_be_off(db, owner):
 
     async def task(db_, ws):
         nonlocal count
-        count += 1
+        if ws == owner.workspace_id:
+            count += 1
         return 0
 
     loop = asyncio.create_task(
@@ -330,9 +332,12 @@ async def test_maintenance_loop_runs_on_interval_and_can_be_off(db, owner):
             tasks=[MaintenanceTask("t", task)],
         )
     )
-    await asyncio.sleep(0.5)
+    # 공유 DB에는 공간이 많아 한 번 도는 데 걸리는 시간이 들쭉날쭉하다: 두 번 돌 때까지 기다린다
+    deadline = asyncio.get_running_loop().time() + 10
+    while count < 2 and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.05)
     stop.set()
-    runs = await asyncio.wait_for(loop, 5)
+    runs = await asyncio.wait_for(loop, 10)
     assert runs >= 2 and count >= 2
 
 
@@ -341,3 +346,266 @@ async def test_workspace_listing_does_not_open_workspaces_to_the_app_role(db, ow
     async with db.system_session() as s:
         await s.execute(text("SELECT set_config('career.maintenance_scan', 'on', true)"))
         assert await s.scalar(text("SELECT count(*) FROM core.workspaces")) == 0
+
+
+# ---------------------------------------------------------------- 다음 작업 예정 시각 (c0020)
+
+
+async def test_next_due_covers_queued_and_expired_lease_jobs(db, owner):
+    from career_core.jobs.worker import next_due_seconds
+
+    kind = new_kind()
+    assert await next_due_seconds(db, [kind]) is None
+    await enqueue(db, owner.workspace_id, kind, delay=30)
+    assert 25 < await next_due_seconds(db, [kind]) <= 30
+    await enqueue(db, owner.workspace_id, new_kind(), delay=0)  # 다른 종류는 세지 않는다
+    assert 25 < await next_due_seconds(db, [kind]) <= 30
+    async with db.workspace_session(owner.workspace_id) as s:
+        s.add(
+            Job(
+                workspace_id=owner.workspace_id,
+                kind=kind,
+                target_id=uuid4(),
+                status="running",
+                attempts=1,
+                locked_until=utcnow() + timedelta(seconds=5),
+            )
+        )
+    assert 3 < await next_due_seconds(db, [kind]) <= 5  # lease가 끝나면 다시 집을 수 있다
+    await enqueue(db, owner.workspace_id, kind, delay=-10)
+    assert await next_due_seconds(db, [kind]) == 0  # 지난 시각은 0
+
+
+async def test_next_due_exposes_only_one_timestamp(db, owner):
+    """공간 문맥 없이 부르는 함수지만 시각 하나만 돌려준다 (공간·대상 ID·행 수 없음)."""
+    kind = new_kind()
+    other, _ = await create_workspace(db, name="B", owner_display_name="bob")
+    await enqueue(db, other, kind, delay=60)
+    async with db.system_session() as s:
+        result = await s.scalar(
+            text(
+                "SELECT pg_get_function_result(p.oid) FROM pg_proc p "
+                "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                "WHERE n.nspname = 'core' AND p.proname = 'next_job_due'"
+            )
+        )
+        assert result == "timestamp with time zone"
+        assert await s.scalar(text("SELECT core.next_job_due(:k)"), {"k": [kind]}) is not None
+        assert await s.scalar(text("SELECT count(*) FROM core.jobs")) == 0  # 직접 조회는 막힘
+
+
+# ---------------------------------------------------------------- 유지보수 마지막 실행 (c0020)
+
+
+async def test_scheduled_maintenance_runs_once_per_interval_across_workers(db, owner):
+    """worker 여러 개가 각자 주기 실행을 해도 간격 안에서는 한 번만 돈다 (잠금만으로는 차례마다 돈다)."""
+    from career_core.jobs.maintenance import maintenance_status
+
+    seen = []
+
+    async def task(db_, ws):
+        seen.append(ws)
+        return 1 if ws == owner.workspace_id else 0
+
+    tasks = [MaintenanceTask("t", task)]
+    first = await run_maintenance(db, tasks, interval_seconds=3600)  # 지금 바로 (명령)
+    assert first.ran and first.next_at is not None
+    seen.clear()
+    later = [await run_maintenance(db, tasks, interval_seconds=3600, force=False) for _ in range(3)]
+    assert [r.skipped for r in later] == ["not_due"] * 3 and seen == []
+    assert all(r.next_at == first.next_at for r in later)
+
+    status = await maintenance_status(db, owner.workspace_id)
+    assert status.interval_seconds == 3600 and not status.running
+    assert status.next_at == first.next_at
+    assert status.last_finished_at >= status.last_started_at
+    assert (status.counts, status.errors) == ({"t": 1}, 0)  # 이 공간의 결과만
+
+    # 한 일이 없던 공간은 행을 쓰지 않는다: 이번 실행의 결과는 빈 값, 마지막 정리 시각은 그대로
+    owner_changed = status.last_changed_at
+    other, _ = await create_workspace(db, name="B", owner_display_name="bob")
+    await run_maintenance(
+        db, [MaintenanceTask("t", lambda db_, ws: _zero())], interval_seconds=3600
+    )
+    mine, theirs = (
+        await maintenance_status(db, owner.workspace_id),
+        await maintenance_status(db, other),
+    )
+    assert (mine.counts, mine.last_changed_at) == ({}, owner_changed)
+    assert (theirs.counts, theirs.last_changed_at) == ({}, None)
+    # 짧은 간격이면 다시 차례가 온다
+    again = await run_maintenance(db, tasks, interval_seconds=0.01, force=False)
+    assert again.ran
+
+
+async def _zero() -> int:
+    return 0
+
+
+async def test_maintenance_results_are_workspace_scoped(db, owner):
+    other, _ = await create_workspace(db, name="B", owner_display_name="bob")
+
+    async def one(db_, ws):
+        return 1
+
+    await run_maintenance(db, [MaintenanceTask("t", one)])
+    async with db.workspace_session(owner.workspace_id) as s:
+        rows = (await s.execute(text("SELECT workspace_id FROM core.maintenance_results"))).all()
+    assert [r.workspace_id for r in rows] == [owner.workspace_id]
+    async with db.workspace_session(other) as s:
+        rows = (await s.execute(text("SELECT workspace_id FROM core.maintenance_results"))).all()
+    assert [r.workspace_id for r in rows] == [other]
+    async with db.system_session() as s:
+        assert await s.scalar(text("SELECT count(*) FROM core.maintenance_results")) == 0
+    # 설치 전체 일정 표는 앱 계정이 직접 읽을 수 없다 (함수로 시각만)
+    with pytest.raises(Exception, match="permission denied"):
+        async with db.system_session() as s:
+            await s.execute(text("SELECT * FROM core.maintenance_schedule"))
+
+
+async def test_maintenance_loop_waits_for_the_next_run_another_worker_set(db, owner, monkeypatch):
+    """간격 안에 다른 worker가 이미 했으면 DB가 알려 준 다음 예정 시각까지 쉰다."""
+    from career_core.jobs import maintenance as m
+
+    calls = []
+
+    async def task(db_, ws):
+        calls.append(time.monotonic())
+        return 0
+
+    tasks = [MaintenanceTask("t", task)]
+    await run_maintenance(db, tasks, interval_seconds=1.0)  # 다른 worker가 방금 했다
+    calls.clear()
+    monkeypatch.setattr(m.random, "uniform", lambda a, b: 0.0 if a == 0 else a)
+    stop = asyncio.Event()
+    t0 = time.monotonic()
+    loop = asyncio.create_task(
+        maintenance_loop(db, stop, interval_seconds=1.0, first_delay_seconds=0, tasks=tasks)
+    )
+    while not calls and time.monotonic() - t0 < 5:
+        await asyncio.sleep(0.01)
+    stop.set()
+    await asyncio.wait_for(loop, 5)
+    # 첫 시도는 간격 안이라 건너뛰고, 다음 예정 시각(약 1초 뒤)에 한다. 간격×0.9 다시 시도가 아니다
+    assert calls and 0.7 < calls[0] - t0 < 1.6
+
+
+# ---------------------------------------------------------------- CPU를 오래 쓰는 단계와 heartbeat
+
+
+class _Competitor(threading.Thread):
+    """다른 프로세스의 worker 흉내: 자기 이벤트 루프·DB 연결로 0.2초마다 같은 종류를 집으려 한다."""
+
+    def __init__(self, url, kind: str) -> None:
+        super().__init__(daemon=True)
+        self.url, self.kind = url, kind
+        self.claimed: list = []
+        self.stop = threading.Event()
+
+    def run(self) -> None:
+        asyncio.run(self._main())
+
+    async def _main(self) -> None:
+        from career_core.db import Database
+        from sqlalchemy.pool import NullPool
+
+        other = Database(self.url, poolclass=NullPool)
+        try:
+            while not self.stop.is_set():
+                async with other.system_session() as s:
+                    row = (
+                        await s.execute(
+                            text("SELECT * FROM core.claim_job(:k, 1)"), {"k": [self.kind]}
+                        )
+                    ).first()
+                if row is not None:
+                    self.claimed.append(row.job_id)
+                await asyncio.sleep(0.2)
+        finally:
+            await other.dispose()
+
+
+class _BlockingParser:
+    """CPU를 오래 쓰는 파서 흉내 (큰 스캔 PDF): 호출한 스레드를 2.5초 막는다."""
+
+    def __init__(self) -> None:
+        self.threads: list[str] = []
+
+    def parse(self, data: bytes):
+        from career_core.ports import LocalParseResult, ParsedBlock
+
+        self.threads.append(threading.current_thread().name)
+        time.sleep(2.5)
+        return LocalParseResult(
+            blocks=(ParsedBlock(page=None, text="합성 본문"),), pages_total=None
+        )
+
+
+async def _parse_job(db, owner, tmp_path, parser):
+    from career_core.adapters.blobstore import LocalBlobStore
+    from career_core.policies import ProviderEgressPolicy
+    from career_core.usecases.parsing import ParsingDeps
+    from career_core.usecases.sources import upload_source
+
+    blobs = LocalBlobStore(tmp_path)
+    up = await upload_source(
+        db,
+        blobs,
+        owner,
+        filename="note.txt",
+        data=f"합성 메모 {uuid4()}".encode(),
+        declared_mime="text/plain",
+        max_bytes=1024,
+    )
+    deps = ParsingDeps(
+        db=db,
+        blobs=blobs,
+        egress=ProviderEgressPolicy(),
+        local_parsers={"text/plain": parser},
+    )
+    return up, deps
+
+
+async def test_heartbeat_keeps_the_lease_during_a_cpu_heavy_parse(pg, db, owner, tmp_path):
+    """파싱(동기 CPU 작업)은 스레드에서 돈다: 그동안 이벤트 루프의 heartbeat가 lease(1초)를 계속 늘려
+    다른 worker(별도 스레드·연결)가 그 작업을 다시 집지 못한다."""
+    from career_core.jobs.worker import parsing_handlers
+    from career_core.usecases.sources import PARSE_JOB
+
+    parser = _BlockingParser()
+    up, deps = await _parse_job(db, owner, tmp_path, parser)
+    rival = _Competitor(pg.app, PARSE_JOB)
+    rival.start()
+    try:
+        assert await run_once(db, parsing_handlers(deps), lease_seconds=1, heartbeat_seconds=0.25)
+    finally:
+        rival.stop.set()
+        rival.join(5)
+    assert rival.claimed == []
+    assert parser.threads and parser.threads[0] != threading.current_thread().name
+    async with db.workspace_session(owner.workspace_id) as s:
+        job = await s.scalar(select(Job).where(Job.target_id == up.parse_run_id))
+    assert (job.status, job.attempts) == ("done", 1)
+
+
+async def test_a_step_that_blocks_the_loop_loses_its_lease(pg, db, owner):
+    """대조: 같은 일을 이벤트 루프에서 하면 heartbeat가 못 돌아 lease가 끝나고 다른 worker가 집는다."""
+    kind = new_kind()
+    await enqueue(db, owner.workspace_id, kind)
+
+    async def blocking(ws, target):
+        time.sleep(2.5)  # noqa: ASYNC251 - 일부러 루프를 막는다
+        return StepOutcome(done=True)
+
+    rival = _Competitor(pg.app, kind)
+    rival.start()
+    try:
+        await run_once(
+            db, {kind: JobHandler(run=blocking)}, lease_seconds=1, heartbeat_seconds=0.25
+        )
+    finally:
+        rival.stop.set()
+        rival.join(5)
+    assert (
+        rival.claimed
+    )  # lease가 끝나 다른 worker가 다시 집었다 (이 시험에서는 그 lease도 끝나 여러 번)

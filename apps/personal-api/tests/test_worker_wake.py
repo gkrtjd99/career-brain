@@ -174,3 +174,70 @@ def test_worker_env_defaults(monkeypatch, env, listen, poll, maintenance):
         poll,
         maintenance,
     )
+
+
+async def test_idle_worker_wakes_for_jobs_that_never_notify(db):
+    """알림이 없는 두 경우 — 죽은 worker의 lease가 끝날 running 작업, worker 시작 전에 예약된 미래 작업 —
+    도 fallback(30초)이 아니라 다음 예정 시각 조회(c0020 ``core.next_job_due``)로 그 시각에 집는다."""
+    from datetime import timedelta
+
+    from career_core.db.base import utcnow
+    from career_core.jobs.worker import next_due_seconds
+
+    ws, _ = await create_workspace(db, name="w", owner_display_name="me")
+    kind, seen = f"t-{uuid4().hex[:10]}", []
+    handlers = handlers_for(kind, seen)
+    async with db.workspace_session(ws) as s:
+        # 죽은 worker가 집은 채로 남은 작업: running이라 trigger가 알리지 않는다
+        s.add(
+            Job(
+                workspace_id=ws,
+                kind=kind,
+                target_id=uuid4(),
+                status="running",
+                attempts=1,
+                locked_until=utcnow() + timedelta(seconds=1),
+            )
+        )
+        # LISTEN 전에 예약된 작업: 알림은 이미 지나갔다
+        s.add(
+            Job(
+                workspace_id=ws,
+                kind=kind,
+                target_id=uuid4(),
+                available_at=utcnow() + timedelta(seconds=1.5),
+            )
+        )
+    async with JobWaker(db.engine.url, handlers) as waker:
+        assert await waker.wait_listening(5)
+        stop = asyncio.Event()
+        rt = WorkerRuntime(
+            lambda: run_once(db, handlers), waker, next_due=lambda: next_due_seconds(db, handlers)
+        )
+        t0 = time.monotonic()
+        task = asyncio.create_task(run_runtime(rt, stop, poll_seconds=30))
+        while len(seen) < 2 and time.monotonic() - t0 < 10:
+            await asyncio.sleep(0.02)
+        stop.set()
+        assert await asyncio.wait_for(task, 5) == 2
+    assert 0.8 < seen[0] - t0 < 3.0
+    assert 1.3 < seen[1] - t0 < 3.5
+    assert waker.notifications == 0  # 알림 없이 집었다
+
+
+async def test_next_due_lookup_failure_falls_back_to_the_poll_interval():
+    from personal_api.runner import _idle_delay
+
+    async def broken():
+        raise RuntimeError("db down")
+
+    async def soon():
+        return 0.0
+
+    async def none():
+        return None
+
+    assert await _idle_delay(30, broken) == 30
+    assert await _idle_delay(30, none) == 30
+    assert 0 < await _idle_delay(30, soon) < 0.1  # 지난 시각이어도 바로 다시 돌지 않는다
+    assert await _idle_delay(30, None) == 30

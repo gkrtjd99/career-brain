@@ -217,6 +217,12 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
         가져오기 실패: <strong>{FETCH_ERROR[run.error_code ?? ""] ?? run.error_code}</strong>
         {run.http_status ? ` (HTTP ${run.http_status})` : ""}. 마감으로 처리하지 않습니다. 본문을 직접
         붙여넣을 수 있습니다.
+        {run.error_code === "bot_blocked" ? (
+          <p className="mt-1 text-fg">
+            사이트의 자동 요청 확인 화면(봇 차단)이 막았습니다. 우회하지 않으며, 다시 가져와도 같을 수 있습니다.
+            브라우저에서 공고 본문을 복사해 아래에 붙여넣거나 캡처 이미지·PDF를 올려 주세요.
+          </p>
+        ) : null}
       </div>
     );
   if (run.status === "listing")

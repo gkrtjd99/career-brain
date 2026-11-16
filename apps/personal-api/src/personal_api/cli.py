@@ -13,7 +13,8 @@ personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.
 personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
 personal-api restore FILE --merge  # CAREER_API_TOKEN 공간에 합치기 (--on-duplicate skip|fail)
 personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
-personal-api token list|issue|revoke ID  # CAREER_API_TOKEN 공간의 API 토큰 (소유자만, 새 토큰은 한 번만 출력)
+personal-api token list|issue|revoke ID  # CAREER_API_TOKEN 공간의 API 토큰 (소유자만, 새 토큰은 한 번만 출력,
+                                         #   issue --expires-days N: N일 뒤 만료)
 personal-api maintenance         # 모든 공간 주기 유지보수(초안 정리)를 지금 한 번 (serve·worker는 자동)
 """
 
@@ -54,6 +55,7 @@ from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
 from personal_api.identity import (
+    MAX_EXPIRES_DAYS,
     PersonalTokenResolver,
     issue_token,
     list_tokens,
@@ -516,7 +518,12 @@ async def _oauth_link(
 
 
 async def _token(
-    settings: Settings, action: str, *, token_id: str | None = None, label: str | None = None
+    settings: Settings,
+    action: str,
+    *,
+    token_id: str | None = None,
+    label: str | None = None,
+    expires_days: int | None = None,
 ) -> int:
     """토큰 관리. 원문은 새로 발급한 토큰만 한 번 출력하고, 목록에는 ID·이름·상태만 보인다."""
     from uuid import UUID
@@ -531,11 +538,22 @@ async def _token(
         current = os.environ[TOKEN_ENV]
         if action == "list":
             rows = await list_tokens(db, workspace_id=ws, current_token=current)
-            print(f"  {'id':<36}  {'status':<18}  {'created':<16}  label")
+            print(
+                f"  {'id':<36}  {'status':<18}  {'created':<16}  {'expires':<10}  "
+                f"{'last used':<16}  label"
+            )
             for r in rows:
-                status = f"revoked {r.revoked_at:%Y-%m-%d}" if r.revoked_at else "active"
+                if r.revoked_at:
+                    status = f"revoked {r.revoked_at:%Y-%m-%d}"
+                else:
+                    status = "expired" if r.expired else "active"
                 mark = "*" if r.current else " "
-                print(f"{mark} {r.id}  {status:<18}  {r.created_at:%Y-%m-%d %H:%M}  {r.label}")
+                expires = f"{r.expires_at:%Y-%m-%d}" if r.expires_at else "-"
+                used = f"{r.last_used_at:%Y-%m-%d %H:%M}" if r.last_used_at else "-"
+                print(
+                    f"{mark} {r.id}  {status:<18}  {r.created_at:%Y-%m-%d %H:%M}  "
+                    f"{expires:<10}  {used:<16}  {r.label}"
+                )
             print("* = the token in CAREER_API_TOKEN")
             return 0
         if action == "issue":
@@ -543,7 +561,18 @@ async def _token(
             if not name or len(name) > MAX_TOKEN_LABEL:
                 print(f"label must be 1..{MAX_TOKEN_LABEL} characters")
                 return 1
-            token = await issue_token(db, workspace_id=ws, actor_id=actor.subject_id, label=name)
+            if expires_days is not None and not 1 <= expires_days <= MAX_EXPIRES_DAYS:
+                print(f"--expires-days must be 1..{MAX_EXPIRES_DAYS}")
+                return 1
+            token = await issue_token(
+                db,
+                workspace_id=ws,
+                actor_id=actor.subject_id,
+                label=name,
+                expires_days=expires_days,
+            )
+            if expires_days:
+                print(f"expires in {expires_days} day(s)")
             print("new API token (shown once, store it safely):")
             print(token)
             return 0
@@ -575,7 +604,8 @@ async def _maintenance(settings: Settings) -> int:
 
     db = Database(settings.database_url)
     try:
-        report = await run_maintenance(db)
+        # 지금 바로 한다 (간격 무시). 이 시각이 마지막 실행으로 남아 자동 실행은 간격 뒤로 밀린다.
+        report = await run_maintenance(db, interval_seconds=maintenance_interval_seconds())
     finally:
         await db.dispose()
     if not report.ran:
@@ -654,6 +684,9 @@ def main(argv: list[str] | None = None) -> None:
     tk_sub.add_parser("list", help="token ids, labels and status (never the tokens)")
     ti = tk_sub.add_parser("issue", help="issue a new owner token (printed once)")
     ti.add_argument("--label", default="cli")
+    ti.add_argument(
+        "--expires-days", type=int, default=None, help="expire after N days (default: never)"
+    )
     tr = tk_sub.add_parser("revoke", help="revoke a token by id")
     tr.add_argument("id")
     sub.add_parser("maintenance", help="run periodic maintenance (draft purge) for all workspaces")
@@ -732,6 +765,7 @@ def main(argv: list[str] | None = None) -> None:
                     args.token_cmd,
                     token_id=getattr(args, "id", None),
                     label=getattr(args, "label", None),
+                    expires_days=getattr(args, "expires_days", None),
                 )
             )
         )
