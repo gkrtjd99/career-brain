@@ -110,3 +110,23 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - `core.job_fetch_runs` — 가져오기 시도 기록. `status` pending/done/listing/failed, `error_code`, `http_status`, `unchanged`, 목록 페이지면 `candidates`(따라가지 않음), `notes`.
 - 확정하지 않은 초안은 7일 뒤 `purge_unconfirmed`로 정리 (버전·실행 기록은 FK CASCADE).
 - 상세: `docs/architecture/postings.md`.
+
+## 학습 (c0009)
+
+계획 문서 §7의 `assessment_requirements, study_items, attempts, reviews`를 아래 이름으로 구현했다. 모두 RLS FORCE, 공간 복합 FK.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `study_requirements` | 저장 공고 요건 한 줄 (`field` requirements/preferred/process, 확정 당시 `text`). `(workspace_id, posting_id, field, text)` UNIQUE | `SELECT, INSERT` |
+| `study_requirement_claims` | 요건 ↔ 주장 (사용자가 연결). `(requirement_id, claim_id)` UNIQUE | `SELECT, INSERT, DELETE` |
+| `study_assessments` | 시험 준비 (`kind` coding_test/written_test/assignment/interview/certification/other, `status`, 일정은 모르면 비움) | 전체 |
+| `study_items` | 학습 항목 (`status` planned/in_progress/done/dropped, `ck_study_items_completed`: done ⇔ `completed_at`) | 전체 |
+| `study_sessions` | 학습 기록 (분 1–1440, 메모, 자료 제목·URL — 가져오지 않음) | 전체 |
+| `study_attempts` | 응시·풀이 1회 (`result`, 점수 ≤ 만점, 시험 또는 항목 중 하나 이상) | `SELECT, INSERT` |
+| `study_mistakes` | 오답 + 복습 상태 (`repetitions`, `interval_days`, `ease` 천분율, `due_at`). 부분 색인 `(workspace_id, due_at) WHERE status = 'open'` | 전체 |
+| `study_reviews` | 복습 1회 (평가, 전후 간격·배율·다음 날짜) | `SELECT, INSERT` |
+| `study_claim_candidates` | 학습 결과 → 사용자가 올린 확인 대기 주장 (`claim_id` UNIQUE) | `SELECT, INSERT` |
+
+- 선택 연결(`requirement_id`, `assessment_id`, 후보의 `attempt_id`)은 `ON DELETE SET NULL (칸)` — 부모가 지워져도 `workspace_id`는 그대로 둔다 (PostgreSQL 15+).
+- 학습 테이블은 `claims`·`experiences`에 쓰지 않는다. 예외는 사용자가 직접 올린 후보 1건이며 `extracted`로만 생긴다.
+- 상세: `docs/architecture/study.md`.

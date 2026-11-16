@@ -53,3 +53,28 @@ __all__ = [
     "Workspace",
     "normalize_url",
 ]
+
+# O09 학습
+from career_core.db.models import (
+    StudyAssessment,
+    StudyAttempt,
+    StudyClaimCandidate,
+    StudyItem,
+    StudyMistake,
+    StudyRequirement,
+    StudyRequirementClaim,
+    StudyReview,
+    StudySession,
+)
+
+__all__ += [
+    "StudyAssessment",
+    "StudyAttempt",
+    "StudyClaimCandidate",
+    "StudyItem",
+    "StudyMistake",
+    "StudyRequirement",
+    "StudyRequirementClaim",
+    "StudyReview",
+    "StudySession",
+]
