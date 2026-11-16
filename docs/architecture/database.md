@@ -389,9 +389,23 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내지 않는 표라 묶음 변환은 `no_data_change("c0026")`. downgrade: trigger·함수·칸을 지운다.
 - 시험: `test_korean_search_judges_more.py` (주장·경험·지원 문서·지원 삭제, 다른 공간 그대로, trigger 위치·설정).
 
+## 웹 복원을 worker 큐로·비슷한 행 선택 (c0027)
+
+`c0027_restore_worker` (`down_revision = c0026`. 병렬로 만들어 합칠 때 번호 순서로 이었다). 웹 복원의 확인·합치기를 API 프로세스의 백그라운드 작업에서 worker 작업 큐(`core.jobs`, kind `restore`, 대상 = `restore_jobs.id`)로 옮긴다. `core.jobs.kind`에는 CHECK가 없어 큐 쪽 변경은 없다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `restore_jobs.started_by` | 확인·합치기를 시작한 사람 (시작할 때마다 고친다, 올린 사람 `actor_id`는 그대로). worker가 이 사람으로 합치고, 실행 때 이 사람의 지금 역할을 다시 본다. NULL(옛 행)이면 `actor_id` | 그대로 |
+| `restore_jobs.near_choices` | 합치기에서 고른 비슷한 행 쌍 `[{table, incoming_id, existing_id}]` (들어오는 행을 건너뛰고 기존 행으로 잇는 쌍만, `ck_restore_jobs_near_choices`: 배열·1000개 이하). 없으면 기본(둘 다 둠) | 그대로 |
+
+- 큐에서 기다리는 작업(`phase = queued`)은 생존 신호가 오래돼도 끊김이 아니다. 끊김 판정은 큐 작업이 없거나 끝났을 때, 또는 worker가 집은 뒤 lease도 지났을 때만. 끊김으로 닫은 작업은 worker가 나중에 집어도 돌지 않는다 (`runner`·`status` 확인).
+- 신호 간격·끊김 판정 시간은 설정 (`CAREER_RESTORE_HEARTBEAT_SECONDS` 기본 2, `CAREER_RESTORE_STALE_SECONDS` 기본 60, 판정 ≥ 간격×3).
+- `restore_jobs`는 내보내지 않는 표라 묶음 변환 단계는 `no_data_change("c0027")`.
+- 같은 묶음의 코드 변경(migration 없음): 묶음 변환 하한 `SCHEMA_FLOOR` c0018 → c0011 (c0012·c0013·c0014·c0016 단계, c0015·c0018 바뀜 없음), 칸을 그 server default와 함께 더하는 도우미(`read_column_defaults`, `_Archive.add_columns`), 합치기 비슷한 행 보고·선택(`SameExcept.identity`). 상세 `docs/operations/backup.md`.
+
 ## 원본 파싱의 숨김 서식 글 빼기 (c0029)
 
-`c0029_docx_hidden_runs` (`down_revision = c0026`; 병렬로 만들어 합칠 때 번호 순서로 이었다).
+`c0029_docx_hidden_runs` (`down_revision = c0027`; 병렬로 만들어 합칠 때 번호 순서로 이었다).
 
 | 변경 | 내용 | 앱 role |
 |---|---|---|

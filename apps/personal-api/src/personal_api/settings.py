@@ -19,6 +19,11 @@ class Settings:
     max_upload_bytes: int = 20 * 1024 * 1024
     # 웹 복원(백업 묶음 올리기) 상한. 이 경로만 위 상한 대신 이 값을 쓴다.
     max_restore_bytes: int = 2048 * 1024 * 1024
+    # 웹 복원 작업 폴더 (c0027): API가 받은 묶음을 worker가 읽는다 → 두 프로세스가 모두 보는 곳
+    restore_dir: str = "data/restore"
+    # 웹 복원 worker의 진행·생존 신호 간격과, 신호가 끊긴 작업을 interrupted로 보는 시간 (초)
+    restore_heartbeat_seconds: float = 2.0
+    restore_stale_seconds: float = 60.0
     # 모델 엔드포인트·라우트·예산. 없으면 모델 호출은 전부 거부된다. 예시: models.example.toml
     models_config: str = "models.toml"
     # 동적 공고 페이지를 Playwright로 렌더링 (선택 설치: extra `browser` + `playwright install chromium`)
@@ -44,6 +49,11 @@ class Settings:
     # introspection 활성 결과 캐시(초). 인가 서버 폐기 반영 지연의 상한 (프로세스 수와 무관)
     oauth_introspection_cache_seconds: int = 10
 
+    def __post_init__(self) -> None:
+        from career_core.usecases.restore_jobs import check_timing
+
+        check_timing(self.restore_heartbeat_seconds, self.restore_stale_seconds)
+
     @classmethod
     def from_env(cls) -> Settings:
         # 로컬 `.env`(git 제외)로 키·토큰을 둘 수 있다. 셸 환경변수가 우선한다.
@@ -56,6 +66,11 @@ class Settings:
             blob_dir=os.environ.get("CAREER_BLOB_DIR", "data/blobs"),
             max_upload_bytes=int(os.environ.get("CAREER_MAX_UPLOAD_MB", "20")) * 1024 * 1024,
             max_restore_bytes=int(os.environ.get("CAREER_MAX_RESTORE_MB", "2048")) * 1024 * 1024,
+            restore_dir=os.environ.get("CAREER_RESTORE_DIR") or "data/restore",
+            restore_heartbeat_seconds=float(
+                os.environ.get("CAREER_RESTORE_HEARTBEAT_SECONDS", "2")
+            ),
+            restore_stale_seconds=float(os.environ.get("CAREER_RESTORE_STALE_SECONDS", "60")),
             models_config=os.environ.get("CAREER_MODELS_CONFIG", "models.toml"),
             browser_fetch=os.environ.get("CAREER_BROWSER_FETCH", "0").lower() in ("1", "true"),
             vision_confirm_usd=_usd_or_off(os.environ.get("CAREER_VISION_CONFIRM_USD", "0.10")),

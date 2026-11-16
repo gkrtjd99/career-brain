@@ -67,6 +67,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     CAREER_HOST=0.0.0.0 \
     CAREER_PORT=8000 \
     CAREER_BLOB_DIR=/data/blobs \
+    CAREER_RESTORE_DIR=/data/restore \
     CAREER_MODEL_DIR=/data/models \
     CAREER_MODELS_CONFIG=/config/models.toml \
     CAREER_WEB_DIR=/app/web \

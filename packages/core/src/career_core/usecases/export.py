@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import heapq
 import io
@@ -38,7 +39,7 @@ import re
 import tarfile
 import tempfile
 import zlib
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -284,6 +285,61 @@ async def read_catalog(conn: AsyncConnection, schemas: Sequence[str] = SCHEMAS) 
             )
         )
     return sorted(out, key=lambda t: t.name)
+
+
+_CATALOG_DEFAULTS = """
+SELECT n.nspname || '.' || c.relname AS table_name, a.attname AS column_name,
+       pg_get_expr(d.adbin, d.adrelid) AS expr
+FROM pg_attrdef d
+JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+JOIN pg_class c ON c.oid = d.adrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p') AND n.nspname = ANY(:schemas) AND NOT a.attisdropped
+  AND a.attgenerated = ''
+ORDER BY 1, 2
+"""
+# 상수 기본값: 글자·수·참거짓·NULL 하나에 형 변환만 (``'{}'::jsonb``, ``(0)::numeric``, ``'a'::text``).
+# 함수 호출(``now()``·``gen_random_uuid()``)·``CURRENT_TIMESTAMP`` 같은 값은 행마다 달라 쓰지 않는다.
+_CONSTANT_DEFAULT = re.compile(
+    r"\(*(?:'(?:[^']|'')*'|-?\d+(?:\.\d+)?|true|false|NULL)\)*"
+    r"""(?:::[a-z_][a-z0-9_ ."]*(?:\(\d+(?:,\s*\d+)?\))?(?:\[\])*)*"""
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ColumnDefault:
+    """칸의 서버 기본값. ``constant``이면 ``value``가 그 값의 ``to_jsonb`` 모양 (변환 단계가 채운다)."""
+
+    expr: str
+    constant: bool
+    value: Any = None
+
+
+async def read_column_defaults(
+    conn: AsyncConnection, schemas: Sequence[str] = SCHEMAS
+) -> dict[str, dict[str, ColumnDefault]]:
+    """표 → 칸 → 기본값 (pg_catalog). 상수 기본값은 DB가 ``to_jsonb``로 계산한 값을 같이 둔다.
+
+    변환 단계가 칸을 더할 때 ``to_jsonb`` 모양을 손으로 적지 않게 한다 (``_Archive.add_columns``).
+    DEFAULT가 없는 칸은 목록에 없다 (= NULL).
+    """
+    rows = (await conn.execute(text(_CATALOG_DEFAULTS), {"schemas": list(schemas)})).all()
+    constant = [r for r in rows if _CONSTANT_DEFAULT.fullmatch(r.expr.strip())]
+    values: dict[tuple[str, str], Any] = {}
+    for i in range(0, len(constant), 200):
+        chunk = constant[i : i + 200]
+        # 식은 카탈로그가 돌려준 기본값 그대로다 (위 정규식으로 상수 모양만 골랐다).
+        # 매개변수 없이 드라이버에 그대로 보낸다 (글자 값 안의 ``:이름``을 bind로 읽지 않게).
+        cols = ", ".join(f"to_jsonb({r.expr})::text AS d{j}" for j, r in enumerate(chunk))
+        got = (await conn.exec_driver_sql(f"SELECT {cols}")).one()
+        for j, r in enumerate(chunk):
+            values[(r.table_name, r.column_name)] = json.loads(got[j], parse_float=Decimal)
+    out: dict[str, dict[str, ColumnDefault]] = {}
+    for r in rows:
+        key = (r.table_name, r.column_name)
+        out.setdefault(r.table_name, {})[r.column_name] = ColumnDefault(
+            r.expr, key in values, values.get(key)
+        )
+    return out
 
 
 def build_plan(tables: Sequence[Table], excluded: dict[str, str] | None = None) -> ExportPlan:
@@ -806,6 +862,10 @@ class _Archive:
     schema_from: list[str] | None = None
     # 변환 단계가 만들거나 고친 표. 칸 이름은 행마다 대상 DB와 비교한다 (``_check_schema``).
     touched: set[str] = field(default_factory=set)
+    # 대상 DB의 칸 기본값 (``read_column_defaults``). 변환 전에 읽어 둔다 (단계는 DB 없이 돈다).
+    defaults: dict[str, dict[str, ColumnDefault]] | None = None
+    # 단계가 서버 기본값으로 채운 (표, 칸) (시험이 그 revision의 기본값과 같은지 본다)
+    defaults_used: set[tuple[str, str]] = field(default_factory=set)
 
     def path(self, name: str) -> Path:
         return self.table_dir / f"{name}.jsonl"
@@ -874,6 +934,48 @@ class _Archive:
         self.manifest["tables"].remove(entry)
         self.path(name).unlink()
         self.touched.discard(name)
+
+    def column_default(self, table: str, column: str) -> Any:
+        """그 칸의 서버 기본값 (``to_jsonb`` 모양). DEFAULT가 없는 칸은 NULL(None).
+
+        상수 기본값(``false``·``0``·``'{}'::jsonb``·``'pending'::text`` 등)만 쓴다. ``now()``처럼 행마다
+        다른 기본값은 ``upgrade_failed`` — 단계가 값을 직접 정해야 한다 (``add_columns(..., 칸=값)``).
+        대상 DB(이 설치의 head)에서 읽은 값이다: 나중 migration이 기본값을 바꿨으면 그 단계는 옛 값을
+        직접 적는다 (``test_schema_steps_cover_every_migration``이 revision 시점 값과 비교한다).
+        """
+        if self.defaults is None:
+            raise ArchiveError("upgrade_failed", "column defaults were not read for conversion")
+        d = self.defaults.get(table, {}).get(column)
+        self.defaults_used.add((table, column))
+        if d is None:
+            return None
+        if not d.constant:
+            raise ArchiveError(
+                "upgrade_failed", f"default of {table}.{column} is not a constant ({d.expr[:80]})"
+            )
+        return copy.deepcopy(d.value)
+
+    def add_columns(self, table: str, *defaulted: str, **values: Any) -> None:
+        """변환 단계용: 칸 더하기. 이름만 주면 서버 기본값(``column_default``), ``칸=값``이면 그 값.
+
+        행마다 같은 값을 넣는다. 이미 있는 칸이면 ``upgrade_failed`` (단계를 두 번 적용하지 않게).
+        """
+        if not self.has(table):
+            raise ArchiveError("upgrade_failed", f"no table {table} in the archive")
+        add = {c: self.column_default(table, c) for c in defaulted} | values
+
+        def change(row: dict) -> dict:
+            if clash := add.keys() & row.keys():
+                raise ArchiveError("upgrade_failed", f"{table} already has {sorted(clash)}")
+            return {**row, **copy.deepcopy(add)}
+
+        self.rewrite(table, change)
+
+    def ensure_tables(self, *names: str) -> None:
+        """변환 단계용: 옛 묶음에 없던 표를 빈 표로 (이미 있으면 그대로)."""
+        for name in names:
+            if not self.has(name):
+                self.add_table(name)
 
 
 def _json_text(value: Any) -> str:
@@ -1126,7 +1228,9 @@ def _restat(arc: _Archive) -> None:
 #
 # - ``@schema_step("c00NN", "요약")``: 행을 바꾸는 함수 ``(arc) -> None``. 도구는 ``arc.rename_table``,
 #   ``arc.add_table``(빈 표·나눈 표), ``arc.drop_table``, ``arc.rewrite``(행마다 dict → dict/None),
-#   ``arc.iter_rows``. 값은 PostgreSQL ``to_jsonb`` 출력 모양으로 쓴다 (복원 확인이 그 모양으로 비교한다).
+#   ``arc.iter_rows``, ``arc.add_columns(표, "칸", 칸=값)``(이름만 주면 대상 DB 카탈로그의 서버 기본값,
+#   ``arc.column_default``), ``arc.ensure_tables``(없던 표를 빈 표로).
+#   값은 PostgreSQL ``to_jsonb`` 출력 모양으로 쓴다 (복원 확인이 그 모양으로 비교한다).
 #   칸 값이 null인 행에서도 깨지지 않아야 한다 (``test_schema_steps_cover_every_migration``이
 #   모든 칸이 null인 합성 행으로 돌려 본다).
 # - ``no_data_change("c00NN", "이유")``: 내보내는 표의 모양이 그대로인 revision (함수·trigger·색인,
@@ -1146,7 +1250,8 @@ class SchemaStep:
 # migration revision → 그 revision으로 올리는 단계 (또는 바뀜 없음 표시)
 SCHEMA_STEPS: dict[str, SchemaStep] = {}
 # 이 head(포함)부터 만든 묶음을 바꿔 읽는다. 이 다음 revision마다 SCHEMA_STEPS에 하나씩 있어야 한다.
-SCHEMA_FLOOR = "c0018"
+# c0011 = 내보내기가 처음 생긴 head (O11). 그보다 옛 head의 묶음은 있을 수 없다.
+SCHEMA_FLOOR = "c0011"
 
 
 def schema_step(revision: str, summary: str) -> Callable[[SchemaStepFn], SchemaStepFn]:
@@ -1167,18 +1272,69 @@ def _register_step(step: SchemaStep) -> None:
     SCHEMA_STEPS[step.revision] = step
 
 
+@schema_step(
+    "c0012",
+    "공용 문서 복사 출처(source_document_id·source_revision_id = null), 수정안 멱등 키(null), "
+    "새 표 application_stages·document_settings (옛 묶음에는 빈 표)",
+)
+def _schema_c0012(arc: _Archive) -> None:
+    arc.add_columns("core.application_documents", "source_document_id", "source_revision_id")
+    arc.add_columns("core.document_suggestions", "idempotency_key")
+    arc.ensure_tables("core.application_stages", "core.document_settings")
+
+
+@schema_step(
+    "c0013",
+    "학습 항목 합치기 표 study_item_merges, 학습 설정 study_settings (빈 표). "
+    "study_items.status에 merged를 더한 것은 넓히기라 행은 그대로",
+)
+def _schema_c0013(arc: _Archive) -> None:
+    arc.ensure_tables("core.study_item_merges", "core.study_settings")
+
+
+@schema_step(
+    "c0014",
+    "감사 기록 audit_events·삭제 기록 deletions (빈 표). oauth_identities는 내보내지 않음, "
+    "승인 무효화 trigger는 행을 바꾸지 않음",
+)
+def _schema_c0014(arc: _Archive) -> None:
+    arc.ensure_tables("core.audit_events", "core.deletions")
+
+
+no_data_change("c0015", "작업 큐 NOTIFY trigger·유지보수 공간 목록 함수 (작업 큐는 내보내지 않음)")
+
+
+@schema_step(
+    "c0016",
+    "모델 장부 run_id·run_step(null), runs.cost_from_ledger(서버 기본값 false: 그 전 실행은 예전 방식), "
+    "interview_sessions.idempotency_key·interview_questions.request_id(null), "
+    "새 표 document_suggestion_requests·interview_question_requests (빈 표)",
+)
+def _schema_c0016(arc: _Archive) -> None:
+    arc.add_columns("core.model_calls", "run_id", "run_step")
+    arc.add_columns("core.runs", "cost_from_ledger")
+    arc.add_columns("core.interview_sessions", "idempotency_key")
+    arc.add_columns("core.interview_questions", "request_id")
+    arc.ensure_tables("core.document_suggestion_requests", "core.interview_question_requests")
+
+
+no_data_change(
+    "c0018", "삭제 기록 trigger를 12개 표로 넓힘, export_runs.kind에 merge (넓히기만, 행은 그대로)"
+)
 no_data_change(
     "c0019", "승인 대상 버전 함수·trigger, oauth_tokens(내보내지 않음), 감사 보존 함수, 알림"
 )
 no_data_change("c0020", "다음 작업 시각·유지보수 함수, maintenance_schedule·results(내보내지 않음)")
 
 
-@schema_step("c0021", "study_settings → workspace_settings (timezone 그대로, tech_aliases = [])")
+@schema_step(
+    "c0021", "study_settings → workspace_settings (timezone 그대로, tech_aliases = 기본값 [])"
+)
 def _schema_c0021(arc: _Archive) -> None:
     if not arc.has("core.study_settings"):
         return
     arc.rename_table("core.study_settings", "core.workspace_settings")
-    arc.rewrite("core.workspace_settings", lambda row: {**row, "tech_aliases": []})
+    arc.add_columns("core.workspace_settings", "tech_aliases")
 
 
 no_data_change("c0022", "판정 응답 캐시 judge_cache (내보내지 않음)")
@@ -1188,8 +1344,10 @@ no_data_change("c0024", "웹 복원 작업 표 restore_jobs (내보내지 않음
 
 @schema_step("c0025", "스캔 PDF 비전 비용 확인 표 job_fetch_confirmations 추가 (옛 묶음에는 빈 표)")
 def _c0025_fetch_confirmations(arc) -> None:
-    if not arc.has("core.job_fetch_confirmations"):
-        arc.add_table("core.job_fetch_confirmations")
+    arc.ensure_tables("core.job_fetch_confirmations")
+
+
+no_data_change("c0027", "restore_jobs.started_by·near_choices (웹 복원 작업 표는 내보내지 않음)")
 
 
 no_data_change("c0026", "judge_cache 대상 ID·삭제 trigger (judge_cache는 내보내지 않음)")
@@ -1260,6 +1418,15 @@ def convert_schema(arc: _Archive, expected_heads: Sequence[str] | None = None) -
     m["converted_from_heads"] = have
     arc.schema_from = have
     return have
+
+
+async def _convert(db: Database, arc: _Archive, expected_heads: Sequence[str] | None) -> None:
+    """head가 다르면 대상 DB의 칸 기본값을 읽어 둔 뒤 ``convert_schema`` (단계는 스레드에서, DB 없이)."""
+    heads = sorted(expected_heads) if expected_heads is not None else core_migration_heads()
+    if sorted(arc.manifest["migration_heads"]) != heads and arc.defaults is None:
+        async with db.engine.connect() as conn:
+            arc.defaults = await read_column_defaults(conn)
+    await asyncio.to_thread(convert_schema, arc, expected_heads)
 
 
 async def _open_archive(
@@ -1440,7 +1607,7 @@ async def restore_workspace(
         staging = Path(tmp)
         arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
         m = arc.manifest
-        await asyncio.to_thread(convert_schema, arc, expected_heads)
+        await _convert(db, arc, expected_heads)
         source_ws = UUID(m["workspace"]["id"])
         tombstones = await _read_tombstones(deletion_logs, source_ws)
         async with db.engine.connect() as conn:
@@ -1974,13 +2141,40 @@ class SameExcept:
     ``created_at``과 정체를 정하는 칸(제목·문장·문제 등)은 남기므로, 만든 뒤 상태·메모만 바뀐 행을 같은
     행으로 본다. 정체 칸을 고친 행은 다른 행으로 더해진다 (겹침을 놓쳐 행이 하나 늘 뿐, 다른 행을 잘못
     합쳐 잃지는 않는 쪽으로). 같은 내용(``content``) 다음에 본다.
+
+    ``identity``: 사용자가 고칠 수 있는 정체 칸. 이 칸까지 빼면 같은 기존 행(같은 만든 시각·만든 사람·부모)이
+    있으면 "비슷한 행"(``NearDuplicate``)으로 보고에 올린다. 기본은 지금처럼 둘 다 두기, 사용자가 쌍마다
+    "들어오는 행 건너뛰기"를 고르면 기존 행으로 잇는다 (``merge_workspace(near_duplicates=…)``).
     """
 
     ignore: tuple[str, ...]
+    identity: tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
         return "same_except:" + "+".join(self.ignore)
+
+
+# 비슷한 행(정체 칸만 다른 행)을 사용자 선택으로 건너뛴 수의 키 (``MergeTableReport.skipped_by``)
+NEAR_DUPLICATE_KEY = "near_duplicate"
+NEAR_KEEP_BOTH = "keep_both"
+NEAR_SKIP_INCOMING = "skip_incoming"
+# 보고에 올리는 비슷한 행 쌍의 상한 (넘으면 ``near_duplicates_total``만 늘고 나머지는 둘 다 둔다)
+MAX_NEAR_DUPLICATES = 200
+_NEAR_VALUE_CHARS = 300
+
+
+@dataclass(frozen=True, slots=True)
+class NearDuplicate:
+    """정체 칸만 다른 (들어오는 행, 기존 행) 한 쌍. 값은 정체 칸만, 긴 글은 잘라서."""
+
+    table: str
+    incoming_id: str  # 묶음의 ID
+    existing_id: str  # 이 공간의 ID
+    columns: list[str]  # 값이 다른 정체 칸
+    incoming: dict[str, Any]
+    existing: dict[str, Any]
+    decision: str = NEAR_KEEP_BOTH
 
 
 MergeKey = tuple[str, ...] | SameExcept
@@ -2031,10 +2225,17 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
             )
         ),
     ),
-    # 경험: 확인 상태만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행 — 다른 경험을 합쳐 잃지 않게)
-    "core.experiences": (SameExcept(("status", "updated_at")),),
-    # 주장: 확인(상태·확인한 사람·시각). 문장·종류·기여는 정체 칸
-    "core.claims": (SameExcept(("status", "confirmed_by", "confirmed_at", "updated_at")),),
+    # 경험: 확인 상태만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행 — 다른 경험을 합쳐 잃지 않게).
+    # 제목·조직·역할·기간만 다른 행은 비슷한 행으로 보여 주고 고르게 한다
+    "core.experiences": (
+        SameExcept(("status", "updated_at"), ("title", "organization", "role", "period_text")),
+    ),
+    # 주장: 확인(상태·확인한 사람·시각). 문장·종류·기여는 정체 칸 (문장·기여를 고친 행은 비슷한 행)
+    "core.claims": (
+        SameExcept(
+            ("status", "confirmed_by", "confirmed_at", "updated_at"), ("statement", "contribution")
+        ),
+    ),
     # 인터뷰 세션: 상태만 (멱등 키 UNIQUE는 NULL이면 안 걸린다)
     "core.interview_sessions": (SameExcept(("status",)),),
     # 공고 가져오기 기록: 결과 칸은 실행하며 채워진다
@@ -2099,9 +2300,11 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
         SameExcept(("status", "reject_reasons", "applied_revision_id", "updated_at")),
     ),
     # 학습: 상태·메모·일정·완료 시각은 고친다. 제목·종류·요건·만든 시각이 정체
-    "core.study_assessments": (SameExcept(("status", "scheduled_at", "notes", "updated_at")),),
+    "core.study_assessments": (
+        SameExcept(("status", "scheduled_at", "notes", "updated_at"), ("title",)),
+    ),
     "core.study_items": (
-        SameExcept(("status", "notes", "assessment_id", "completed_at", "updated_at")),
+        SameExcept(("status", "notes", "assessment_id", "completed_at", "updated_at"), ("title",)),
     ),
     "core.study_attempts": (SameExcept(("notes",)),),
     "core.study_sessions": (SameExcept(("notes", "resources")),),
@@ -2117,7 +2320,8 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "last_reviewed_at",
                 "reason_note",
                 "updated_at",
-            )
+            ),
+            ("question", "wrong_answer", "correct_answer"),
         ),
     ),
 }
@@ -2177,6 +2381,9 @@ class MergeReport:
     schema_converted_from: list[str] | None = None
     # 합친 지원(넣었거나 겹친)의 열린 승인 중 대상 버전이 바뀌어 닫은 수 (``_recheck_approvals``)
     approvals_invalidated: int = 0
+    # 정체 칸만 다른 (들어오는 행, 기존 행) 쌍과 고른 처리 (``SameExcept.identity``). 상한까지만 싣는다
+    near_duplicates: list[NearDuplicate] = field(default_factory=list)
+    near_duplicates_total: int = 0
 
     @property
     def rows_added(self) -> int:
@@ -2199,6 +2406,11 @@ class _MergeState:
     inserted: dict[str, set[str]]  # 표 → 새로 넣는 행의 (새) ID
     matched: dict[str, set[str]]  # 표 → 겹친 기존 행의 ID
     actors_mapped: int
+    # (표, 묶음 ID) → 건너뛰고 이을 기존 ID (사용자가 "들어오는 행 건너뛰기"를 고른 비슷한 행)
+    near_choices: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    near: list[NearDuplicate] = field(default_factory=list)
+    near_total: int = 0
+    near_used: set[tuple[str, str]] = field(default_factory=set)
 
 
 def _key_order(name_cols: tuple[str, tuple[str, ...]]) -> tuple[int, str]:
@@ -2235,13 +2447,15 @@ async def _match_all(
     ws: UUID,
     me: UUID,
     tick: Progress,
+    near_choices: Mapping[tuple[str, str], str] | None = None,
 ) -> _MergeState:
     """표마다 (FK 순서로) 묶음의 행이 대상 공간에 이미 있는지 정하고, 모든 ID의 새 값을 정한다.
 
     찾는 순서: 같은 ID(그리고 이미 정한 FK 칸이 같음) → DB UNIQUE 제약(내용 주소·주소·멱등 키 먼저) →
     내용 키(``EXTRA_MERGE_KEYS``의 칸 목록·``CHILD_MERGE_KEYS``) → 같은 내용(기본 키 밖 모든 칸, ``content``)
     → 고치는 칸을 뺀 같은 내용(``EXTRA_MERGE_KEYS``의 ``SameExcept``).
-    찾으면 그 기존 행의 ID로, 못 찾으면 새 UUID로.
+    찾으면 그 기존 행의 ID로, 못 찾으면 새 UUID로. 못 찾은 행 중 정체 칸까지 빼면 같은 기존 행이 있으면
+    비슷한 행으로 적고, ``near_choices``에 (표, 묶음 ID) → 그 기존 ID가 있으면 기존 행으로 잇는다.
     키 칸은 부모 표의 결정이 끝난 뒤 바꾼 값으로 비교한다. 아직 정하지 않은 표(뒤 표·같은 표)를 가리키는
     FK 칸이 든 키는 쓰지 않는다. 이번에 넣기로 한 행의 키도 색인에 넣어 묶음 안의 겹침도 잡는다.
     """
@@ -2267,7 +2481,7 @@ async def _match_all(
             ids.set(old, str(me))
             mapped += 1
 
-    state = _MergeState(ids, {}, {}, {}, {}, mapped)
+    state = _MergeState(ids, {}, {}, {}, {}, mapped, near_choices=dict(near_choices or {}))
     decided = {"core.workspaces", "core.actors"}
     for n, t in enumerate(plan.tables):
         tick("match", n, len(plan.tables))
@@ -2279,6 +2493,12 @@ async def _match_all(
             continue
         await _match_table(conn, plan, arc, t, ws, state, decided)
         decided.add(t.name)
+    if stale := set(state.near_choices) - state.near_used:
+        # 확인 뒤 이 공간이 바뀌어 고른 쌍이 더는 그 쌍이 아니다 (다시 확인하고 고른다)
+        table, row = min(stale)
+        raise ArchiveError(
+            "near_duplicate_changed", f"{len(stale)} chosen pair(s), e.g. {table} {row}"
+        )
     tick("match", len(plan.tables), len(plan.tables))
     return state
 
@@ -2324,10 +2544,18 @@ async def _match_table(
     content_skip = set(pk_cols) | unsettled
     # 그다음: 고치는 칸을 뺀 내용 (``SameExcept``)
     loose = [(k.name, content_skip | set(k.ignore)) for k in extra if isinstance(k, SameExcept)]
+    # 마지막: 정체 칸까지 뺀 내용이 같은 **기존** 행 = 비슷한 행 (보고에 올리고 사용자가 고른다)
+    near = [
+        (k.identity, content_skip | set(k.ignore) | set(k.identity))
+        for k in extra
+        if isinstance(k, SameExcept) and k.identity and pk is not None
+    ]
     by_id: dict[str, dict] = {}
     index: dict[str, dict[tuple[str, ...], str]] = {name: {} for name, _ in keys}
     content: dict[str, str] = {}
     loose_index: dict[str, dict[str, str]] = {name: {} for name, _ in loose}
+    near_index: list[dict[str, str]] = [{} for _ in near]
+    near_values: dict[str, dict] = {}
     result = await conn.stream(text(_rows_sql(t)), {"ws": str(ws)})
     async for r in result:
         row = json.loads(r.j, parse_float=Decimal)
@@ -2341,6 +2569,9 @@ async def _match_table(
         content.setdefault(_content_key(row, content_skip), ref)
         for name, skip in loose:
             loose_index[name].setdefault(_content_key(row, skip), ref)
+        for (identity, skip), idx in zip(near, near_index, strict=True):
+            if idx.setdefault(_content_key(row, skip), ref) == ref:
+                near_values[ref] = {c: row.get(c) for c in identity}
     child = CHILD_MERGE_KEYS.get(t.name)
     child_hits: dict[str, str] = {}
     if child is not None and pk is not None:
@@ -2385,6 +2616,9 @@ async def _match_table(
                 if k in loose_index[name]:
                     hit, by = loose_index[name][k], name
                     break
+        if hit is None and near:
+            hit = _near_duplicate(t.name, old, row, near, near_index, near_values, state)
+            by = NEAR_DUPLICATE_KEY
         if hit is not None:
             skipped_by[by] = skipped_by.get(by, 0) + 1
             if pk is not None:
@@ -2403,6 +2637,51 @@ async def _match_table(
         content.setdefault(digest, new)
         for name, k in loose_keys:
             loose_index[name].setdefault(k, new)
+
+
+def _near_duplicate(
+    table: str,
+    old: str,
+    row: dict,
+    near: list[tuple[tuple[str, ...], set[str]]],
+    near_index: list[dict[str, str]],
+    near_values: dict[str, dict],
+    state: _MergeState,
+) -> str | None:
+    """정체 칸만 다른 기존 행이 있으면 적고, 사용자가 건너뛰기를 고른 쌍이면 그 기존 ID (아니면 None)."""
+    for (identity, skip), idx in zip(near, near_index, strict=True):
+        existing = idx.get(_content_key(row, skip))
+        if existing is None:
+            continue
+        theirs = near_values.get(existing, {})
+        mine = {c: row.get(c) for c in identity}
+        chosen = state.near_choices.get((table, old))
+        skip_it = chosen == existing
+        if chosen is not None and skip_it:
+            state.near_used.add((table, old))
+        state.near_total += 1
+        if len(state.near) < MAX_NEAR_DUPLICATES:
+            state.near.append(
+                NearDuplicate(
+                    table=table,
+                    incoming_id=old,
+                    existing_id=existing,
+                    columns=[c for c in identity if mine[c] != theirs.get(c)],
+                    incoming={c: _near_value(v) for c, v in mine.items()},
+                    existing={c: _near_value(theirs.get(c)) for c in identity},
+                    decision=NEAR_SKIP_INCOMING if skip_it else NEAR_KEEP_BOTH,
+                )
+            )
+        return existing if skip_it else None
+    return None
+
+
+def _near_value(value: Any) -> Any:
+    """보고용 값: 글은 잘라서, 그 밖의 값(숫자·JSON)은 정규 JSON 글로."""
+    if value is None or isinstance(value, bool | int):
+        return value
+    out = value if isinstance(value, str) else canonical_json(value)
+    return out if len(out) <= _NEAR_VALUE_CHARS else out[: _NEAR_VALUE_CHARS - 1] + "…"
 
 
 def _content_key(row: dict, skip: set[str]) -> str:
@@ -2438,6 +2717,8 @@ async def merge_workspace(
     deletion_logs: Sequence[str | os.PathLike[str]] = (),
     permissions: PermissionPolicy | None = None,
     progress: Progress | None = None,
+    near_duplicates: Mapping[tuple[str, str], str] | None = None,
+    staging_dir: str | os.PathLike[str] | None = None,
 ) -> MergeReport:
     """묶음을 actor의 (자료가 있는) 공간에 합친다. 소유자(workspace-admin)만.
 
@@ -2449,6 +2730,11 @@ async def merge_workspace(
       넣은 행의 해시 합과 같은지 본다 (추가만 되는 표도 그대로). 다르면 rollback.
     - 한 트랜잭션(REPEATABLE READ)이다. 확인이 끝난 뒤에만 원본을 저장하고 commit. 하나라도 틀리면 아무것도 남지 않는다.
     - ``deletion_logs``(묶음 공간의 나중 삭제 기록)는 이번에 넣은 행에만 적용한다 (기존 행은 ``kept_existing``).
+    - 비슷한 행(``SameExcept.identity``: 정체 칸만 다른 기존 행)은 보고 ``near_duplicates``에 쌍으로 싣는다.
+      기본은 둘 다 둔다(들어오는 행을 새 행으로). ``near_duplicates``에 (표, 묶음 ID) → 기존 ID를 주면 그 쌍은
+      들어오는 행을 건너뛰고 기존 행으로 잇는다 (자식도 기존 행을 가리킨다). 고른 쌍이 더는 그 쌍이 아니면
+      ``near_duplicate_changed``. 사용자가 고른 건너뛰기는 ``fail`` 정책의 겹침으로 세지 않는다.
+    - ``staging_dir``: 묶음을 풀어 둘 폴더 (없으면 시스템 임시 디렉터리). 웹 복원 worker는 작업 폴더를 쓴다.
     """
     if on_duplicate not in DUPLICATE_POLICIES:
         raise ExportError("invalid_policy", on_duplicate[:20])
@@ -2456,11 +2742,11 @@ async def merge_workspace(
         raise ExportError("forbidden")
     tick = progress or _no_progress
     ws = actor.workspace_id
-    with tempfile.TemporaryDirectory(prefix="career-merge-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="career-merge-", dir=staging_dir) as tmp:
         staging = Path(tmp)
         arc, encrypted = await _open_archive(Path(archive), staging, identities, tick)
         m = arc.manifest
-        await asyncio.to_thread(convert_schema, arc, expected_heads)
+        await _convert(db, arc, expected_heads)
         source_ws = UUID(m["workspace"]["id"])
         tombstones = await _read_tombstones(deletion_logs, source_ws)
         async with db.engine.connect() as conn:
@@ -2477,13 +2763,18 @@ async def merge_workspace(
                 )
                 if name is None:
                     raise ExportError("workspace_not_found")
-                state = await _match_all(conn, plan, arc, ws, actor.subject_id, tick)
+                state = await _match_all(
+                    conn, plan, arc, ws, actor.subject_id, tick, near_duplicates
+                )
                 counted = [
                     t.name
                     for t in plan.tables
                     if t.name not in MERGE_SKIPPED_TABLES and t.scope == _WORKSPACE
                 ]
-                dupes = {n: sum(state.skipped_by[n].values()) for n in counted}
+                dupes = {
+                    n: sum(c for k, c in state.skipped_by[n].items() if k != NEAR_DUPLICATE_KEY)
+                    for n in counted
+                }
                 if on_duplicate == "fail" and any(dupes.values()):
                     summary = ", ".join(f"{n} {c}" for n, c in dupes.items() if c)
                     raise ArchiveError("duplicates_found", summary[:500])
@@ -2626,6 +2917,8 @@ async def merge_workspace(
         format_upgraded_from=arc.upgraded_from,
         schema_converted_from=arc.schema_from,
         approvals_invalidated=invalidated,
+        near_duplicates=state.near,
+        near_duplicates_total=state.near_total,
     )
 
 
@@ -2638,13 +2931,18 @@ __all__ = [
     "EXTRA_MERGE_KEYS",
     "FORMAT",
     "FORMAT_VERSION",
+    "MAX_NEAR_DUPLICATES",
     "MERGE_SKIPPED_TABLES",
+    "NEAR_DUPLICATE_KEY",
+    "NEAR_KEEP_BOTH",
+    "NEAR_SKIP_INCOMING",
     "REQUEUE_KINDS",
     "SCHEMA_FLOOR",
     "SCHEMA_STEPS",
     "TOMBSTONE_TABLES",
     "UPGRADES",
     "ArchiveError",
+    "ColumnDefault",
     "ExportError",
     "ExportPlan",
     "ExportReport",
@@ -2652,6 +2950,7 @@ __all__ = [
     "IdMap",
     "MergeReport",
     "MergeTableReport",
+    "NearDuplicate",
     "PlanError",
     "Progress",
     "RestoreReport",
@@ -2670,6 +2969,7 @@ __all__ = [
     "no_data_change",
     "read_archive",
     "read_catalog",
+    "read_column_defaults",
     "read_deletions",
     "readable_versions",
     "restore_workspace",

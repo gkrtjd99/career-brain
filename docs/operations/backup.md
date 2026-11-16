@@ -63,21 +63,30 @@ def _upgrade_v1(arc: _Archive) -> None:
 - 바꾼 묶음은 파일 해시가 묶음과 달라지므로, 복원 확인은 원래 해시 대신 **논리 해시**(행마다 정규 JSON sha256의 합, `--new-ids`와 같은 방식)로 한다. 보고에 `format_upgraded_from`과 노트가 남는다.
 - 형식 1 → 2는 manifest 키 하나를 채우는 것뿐이다 (v1 단계는 사실상 아무것도 바꾸지 않는다). 테스트(`test_older_format_archives_are_upgraded`)가 합성 v1 묶음을 만들어 복원·합치기를 확인하고, 단계가 없는 v0은 거부되는지 본다.
 
-#### 옛 migration head 묶음 (`schema_step`, c0024)
+#### 옛 migration head 묶음 (`schema_step`, c0024 · 하한 c0011)
 
 형식 버전과 별개로, **core migration head가 다른 묶음**(그 사이 migration이 표·칸을 바꾼 묶음)도 읽는다. `SCHEMA_STEPS`에 migration revision마다 하나씩 등록한 단계를, 묶음의 head **다음** revision부터 이 설치의 head까지 차례로 적용한다.
 
 | revision | 등록 | 하는 일 |
 |---|---|---|
+| c0012 | `schema_step` | `application_documents`에 `source_document_id`·`source_revision_id`(null), `document_suggestions`에 `idempotency_key`(null), 새 표 `application_stages`·`document_settings`(빈 표) |
+| c0013 | `schema_step` | 새 표 `study_item_merges`·`study_settings` (빈 표. `study_items.status`는 값만 넓어짐) |
+| c0014 | `schema_step` | 새 표 `audit_events`·`deletions` (빈 표) |
+| c0015 | `no_data_change` | 작업 큐 NOTIFY trigger·유지보수 함수뿐 |
+| c0016 | `schema_step` | `model_calls`에 `run_id`·`run_step`, `runs`에 `cost_from_ledger`(server default `false`), `interview_sessions`에 `idempotency_key`, `interview_questions`에 `request_id`, 새 표 `document_suggestion_requests`·`interview_question_requests` |
+| c0018 | `no_data_change` | trigger·`export_runs.kind` 넓힘 (형식 2는 `UPGRADES`가 맡는다) |
 | c0019 | `no_data_change` | 승인 함수·trigger, 내보내지 않는 표뿐 |
 | c0020 | `no_data_change` | 유지보수 함수·내보내지 않는 표뿐 |
 | c0021 | `schema_step` | `core.study_settings` → `core.workspace_settings` (이름 바꾸기, `timezone` 그대로, `tech_aliases = []`) |
+| c0022·c0023 | `no_data_change` | `judge_cache`·`jobs.lease_token` (내보내지 않음) |
 | c0024 | `no_data_change` | `restore_jobs`(내보내지 않음) |
+| c0025 | `schema_step` | 새 표 `job_fetch_confirmations` (빈 표) |
+| c0027 | `no_data_change` | `restore_jobs.started_by`·`near_choices` (내보내지 않음) |
 
-- 받는 head의 하한은 `SCHEMA_FLOOR = "c0018"`(형식 2가 생긴 head)이다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
+- 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
 - 복원 확인은 논리 해시(행 정규 JSON)로 한다. 보고에 `schema_converted_from`(원래 head)과 노트 `archive migrations c0020 were converted to …`가 남는다. CLI·웹 복원·합치기 모두 같다.
-- 시험: `test_archive_from_an_older_migration_head_is_converted`는 임시 DB를 c0020까지만 올려 거기서 **진짜 옛 묶음**(`study_settings` 행 포함)을 만들고, 지금 head로 새 ID 복원·합치기를 해 본다.
+- 시험: `test_archive_from_an_older_migration_head_is_converted`는 임시 DB를 c0020까지만 올려 거기서 **진짜 옛 묶음**(`study_settings` 행 포함)을 만들고, 지금 head로 새 ID 복원·합치기를 해 본다. `test_archive_from_heads_before_c0018_is_converted`는 c0011~c0016 head마다 임시 DB를 그 head까지 올려 합성 자료(실행·모델 장부·인터뷰 포함)로 묶음을 만들고(형식 1로 적음), 지금 head로 새 ID 복원과 합치기 dry-run(더할 행 0)을 해 본다.
 
 **migration이 내보내는 표의 모양을 바꿀 때 (필수)** — 표를 더하거나 지우거나, 칸 이름·타입을 바꾸거나, 칸을 더하면 `career_core/usecases/export.py`에 같은 revision으로 단계를 더한다:
 
@@ -100,7 +109,8 @@ def _schema_c0031(arc: _Archive) -> None:
 no_data_change("c0032", "색인·함수만")  # 내보내는 표의 모양이 그대로면
 ```
 
-- 도구: `arc.rewrite(표, 행 → 행|None)`, `arc.rename_table(옛, 새)`, `arc.add_table(표, rows=())`(빈 표·나눈 표), `arc.drop_table(표)`, `arc.iter_rows(표)`(합치기·나누기에서 다른 표 읽기), `arc.has(표)`.
+- 도구: `arc.rewrite(표, 행 → 행|None)`, `arc.rename_table(옛, 새)`, `arc.add_table(표, rows=())`(빈 표·나눈 표), `arc.ensure_tables(표, …)`(없으면 빈 표), `arc.drop_table(표)`, `arc.iter_rows(표)`(합치기·나누기에서 다른 표 읽기), `arc.has(표)`.
+- **칸 더하기**: `arc.add_columns(표, "server default를 쓰는 칸", …, 칸=값)`. 이름만 준 칸은 **대상 DB 카탈로그의 server default**(`pg_attrdef`)를 그 칸 값으로 넣는다 — 위 예의 `row["priority"] = 0`처럼 기본값을 코드에 다시 적지 않는다. DEFAULT가 없는 칸은 null. 기본값은 변환을 시작할 때 `read_column_defaults`가 대상 DB에서 한 번 읽어(`to_jsonb(<식>)`, 상수 식만) 묶음에 붙인다. `now()`·`gen_random_uuid()`처럼 상수가 아닌 기본값은 `upgrade_failed: default of <표>.<칸> is not a constant` — 그런 칸은 값을 직접 준다 (`칸=값`). 이미 있는 칸을 더하면 `upgrade_failed`. 하나의 기본값은 `arc.column_default(표, 칸)`. c0016(`runs.cost_from_ledger`)·c0021(`workspace_settings.tech_aliases`)이 이것을 쓴다; 시험은 쓴 기본값이 지금 head의 카탈로그 값과 같은지도 본다 (`test_schema_steps_cover_every_migration`, `test_column_defaults_from_the_catalog`).
 - 값은 PostgreSQL `to_jsonb` 출력 모양으로 쓴다 (시각은 `2026-11-17T09:00:00+00:00`, numeric은 그대로). 복원 확인이 DB가 다시 내놓은 행과 비교한다.
 - 칸 값이 null인 행에서도 깨지지 않게 쓴다. `test_schema_steps_cover_every_migration`이 migration을 하나씩 올리며 (1) `SCHEMA_FLOOR` 다음 모든 revision에 등록이 있는지, (2) `no_data_change` revision의 앞뒤 카탈로그가 같은지, (3) 단계를 앞 모양의 합성 묶음(칸이 모두 null인 행 하나씩)에 적용하면 뒤 모양의 표·칸이 되는지 본다. 등록을 빠뜨리거나 표시가 틀리면 이 시험이 실패한다.
 - 내보내지 않는 표(`EXCLUDED_TABLES`)·함수·trigger·색인만 바꾸면 `no_data_change`.
@@ -186,6 +196,18 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   3. DB 제약은 없지만 같은 것으로 보는 키: 블록은 (파싱 실행, 순번), 원본은 자식 버전의 sha256 (업로드 중복 방지와 같은 규칙).
   4. 같은 내용 (`content`): 기본 키를 뺀 모든 칸의 정규 JSON이 같다.
   5. 고치는 칸을 뺀 같은 내용 (`same_except:<칸>+…`, c0024): 표마다 나중에 바뀌는 칸(상태·진행·메모·`updated_at` 등)만 빼고 나머지(만든 시각·정체 칸 포함)가 같으면 같은 행. 묶음을 만든 뒤 상태·메모만 바뀐 행이 또 더해지지 않는다.
+  6. **비슷한 행** (`near_duplicate`, 고를 때만): 5에서 정체 칸(아래 표)까지 빼고 같은 **기존** 행. 기본은 둘 다 둔다 (들어오는 행을 새 행으로, 지금까지와 같음). 보고 `near_duplicates`에 쌍마다 표·들어오는 ID·기존 ID·다른 칸·두 행의 정체 칸 값(칸마다 300자까지)과 처리(`keep_both`/`skip_incoming`)가 나온다. 합치기에 `near_duplicates=[{table, incoming_id, existing_id}]`로 "들어오는 행 건너뛰기"를 고른 쌍만 기존 행으로 잇는다 (자식 행의 FK도 기존 행으로). 정체 칸이 다른 쌍은 `--on-duplicate fail`의 겹침으로 세지 않는다.
+
+  | 표 | 정체 칸 (비슷한 행에서 더 빼는 칸) |
+  |---|---|
+  | `experiences` | 제목·조직·역할·기간 |
+  | `claims` | 문장·기여 |
+  | `study_assessments`·`study_items` | 제목 |
+  | `study_mistakes` | 문제·틀린 답·정답 |
+
+  - 보고에는 앞 200쌍(`MAX_NEAR_DUPLICATES`)만 싣고 모두의 수는 `near_duplicates_total`. 보고에 없는 쌍은 고를 수 없다 (둘 다 둠).
+  - 고른 쌍이 그 사이 맞지 않으면(확인 뒤 자료가 바뀌어 그 기존 행이 더 비슷한 행이 아니면) 아무것도 하지 않고 `near_duplicate_changed: <표> <들어오는 ID>`.
+  - 기존 행끼리만 비교한다 (묶음 안 행끼리는 아님). 웹 복원은 확인 보고에서 쌍마다 고른다. CLI `--merge`는 고르지 않고 둘 다 두며, 쌍 수와 앞 10쌍을 출력한다.
 
   표별 내용 키 (`EXTRA_MERGE_KEYS`). 원칙: `created_at`과 정체를 정하는 칸(제목·문장·문제·입력)은 남기고, 사용하며 바뀌는 칸만 뺀다. 정체 칸을 고친 행은 다른 행으로 더해진다 — 겹침을 놓쳐 행이 하나 느는 쪽이, 다른 행을 잘못 합쳐 잃는 쪽보다 낫다.
 
@@ -227,18 +249,18 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
 | `POST /api/core/maintenance/restore` (본문 = 파일 그대로, `Content-Type: application/octet-stream`·`application/gzip`, 선택 `X-Filename`) | 임시 폴더에 흘려 받고 sha256을 잰다 → 작업(201) |
 | `GET …/restore` | 이 공간의 지금 작업 (없으면 404). 화면을 다시 열면 이어 본다 |
 | `POST …/restore/{id}/deletions` (본문 = jsonl) | 삭제 기록을 붙인다 (머리말·공간 검사, 잘못되면 400) |
-| `POST …/restore/{id}/verify` `{on_duplicate, identity?}` | 배경에서 dry-run (202) |
+| `POST …/restore/{id}/verify` `{on_duplicate, identity?}` | worker 큐에 dry-run을 넣는다 (202, 단계 `queued`) |
 | `GET …/restore/{id}` | 상태 `uploaded`→`verifying`→`verified`→`applying`→`done`/`failed`, 단계(`read`·`decrypt`·`match`·`insert`·`verify`·`deletions`·`blobs`·`commit`)와 진행 수, 보고, 실행 중이면 `heartbeat_at` |
-| `POST …/restore/{id}/apply` `{on_duplicate, identity?, archive_sha256}` | 확인한 파일·정책과 같을 때만 합치기 (아니면 409 `not_verified`·`archive_changed`·`policy_changed`) |
-| `DELETE …/restore/{id}` | 작업과 임시 파일 지우기 |
+| `POST …/restore/{id}/apply` `{on_duplicate, identity?, archive_sha256, near_duplicates?}` | 확인한 파일·정책과 같을 때만 worker 큐에 합치기를 넣는다 (아니면 409 `not_verified`·`archive_changed`·`policy_changed`). `near_duplicates`: 확인 보고의 비슷한 행 쌍 중 들어오는 행을 건너뛸 것 `[{table, incoming_id, existing_id, decision: "skip_incoming"}]` (보고에 없는 쌍은 409 `near_duplicate_unknown`, 1000개까지) |
+| `DELETE …/restore/{id}` | 작업과 임시 파일 지우기 (큐에서 기다리는 작업이면 큐 작업도 닫는다) |
 
 - **본문 상한**: 이 업로드 경로(`POST /api/core/maintenance/restore`) 하나만 `CAREER_MAX_RESTORE_MB`(기본 2048)을 쓴다. 다른 경로는 `CAREER_MAX_UPLOAD_MB` 그대로. 넘으면 413 `too_large` (받던 파일은 지운다). 리버스 프록시 상한(`client_max_body_size` 등)도 같이 올린다.
-- **임시 폴더만**: 올린 파일은 `CAREER_RESTORE_DIR`(없으면 시스템 임시 디렉터리)의 `career-restore-upload-<작업 ID>` 폴더에만 둔다 (권한 0700). 합치기가 끝나거나(`done`), 지우거나, 1시간 쓰지 않으면 폴더째 지운다. 작업을 읽거나 돌리거나 받는 동안 폴더 시각을 고치고, 서버 시작·새 업로드 때 그 시각이 1시간 넘은 폴더를 지운다 (다른 프로세스·비정상 종료가 남긴 것 포함). 폴더 수 상한은 8개(넘으면 429). 원본 저장소에는 합치기가 commit할 때 필요한 원본만 들어간다. 지워진 파일로 확인·합치기를 시작하면 410 `upload_missing`(다시 올린다).
-- **age 신원**: 확인·합치기 요청 본문으로만 보낸다 (형식이 틀리면 바로 400 `invalid_identity`). 서버는 그 작업 동안만 0600 임시 파일로 두고 지운다. 저장하지 않는다.
+- **작업 폴더만**: 올린 파일은 `CAREER_RESTORE_DIR`(개인 앱 기본 `data/restore`, 이미지 `/data/restore`. 설정이 없는 조립은 시스템 임시 디렉터리)의 `career-restore-upload-<작업 ID>` 폴더에만 둔다 (권한 0700). 합치기가 끝나거나(`done`), 지우거나, 1시간 쓰지 않으면 폴더째 지운다. 작업을 읽거나 돌리거나 받는 동안 폴더 시각을 고치고, 서버 시작·새 업로드 때 그 시각이 1시간 넘은 폴더를 지운다 (다른 프로세스·비정상 종료가 남긴 것 포함). 폴더 수 상한은 8개(넘으면 429). 원본 저장소에는 합치기가 commit할 때 필요한 원본만 들어간다. 지워진 파일로 확인·합치기를 시작하면 410 `upload_missing`(다시 올린다).
+- **age 신원**: 확인·합치기 요청 본문으로만 보낸다 (형식이 틀리면 바로 400 `invalid_identity`). API가 작업 폴더에 0600 파일(`identity-key.txt`)로 두고, worker가 쓴 뒤 지운다 — worker가 집기 전까지(큐에서 기다리는 동안) 폴더에 남는다. 작업 지우기·끊김 정리·폴더 정리 때도 지운다. DB에는 저장하지 않는다.
 - **작업 상태는 DB에 있다** (c0024 `core.restore_jobs`, 공간마다 하나, FORCE RLS). 어느 API 프로세스로 요청이 가도 같은 작업을 보고, 서버를 다시 시작해도 남는다. 진행 중이면 같은 공간의 새 작업은 409 `restore_busy`. 확인·합치기 시작은 조건부 UPDATE라 두 프로세스가 같이 시작하지 못한다.
-- **배경 작업은 시작한 프로세스에서 돈다.** 2초마다 진행 수와 생존 신호(`heartbeat_at`)를 DB에 쓴다. 신호가 60초 넘게 없는 실행 중 작업은 읽는 쪽이 `failed` / `interrupted`("stopped during <단계>")로 닫는다 — 서버 재시작·죽은 프로세스. 합치기는 한 트랜잭션이라 끊기면 아무것도 바뀌지 않았다. 파일은 남아 있으므로 같은 작업을 다시 확인하면 된다 (commit 직후 끊겼다면 다시 확인이 "더할 행 0"을 보여 준다).
-- **여러 프로세스·컨테이너**: `CAREER_RESTORE_DIR`를 모두가 보는 같은 폴더(같은 볼륨, 예: `/data/restore-uploads`)로 둔다. 서비스 조립은 `CoreDeps(restore_dir=…)`로도 준다. 폴더가 프로세스마다 다르면 다른 프로세스는 파일을 못 찾아 `upload_missing`이 된다.
-- 화면: 묶음 올리기는 XHR `upload.onprogress`로 보낸 바이트·퍼센트를 보여 주고 멈출 수 있다 (fetch 본문은 진행률이 없다). 받은 뒤에는 1초마다 상태를 읽어 단계와 진행 막대를 보여 준다. 화면을 다시 열면 `GET …/restore`로 지금 작업을 이어 보고, 파일을 다시 고르지 않아도 서버에 남은 파일로 다시 확인할 수 있다. 끝나면 유지보수 정보에 "마지막 합치기"가 보인다. 상한은 그대로 이 경로만 `CAREER_MAX_RESTORE_MB`.
+- **확인·합치기는 worker가 돈다** (c0027). 시작 요청은 상태를 바꾸는 조건부 UPDATE와 같은 트랜잭션에서 작업 큐에 `restore` 작업(대상 = 복원 작업 ID)을 넣고 202를 돌려준다. 그래서 API 프로세스가 큰 묶음을 풀고 합치는 동안 묶이지 않고, API를 다시 시작해도 작업은 계속된다. worker는 시작한 사람(`started_by`)의 **지금** 역할로 합친다 (그 사이 소유자가 아니면 `failed`/`forbidden`). worker가 없으면(`serve --no-worker`만 띄움) 작업은 `queued`에 머문다 — 화면에서 취소할 수 있다. 실행 중에는 `CAREER_RESTORE_HEARTBEAT_SECONDS`(기본 2)초마다 진행 수와 생존 신호(`heartbeat_at`)를 DB에 쓴다. 큐에서 기다리는 작업은 오래 기다려도 끊긴 것이 아니다. 실행 중인데 신호가 `CAREER_RESTORE_STALE_SECONDS`(기본 60)초 넘게 없으면 (worker가 집은 뒤 lease도 지났거나 큐 작업이 없으면) 읽는 쪽이 `failed` / `interrupted`("stopped during <단계>")로 닫는다 — worker 재시작·죽은 프로세스. 닫힌 작업은 worker가 나중에 집어도 돌지 않는다. 자동 재시도는 하지 않는다. 합치기는 한 트랜잭션이라 끊기면 아무것도 바뀌지 않았다. 파일은 남아 있으므로 같은 작업을 다시 확인하면 된다 (commit 직후 끊겼다면 다시 확인이 "더할 행 0"을 보여 준다).
+- **API와 worker가 같은 폴더를 본다**: `CAREER_RESTORE_DIR`를 API·worker 모두가 읽고 쓰는 같은 폴더(같은 볼륨, 예: `/data/restore`)로 둔다. 서비스 조립은 `CoreDeps(restore_dir=…)`와 worker의 `restore_handlers(RestoreDeps(root=…))`로 준다. 폴더가 프로세스마다 다르면 worker가 파일을 못 찾아 `upload_missing`이 된다. 합치기의 원본 풀기(staging)도 그 작업 폴더 안에서 한다 (컨테이너의 작은 `/tmp` tmpfs를 쓰지 않는다).
+- 화면: 확인이 끝나면 비슷한 행 쌍(위 6)을 두 행의 정체 칸 값과 함께 보여 주고, 쌍마다 "둘 다 두기"(기본)·"들어오는 행 건너뛰기"를 고른 뒤 합친다. 끝난 보고에는 고른 처리가 남는다. 묶음 올리기는 XHR `upload.onprogress`로 보낸 바이트·퍼센트를 보여 주고 멈출 수 있다 (fetch 본문은 진행률이 없다). 받은 뒤에는 1초마다 상태를 읽어 단계와 진행 막대를 보여 준다. 화면을 다시 열면 `GET …/restore`로 지금 작업을 이어 보고, 파일을 다시 고르지 않아도 서버에 남은 파일로 다시 확인할 수 있다. 끝나면 유지보수 정보에 "마지막 합치기"가 보인다. 상한은 그대로 이 경로만 `CAREER_MAX_RESTORE_MB`.
 - 원본 저장소가 없는 설치(`restore_available=false`)에서는 화면에 CLI 안내만 나온다.
 
 ### 대기 작업 다시 넣기

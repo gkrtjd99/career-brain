@@ -1,6 +1,6 @@
 // 시스템 화면 "백업·유지보수" 탭: 저장된 자료, 내보내기, 웹 복원(합치기), 초안 정리.
 // System.tsx에서 떼어 낸 파일이다 (다른 탭과 따로 고칠 수 있게).
-import type { DuplicatePolicy, Maintenance, RestoreJob } from "@career-brain/client";
+import type { DuplicatePolicy, Maintenance, NearChoice, NearDecision, NearDuplicate, RestoreJob } from "@career-brain/client";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Select, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
@@ -54,10 +54,13 @@ const RESTORE_ERROR: Record<string, string> = {
   upload_failed: "업로드가 끊겼습니다. 연결을 확인하고 다시 하세요.",
   upload_cancelled: "업로드를 멈췄습니다.",
   internal_error: "서버 오류로 멈췄습니다. 서버 기록을 확인하세요.",
+  forbidden: "합칠 권한이 없습니다 (소유자만). 역할이 바뀌었는지 확인하세요.",
+  near_duplicate_unknown: "확인 보고에 없는 비슷한 행 쌍입니다. 다시 확인하세요.",
+  near_duplicate_changed: "확인한 뒤 이 공간의 자료가 바뀌어 고른 비슷한 행이 맞지 않습니다. 다시 확인하고 고르세요.",
 };
 
 const PHASE: Record<string, string> = {
-  queued: "시작하는 중",
+  queued: "작업 큐에서 차례를 기다리는 중 (worker)",
   read: "묶음 읽는 중",
   decrypt: "암호 푸는 중",
   match: "겹치는 자료 찾는 중",
@@ -103,7 +106,16 @@ const short = (name: string) => name.replace(/^core\./, "");
 const running = (job: RestoreJob | RestoreJobMore | null | undefined) =>
   job?.status === "verifying" || job?.status === "applying";
 const keyLabel = (k: string) =>
-  k === "id" ? "같은 ID" : k === "content" ? "같은 내용" : k.startsWith("same_except:") ? "같은 내용(상태·메모·시각 제외)" : k;
+  k === "id"
+    ? "같은 ID"
+    : k === "content"
+      ? "같은 내용"
+      : k === "near_duplicate"
+        ? "비슷한 행(고른 건너뛰기)"
+        : k.startsWith("same_except:")
+          ? "같은 내용(상태·메모·시각 제외)"
+          : k;
+const nearKey = (p: { table: string; incoming_id: string }) => `${p.table}:${p.incoming_id}`;
 
 export function MaintenanceTab() {
   const qc = useQueryClient();
@@ -256,6 +268,8 @@ function RestorePanel({ m }: { m: Maintenance }) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [upload, setUpload] = useState<UploadProgress | null>(null);
+  // 비슷한 행 쌍마다 고른 처리 (없으면 둘 다 둠 = 기본)
+  const [near, setNear] = useState<Record<string, NearDecision>>({});
   const abort = useRef<AbortController | null>(null);
   const key = ["restore-job", jobId] as const;
   const job = useQuery({
@@ -323,17 +337,28 @@ function RestorePanel({ m }: { m: Maintenance }) {
     },
     onSuccess: setJob,
   });
+  const nearChoices = (): NearChoice[] =>
+    ((current?.report ?? null) as MergeReportMore | null)?.near_duplicates
+      ?.filter((p) => near[nearKey(p)] === "skip_incoming")
+      .map((p) => ({ table: p.table, incoming_id: p.incoming_id, existing_id: p.existing_id, decision: "skip_incoming" })) ?? [];
   const apply = useMutation({
     mutationFn: () =>
-      api.applyRestore(current!.id, { on_duplicate: policy, archive_sha256: current!.sha256, identity: secret() }),
+      api.applyRestore(current!.id, {
+        on_duplicate: policy,
+        archive_sha256: current!.sha256,
+        identity: secret(),
+        near_duplicates: nearChoices(),
+      }),
     onSuccess: (j) => {
       setConfirm(false);
       setJob(j);
     },
   });
+  // 큐에서 아직 기다리는 작업은 취소할 수 있다 (worker가 집기 전)
+  const waiting = running(current) && current?.phase === "queued";
   const reset = useMutation({
     mutationFn: async () => {
-      if (jobId && !running(current)) await api.discardRestore(jobId).catch(() => undefined);
+      if (jobId && (!running(current) || waiting)) await api.discardRestore(jobId).catch(() => undefined);
     },
     onSettled: () => {
       qc.setQueryData(["restore-current"], null); // 지운 작업을 다시 잇지 않게
@@ -341,6 +366,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
       setFile(null);
       setDeletionLog(null);
       setIdentity("");
+      setNear({});
       sent.current = { archive: null, deletions: null };
       check.reset();
       apply.reset();
@@ -410,7 +436,9 @@ function RestorePanel({ m }: { m: Maintenance }) {
               disabled={busy}
               className="font-mono text-xs"
             />
-            <p className="text-xs text-muted">확인·합치기 요청에만 실어 보내고, 서버는 그 작업 동안만 임시 파일로 둔 뒤 지웁니다.</p>
+            <p className="text-xs text-muted">
+              확인·합치기 요청에만 실어 보내고, 서버는 worker가 쓸 때까지 작업 폴더에 본인만 읽는 파일로 둔 뒤 지웁니다.
+            </p>
           </div>
         ) : null}
       </div>
@@ -430,7 +458,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
         {upload ? (
           <Button onClick={() => abort.current?.abort()}>업로드 멈추기</Button>
         ) : jobId || file ? (
-          <Button disabled={running(current) || reset.isPending} onClick={() => reset.mutate()}>
+          <Button disabled={(running(current) && !waiting) || reset.isPending} onClick={() => reset.mutate()}>
             {current?.status === "done" ? "새로 하기" : "취소"}
           </Button>
         ) : null}
@@ -439,6 +467,14 @@ function RestorePanel({ m }: { m: Maintenance }) {
       {upload ? <UploadBar progress={upload} name={file?.name} /> : null}
       {current && !upload ? <JobStatus job={current} /> : null}
       <Problem error={check.error ?? apply.error ?? job.error} />
+      {report?.near_duplicates?.length ? (
+        <NearDuplicates
+          report={report}
+          choices={near}
+          editable={current?.status === "verified" && !busy}
+          onChange={(key, d) => setNear((prev) => ({ ...prev, [key]: d }))}
+        />
+      ) : null}
       {report ? <ReportView report={report} /> : null}
 
       <ConfirmDialog
@@ -447,7 +483,11 @@ function RestorePanel({ m }: { m: Maintenance }) {
         title="이 공간에 합칠까요?"
         description={
           report
-            ? `${report.source_workspace_name}의 묶음에서 ${int(report.rows_added)}행과 원본 ${int(report.blobs)}개를 더합니다. 기존 자료는 바뀌지 않습니다. 더한 행은 하나씩 지워야 되돌릴 수 있습니다.`
+            ? `${report.source_workspace_name}의 묶음에서 ${int(report.rows_added)}행과 원본 ${int(report.blobs)}개를 더합니다.${
+                nearChoices().length
+                  ? ` 비슷한 행 ${nearChoices().length}쌍은 들어오는 행을 건너뛰고 기존 행으로 이어서 더하는 행이 그만큼(과 그 자식만큼) 줄어듭니다.`
+                  : ""
+              } 기존 자료는 바뀌지 않습니다. 더한 행은 하나씩 지워야 되돌릴 수 있습니다.`
             : ""
         }
         confirmLabel="합치기"
@@ -456,6 +496,91 @@ function RestorePanel({ m }: { m: Maintenance }) {
         onConfirm={() => apply.mutate()}
       />
     </div>
+  );
+}
+
+const COLUMN_LABEL: Record<string, string> = {
+  title: "제목",
+  organization: "조직",
+  role: "역할",
+  period_text: "기간",
+  statement: "문장",
+  contribution: "기여",
+  question: "문제",
+  wrong_answer: "틀린 답",
+  correct_answer: "정답",
+};
+
+function shown(v: unknown) {
+  if (v === null || v === undefined || v === "") return "—";
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/** 정체 칸만 다른 (들어오는 행, 기존 행) 쌍: 쌍마다 "둘 다 두기"(기본) 또는 "들어오는 행 건너뛰기". */
+function NearDuplicates({
+  report,
+  choices,
+  editable,
+  onChange,
+}: {
+  report: MergeReportMore;
+  choices: Record<string, NearDecision>;
+  editable: boolean;
+  onChange: (key: string, decision: NearDecision) => void;
+}) {
+  const pairs: NearDuplicate[] = report.near_duplicates ?? [];
+  const total = report.near_duplicates_total ?? pairs.length;
+  return (
+    <details className="text-[13px]" open>
+      <summary className="cursor-pointer text-muted">
+        비슷한 행 {int(total)}쌍 {report.dry_run ? "— 합치기 전에 고르세요" : "— 고른 처리"}
+      </summary>
+      <p className="mt-1 text-xs text-muted">
+        만든 시각·만든 사람이 같고 제목·문장 같은 칸만 다른 행입니다. 기본은 둘 다 둡니다 (들어오는 행을 새 행으로). 같은 자료를
+        고친 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
+        {total > pairs.length ? ` 앞 ${pairs.length}쌍만 보여 주고, 나머지는 둘 다 둡니다.` : ""}
+      </p>
+      <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+        {pairs.map((p) => {
+          const key = nearKey(p);
+          const decision = report.dry_run ? (choices[key] ?? "keep_both") : p.decision;
+          return (
+            <li key={key} className="space-y-1.5 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">{short(p.table)}</span>
+                <span className="text-xs text-muted">다른 칸: {p.columns.map((c) => COLUMN_LABEL[c] ?? c).join(", ") || "—"}</span>
+              </div>
+              <dl className="grid grid-cols-1 gap-x-3 gap-y-0.5 text-xs md:grid-cols-[auto_1fr_1fr]">
+                <span className="hidden md:block" />
+                <span className="hidden text-muted md:block">이 공간 (기존)</span>
+                <span className="hidden text-muted md:block">묶음 (들어옴)</span>
+                {Object.keys(p.incoming).map((c) => (
+                  <div key={c} className="contents">
+                    <dt className="text-muted">{COLUMN_LABEL[c] ?? c}</dt>
+                    <dd className="min-w-0 break-words">{shown(p.existing[c])}</dd>
+                    <dd className={`min-w-0 break-words ${p.columns.includes(c) ? "text-warn" : ""}`}>{shown(p.incoming[c])}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="flex flex-wrap gap-3 text-xs" role="radiogroup" aria-label={`${short(p.table)} 처리`}>
+                {(["keep_both", "skip_incoming"] as const).map((d) => (
+                  <label key={d} className="flex items-center gap-1.5">
+                    <input
+                      type="radio"
+                      name={`near-${key}`}
+                      checked={decision === d}
+                      disabled={!editable}
+                      onChange={() => onChange(key, d)}
+                    />
+                    {d === "keep_both" ? "둘 다 두기" : "들어오는 행 건너뛰기"}
+                  </label>
+                ))}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 

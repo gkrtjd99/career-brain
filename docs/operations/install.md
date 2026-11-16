@@ -175,7 +175,8 @@ personal-api token extend <id> --days 90   # 만료를 지금부터 90일 뒤로
 - PostgreSQL: `deploy/docker/compose.yaml`의 `command`. 기본은 1GB 서버용(`shared_buffers=128MB`, `max_connections=40`, 병렬 질의·JIT 끔). RAM이 넉넉하면 `.env`의 `CAREER_PG_SHARED_BUFFERS`(RAM 25%)와 `CAREER_PG_EFFECTIVE_CACHE`(RAM 50%)를 올린다.
 - 작업 깨우기: worker는 `LISTEN career_jobs`로 새 작업을 바로 알아채고, 알림을 놓쳤을 때를 위해 `CAREER_WORKER_POLL_SECONDS`(기본 30초)마다 한 번 확인한다. 알림이 오지 않는 작업(죽은 worker의 lease 만료, worker가 뜨기 전에 예약된 미래 작업)도 늦게 집지 않도록, 쉬기 전에 `core.next_job_due`로 다음 예정 시각을 보고 그때 깬다 (확인 간격보다 길게 자지 않는다. 조회가 실패하면 간격대로). DB 연결이 끊겨도 다시 연결하며, 그동안은 이 간격 확인으로 일한다. PgBouncer transaction 모드처럼 LISTEN이 안 되는 경로면 `CAREER_WORKER_LISTEN=0` (간격 기본 1초).
 - 주기 유지보수: `serve`(내장 worker)와 `worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 21600 = 6시간, `0`이면 끔)마다 모든 공간의 미확정 공고 초안(7일 지난 것)을 정리한다. 시작 60초 뒤 첫 시도. 마지막 실행 시각을 DB(`core.maintenance_schedule`)에 두므로 worker가 여럿이거나 재시작해도 **간격마다 한 번만** 돈다 (먼저 돈 worker가 있으면 그 다음 시각까지 기다림). 동시 실행은 advisory lock으로 막고, 정리는 멱등이다. 마지막·다음 실행과 이 공간의 처리 수는 `GET /api/core/maintenance`의 `auto`. 지금 바로: `personal-api maintenance` (간격과 상관없이 돈다). `serve --no-worker`는 하지 않는다 (따로 띄운 `worker`가 한다). `pg_dump`는 앱이 하지 않는다: [backup.md](backup.md#4-일정-제안)의 cron/systemd timer.
-- 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20). 웹 복원 업로드(`POST /api/core/maintenance/restore`) 하나만 `CAREER_MAX_RESTORE_MB`(기본 2048)을 쓴다 — 받는 파일은 임시 디렉터리(`TMPDIR`)에 두므로 그만큼 여유가 있어야 한다 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)).
+- 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20). 웹 복원 업로드(`POST /api/core/maintenance/restore`) 하나만 `CAREER_MAX_RESTORE_MB`(기본 2048)을 쓴다 — 받는 파일은 `CAREER_RESTORE_DIR`(기본 `data/restore`, 이미지 `/data/restore`)에 두고 합치기도 그 안에서 원본을 푸므로 그 디스크에 묶음 크기의 두 배쯤 여유가 있어야 한다 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)).
+- 웹 복원(확인·합치기)은 worker 작업 큐(`restore`)에서 돈다. `serve`는 내장 worker가 하고, `serve --no-worker`로 띄웠으면 `personal-api worker`가 있어야 한다 (없으면 작업이 "기다리는 중"에 머문다). API와 worker가 `CAREER_RESTORE_DIR`를 **같은 폴더**로 보아야 한다: 두 컨테이너로 나눴으면 같은 볼륨을 같은 경로에 붙인다. 실행 중 진행·생존 신호 간격 `CAREER_RESTORE_HEARTBEAT_SECONDS`(기본 2, worker가 씀), 끊김 판정 `CAREER_RESTORE_STALE_SECONDS`(기본 60, API가 씀, 간격의 3배 이상이어야 시작된다).
 - 앱 프로세스는 하나로 둔다 (`--workers` 없음). 개인 자료 규모에서는 DB가 먼저 일하고 앱 CPU는 거의 쓰지 않는다. 판단 근거: [rust.md](../architecture/rust.md).
 
 ## 환경변수 요약
@@ -196,7 +197,9 @@ personal-api token extend <id> --days 90   # 만료를 지금부터 90일 뒤로
 | `CAREER_MODEL_DIR` | – (이미지: `/data/models`) | 로컬 임베딩 모델 파일 |
 | `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
 | `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |
-| `CAREER_RESTORE_DIR` | 시스템 임시 디렉터리 | 웹 복원 업로드를 받는 폴더. API 프로세스가 여럿이면 모두 보는 같은 폴더로 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)) |
+| `CAREER_RESTORE_DIR` | `data/restore` (이미지: `/data/restore`) | 웹 복원 작업 폴더 (올린 묶음·삭제 기록·잠깐 두는 age 신원·합치기 staging). API와 worker가 모두 읽고 쓰는 같은 폴더로 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)) |
+| `CAREER_RESTORE_HEARTBEAT_SECONDS` | `2` | 웹 복원 실행 중 진행·생존 신호를 DB에 쓰는 간격 (worker) |
+| `CAREER_RESTORE_STALE_SECONDS` | `60` | 이만큼 신호가 없는 실행 중 웹 복원을 끊김(`interrupted`)으로 닫는다 (API). 신호 간격의 3배 이상 |
 | `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
 | `CAREER_VISION_CONFIRM_USD` | `0.10` | 스캔 PDF 이미지 읽기가 종량제 모델일 때, 이미지 읽기 + 뒤의 항목 추출(종량제 호출만)의 예상 최대 비용이 이 금액(USD)을 넘으면 웹에서 확인을 받는다. 이미지 읽기가 구독·로컬이면 묻지 않는다. `off`면 묻지 않음 |
 | `CAREER_OAUTH_INTROSPECT_JWT` | `0` | `1`이면 검증한 JWT도 introspection으로 폐기 확인 ([mcp.md](../architecture/mcp.md)) |

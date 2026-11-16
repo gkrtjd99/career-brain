@@ -40,6 +40,7 @@ from career_core.jobs.worker import (
     index_handlers,
     parsing_handlers,
     posting_handlers,
+    restore_handlers,
     run_handlers,
     run_until_idle,
 )
@@ -52,6 +53,7 @@ from career_core.usecases.extraction import ExtractionDeps
 from career_core.usecases.indexing import IndexDeps
 from career_core.usecases.parsing import ParsingDeps
 from career_core.usecases.postings import PostingDeps
+from career_core.usecases.restore_jobs import RestoreDeps
 from career_core.usecases.runs import RunDeps
 from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
@@ -100,6 +102,15 @@ def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
                 browser=BrowserFetcher() if settings.browser_fetch else None,
                 blobs=deps.blobs,
                 vision_confirm_usd=settings.vision_confirm_usd,
+            )
+        ),
+        # 웹 복원 확인·합치기 (c0027): API와 같은 작업 폴더를 읽는다
+        **restore_handlers(
+            RestoreDeps(
+                db=db,
+                blobs=deps.blobs,
+                root=settings.restore_dir,
+                heartbeat=settings.restore_heartbeat_seconds,
             )
         ),
     }
@@ -467,6 +478,14 @@ async def _merge(
             print(f"  {t.name:<36} +{t.added:<6} skipped {t.skipped}{f' ({by})' if by else ''}")
         for name, reason in sorted(report.not_merged.items()):
             print(f"  {name:<36} not merged: {reason}")
+        if report.near_duplicates_total:
+            # CLI는 고르지 않는다 (둘 다 둠). 쌍마다 고르려면 웹 복원
+            print(
+                f"{report.near_duplicates_total} near-duplicate pair(s) kept as new rows "
+                "(only identity columns differ); choose per pair in the web restore"
+            )
+            for p in report.near_duplicates[:10]:
+                print(f"  {p.table:<36} {p.incoming_id} ~ {p.existing_id} ({', '.join(p.columns)})")
         if report.actors_mapped:
             print(f"{report.actors_mapped} archive actor(s) mapped to you")
         _print_deletions(report)

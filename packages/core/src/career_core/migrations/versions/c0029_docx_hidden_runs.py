@@ -1,7 +1,7 @@
 """core: 원본 파싱에서 숨김 서식 글을 뺄지 (parse_runs.hidden_text)
 
 Revision ID: c0029
-Revises: c0026
+Revises: c0027
 
 - ``core.parse_runs.hidden_text``: ``keep``(기본, 지금까지와 같음 — 숨김 서식 글도 블록에 넣고 검사가 경고)
   또는 ``exclude``(DOCX ``w:vanish``·``specVanish``·``webHidden`` run을, 스타일 상속까지 숨김 글 검사와 같은
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "c0029"
-down_revision = "c0026"
+down_revision = "c0027"
 branch_labels = None
 depends_on = None
 

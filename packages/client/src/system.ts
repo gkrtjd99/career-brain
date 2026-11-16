@@ -182,6 +182,30 @@ export interface SkippedDeletion {
   detail: string;
 }
 
+/** 정체 칸(경험 제목·주장 문장 등)만 다른 (들어오는 행, 기존 행) 한 쌍 (c0027). 값은 정체 칸만, 긴 글은 잘림 */
+export interface NearDuplicate {
+  table: string;
+  /** 묶음의 ID */
+  incoming_id: Uuid;
+  /** 이 공간의 ID */
+  existing_id: Uuid;
+  /** 값이 다른 정체 칸 */
+  columns: string[];
+  incoming: Record<string, unknown>;
+  existing: Record<string, unknown>;
+  /** keep_both = 둘 다 둠(기본), skip_incoming = 들어오는 행을 건너뛰고 기존 행으로 */
+  decision: NearDecision;
+}
+
+export type NearDecision = "keep_both" | "skip_incoming";
+
+export interface NearChoice {
+  table: string;
+  incoming_id: Uuid;
+  existing_id: Uuid;
+  decision?: NearDecision;
+}
+
 export interface MergeReport {
   dry_run: boolean;
   workspace_id: Uuid;
@@ -203,6 +227,9 @@ export interface MergeReport {
   deletions_skipped: number;
   skipped_deletions: SkippedDeletion[];
   notes: string[];
+  /** c0027: 비슷한 행 쌍 (상한까지)과 전체 수. 없으면 서버가 예전 버전 */
+  near_duplicates?: NearDuplicate[];
+  near_duplicates_total?: number;
 }
 
 export type RestoreStatus = "uploaded" | "verifying" | "verified" | "applying" | "done" | "failed";
@@ -225,6 +252,8 @@ export interface RestoreJob {
   error_detail: string | null;
   created_at: IsoDateTime;
   updated_at: IsoDateTime;
+  /** c0027: 합치기에서 들어오는 행을 건너뛴 비슷한 행 쌍 */
+  near_choices?: NearChoice[];
 }
 
 export interface AuditEvent {
@@ -340,7 +369,13 @@ export function systemEndpoints({ request, get, post }: SystemDeps) {
       post<RestoreJob>(`/core/maintenance/restore/${id(jobId)}/verify`, body),
     applyRestore: (
       jobId: string,
-      body: { on_duplicate: DuplicatePolicy; archive_sha256: string; identity?: string },
+      body: {
+        on_duplicate: DuplicatePolicy;
+        archive_sha256: string;
+        identity?: string;
+        /** 확인 보고의 비슷한 행 쌍에서 고른 처리 (없으면 모두 둘 다 둠) */
+        near_duplicates?: NearChoice[];
+      },
     ) => post<RestoreJob>(`/core/maintenance/restore/${id(jobId)}/apply`, body),
     discardRestore: async (jobId: string) => {
       await request("DELETE", `/core/maintenance/restore/${id(jobId)}`);
