@@ -32,6 +32,8 @@ class FetchError(StrEnum):
     SOURCE_UNAVAILABLE = "source_unavailable"
     LOGIN_REQUIRED = "login_required"
     RATE_LIMITED = "rate_limited"
+    # 봇 차단(Cloudflare 등의 자동 요청 확인 화면). 우회하지 않는다: 본문 붙여넣기·캡처 업로드로 안내
+    BOT_BLOCKED = "bot_blocked"
     NEEDS_MANUAL_CHECK = "needs_manual_check"
     BLOCKED_ADDRESS = "blocked_address"  # 사설망·메타데이터 등 내부 주소
     TOO_LARGE = "too_large"

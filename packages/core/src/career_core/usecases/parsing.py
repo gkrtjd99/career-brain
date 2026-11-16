@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
@@ -153,7 +154,8 @@ async def process_parse_run(deps: ParsingDeps, workspace_id: UUID, run_id: UUID)
             deps.db, workspace_id, run_id, missing=[1], error_code="unsupported_type"
         )
     try:
-        result = parser.parse(data)
+        # PDF(최대 300쪽)·HTML 파싱은 동기 CPU 작업: 스레드에서 해 heartbeat가 lease를 계속 늘리게 한다
+        result = await asyncio.to_thread(parser.parse, data)
     except ParseError as exc:
         return await _finish(deps.db, workspace_id, run_id, missing=[], error_code=exc.code)
 

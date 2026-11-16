@@ -70,6 +70,7 @@ export const FETCH_ERROR: Record<string, string> = {
   source_unavailable: "페이지를 열 수 없음",
   login_required: "로그인이 필요한 페이지",
   rate_limited: "요청이 너무 많아 거절됨",
+  bot_blocked: "사이트가 자동 요청을 막음 — 직접 붙여넣기",
   needs_manual_check: "직접 확인 필요",
   blocked_address: "내부 주소라 차단함",
   too_large: "페이지가 너무 큼",
@@ -116,6 +117,8 @@ const VISION_NOTE: Record<string, string> = {
   image_no_text: "이미지 공고: 읽을 수 있는 글자가 없음",
   ocr_by_model: "이미지의 글자를 AI가 읽어 본문으로 썼습니다. 원본 이미지와 대조해 확인하세요.",
   pdf_no_text: "PDF에 글자가 없음 (스캔본으로 보임)",
+  pdf_render_missing: "스캔 PDF: 쪽 이미지 렌더러(pdf-render 선택 설치)가 없어 읽지 않음",
+  ocr_pdf_by_model: "스캔 PDF의 쪽 이미지를 AI가 읽어 본문으로 썼습니다. 원본 PDF와 대조해 확인하세요.",
 };
 
 /** 가져오기 메모 (`llm_dropped:3` 처럼 값이 붙는다) */
@@ -126,6 +129,10 @@ export function noteLabel(note: string): string {
   switch (code) {
     case "pdf_pages":
       return `PDF에서 글자를 읽은 쪽: ${rest.join(":")}`;
+    case "pdf_rendered":
+      return `스캔 PDF 쪽 이미지로 읽음: ${rest.join(":")}`;
+    case "bot_blocked_by":
+      return `자동 요청 확인 화면(${arg})이 막음 · 우회하지 않음`;
     case "pdf_unreadable":
       return `PDF를 읽지 못함: ${arg}`;
     case "vision_denied":

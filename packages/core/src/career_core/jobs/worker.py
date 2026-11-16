@@ -140,6 +140,21 @@ async def _heartbeat(db: Database, row, lease_seconds: int, every: float) -> Non
             return
 
 
+async def next_due_seconds(db: Database, kinds) -> float | None:
+    """이 worker가 집을 작업 종류 중 가장 이른 예정 시각까지 남은 초 (없으면 None, 지났으면 0).
+
+    ``core.next_job_due``(c0020, SECURITY DEFINER)는 시각 하나만 돌려준다: 대기 작업의
+    ``available_at``, lease가 끝날 running 작업의 ``locked_until``. 알림이 오지 않는 경우
+    (죽은 worker의 lease 만료, worker 시작 전에 예약된 미래 작업)를 fallback 간격보다 일찍 집는다.
+    """
+    async with db.system_session() as s:
+        left = await s.scalar(
+            text("SELECT extract(epoch FROM core.next_job_due(:kinds) - clock_timestamp())"),
+            {"kinds": list(kinds)},
+        )
+    return None if left is None else max(0.0, float(left))
+
+
 async def run_until_idle(
     db: Database, handlers: Mapping[str, JobHandler], *, limit: int = 1000
 ) -> int:

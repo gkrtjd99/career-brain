@@ -6,6 +6,8 @@
   (DNS rebinding으로 검사 후 내부 주소로 바뀌는 것을 막는다). TLS는 원래 호스트 이름으로 검증한다.
 - 쿠키·로그인 정보를 쓰지 않는다. 응답 크기·시간 상한.
 - 브라우저(Playwright)는 선택 설치. 모든 하위 요청도 같은 주소 검사를 거친다.
+- 봇 차단(Cloudflare 확인 화면 등)은 우회하지 않는다. ``rate_limited``(진짜 요청 한도)와 구분해
+  ``bot_blocked``로 알리고 본문 직접 붙여넣기로 안내한다 (``detect_bot_block``).
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import zlib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -72,7 +75,54 @@ async def resolve_public(host: str, port: int) -> str:
     return addresses[0]
 
 
-def _status_failure(status: int, body: str) -> FetchFailure | None:
+# 봇 확인 화면의 표시 (소문자 본문 앞부분에서 찾는다). 자동 요청을 막는 화면이지 요청 한도가 아니다.
+_CHALLENGE_MARKERS: tuple[tuple[str, str], ...] = (
+    ("/cdn-cgi/challenge-platform/", "cloudflare"),
+    ("_cf_chl_opt", "cloudflare"),
+    ("cf-browser-verification", "cloudflare"),
+    ("challenges.cloudflare.com", "cloudflare"),
+    ("<title>just a moment...</title>", "cloudflare"),
+    ("attention required! | cloudflare", "cloudflare"),
+    ("_incapsula_resource", "imperva"),
+    ("incapsula incident id", "imperva"),
+    ("captcha-delivery.com", "datadome"),
+    ("px-captcha", "perimeterx"),
+    ("awswafintegration", "aws_waf"),
+)
+# 봇 확인 화면을 줄 수 있는 상태 코드 (200 확인 화면은 본문이 짧아 직접 확인으로 간다)
+_CHALLENGE_STATUSES = frozenset({403, 429, 503})
+
+
+def detect_bot_block(status: int, headers: Mapping[str, str] | None, body: str) -> str | None:
+    """봇 차단이면 그 출처(예: ``cloudflare``), 아니면 None. 차단을 피하려고 다시 요청하지 않는다.
+
+    1. 응답 머리: Cloudflare ``cf-mitigated: challenge``, AWS WAF ``x-amzn-waf-action``,
+       DataDome ``x-datadome``(403). 상태 코드와 상관없이 확인 화면이다.
+    2. 403·429·503 본문의 확인 화면 표시 (``_CHALLENGE_MARKERS``).
+    ``Retry-After``만 있고 위 표시가 없는 429는 진짜 요청 한도(``rate_limited``)로 둔다.
+    """
+    h = {k.lower(): v for k, v in (headers or {}).items()}
+    if h.get("cf-mitigated", "").strip().lower() == "challenge":
+        return "cloudflare"
+    if h.get("x-amzn-waf-action", "").strip().lower() in ("challenge", "captcha"):
+        return "aws_waf"
+    if status not in _CHALLENGE_STATUSES:
+        return None
+    if status == 403 and "x-datadome" in h:
+        return "datadome"
+    lowered = body[:60000].lower()
+    for marker, source in _CHALLENGE_MARKERS:
+        if marker in lowered:
+            return source
+    return None
+
+
+def _status_failure(
+    status: int, body: str, headers: Mapping[str, str] | None = None
+) -> FetchFailure | None:
+    bot = detect_bot_block(status, headers, body)
+    if bot is not None:
+        return FetchFailure(FetchError.BOT_BLOCKED, status, bot)
     if status in (401, 407):
         return FetchFailure(FetchError.LOGIN_REQUIRED, status)
     if status == 429:
@@ -214,6 +264,7 @@ class HttpFetcher:
                             content_type=resp.headers.get("content-type", ""),
                             charset=resp.charset_encoding,
                             body=body,
+                            headers=_kept_headers(resp.headers),
                         )
                 except httpx.TimeoutException:
                     return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail="timeout")
@@ -228,7 +279,7 @@ class HttpFetcher:
         if isinstance(raw, FetchFailure):
             return raw
         text = raw.body.decode(raw.charset or "utf-8", errors="replace")
-        failure = _status_failure(raw.status, text)
+        failure = _status_failure(raw.status, text, raw.headers)
         if failure:
             return failure
         ctype = raw.content_type.split(";")[0].strip().lower()
@@ -261,6 +312,14 @@ def sniff_binary(data: bytes) -> str | None:
     return None
 
 
+# 봇 차단 판별에 쓰는 응답 머리만 남긴다 (쿠키 등은 버린다)
+_KEPT_HEADERS = ("cf-mitigated", "x-amzn-waf-action", "x-datadome", "retry-after", "server")
+
+
+def _kept_headers(headers: Mapping[str, str]) -> dict[str, str]:
+    return {k: headers[k] for k in _KEPT_HEADERS if k in headers}
+
+
 @dataclass(frozen=True, slots=True)
 class RawResponse:
     final_url: str
@@ -268,6 +327,7 @@ class RawResponse:
     content_type: str
     charset: str | None
     body: bytes
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 SUBRESOURCE_MAX_BYTES = 4 * 1024 * 1024
@@ -353,7 +413,8 @@ class BrowserFetcher:
                     return state["main"]
                 status = resp.status if resp else 200
                 html = await page.content()
-                failure = _status_failure(status, html)
+                kept = _kept_headers(await resp.all_headers()) if resp else {}
+                failure = _status_failure(status, html, kept)
                 if failure:
                     return failure
                 shot = (

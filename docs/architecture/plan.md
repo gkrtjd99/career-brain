@@ -433,9 +433,9 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 검색: potion 토크나이저(Rust Unigram, 상주 ~0.73GB)가 남은 메모리의 대부분이다. 한국어·영어에 안 쓰는 어휘를 잘라낸 토크나이저(손실 있음, 재현율 재측정 필요) 또는 자체 로더 검토.
 - ~~공고: 이미지·PDF 공고 OCR, 추가 채용 시스템 어댑터~~ → 해결 (`postings.md` "채용 시스템 어댑터"·"PDF·이미지 공고": greenhouse·greeting·lever·workday, PDF 본문, 비전 라우트 `job_extract_image`). 초안 정리 주기 실행은 아래 운영 항목.
 - ~~공고: LLM 추출이 같은 줄을 자격·우대 양쪽에 넣음, 제목을 페이지 제목의 조각으로 고름~~ → 해결 (`postings.md` "LLM 출력 보정", 인용 규칙 그대로).
-- 공고: 스캔 PDF(글자 없는 쪽)를 쪽 이미지로 바꿔 비전 경로로 — 렌더러 의존성 필요, 지금은 `pdf_no_text`로 직접 확인.
-- 공고: Workday 등 Cloudflare 앞단 사이트가 httpx 요청에 429를 준다 (curl은 200, 봇 차단으로 보임). 우회하지 않는다. 봇 차단을 `rate_limited`와 구분해 안내하기.
-- 공고: 그리팅 `questionnairesInfo`(자기소개서 문항·글자 수) 구조화 — 실제 예시 확인 후.
+- ~~공고: 스캔 PDF(글자 없는 쪽)를 쪽 이미지로 바꿔 비전 경로로 — 렌더러 의존성 필요, 지금은 `pdf_no_text`로 직접 확인.~~ → 해결 (선택 설치 `pdf-render` = pypdfium2 ~8MB, 앞 4쪽·1600px 상한 회색조 PNG를 `job_extract_image`로, 자료 등급 `public`. 없으면 `pdf_render_missing`. `postings.md` "스캔 PDF").
+- ~~공고: Workday 등 Cloudflare 앞단 사이트가 httpx 요청에 429를 준다 (curl은 200, 봇 차단으로 보임). 우회하지 않는다. 봇 차단을 `rate_limited`와 구분해 안내하기.~~ → 해결 (`bot_blocked`: `cf-mitigated: challenge` 등 헤더·확인 화면 표시로 판단, "사이트가 자동 요청을 막음 — 직접 붙여넣기". 우회·재시도 없음. `postings.md` "봇 차단").
+- ~~공고: 그리팅 `questionnairesInfo`(자기소개서 문항·글자 수) 구조화 — 실제 예시 확인 후.~~ → 해결 (공개 페이지 3곳 확인, 서술형 `type 100`만 문항·`maxLength`로, 구조화 근거 경로. 합성 fixture만 커밋. `postings.md`).
 - ~~웹(O10에서 발견): 인터뷰 목록·원본 목록·최근 활동·공고 버전 목록 API, 공고 목록 시각, 블록 검색 위치~~ → 해결 (`web.md` "화면용 조회 API").
 - ~~테스트: `test_sources.py::test_failing_job_retries_then_gives_up`가 부하 중 간헐 실패 (시간 의존)~~ → 해결 (원인: `claim_job`은 공간을 가리지 않고 종류로만 집는데 시험들이 DB 하나를 같이 쓴다. 앞 시험이 남긴 `parse` 작업의 재시도 대기(2·4초…)가 부하로 느려진 이 시험 도중에 끝나 집혔다. 시험마다 남은 대기 작업을 닫고(`tests/conftest.py`), 백오프 건너뛰기를 앱 시계가 아닌 고정 과거 시각으로).
 - 검색: 키워드 질의가 trigram GIN 색인을 못 쓴다. 원인은 RLS: pg_trgm 연산자(`<%`, `ILIKE`)가 LEAKPROOF가 아니라 정책 조건보다 먼저 색인 조건으로 쓸 수 없다 (테이블별 필터로 바꿔 측정: 주장 2만 개 p50 104ms → 104ms, 변화 없음). 대신 `workspace_id` 색인으로 한 공간의 행만 훑으므로 비용은 서비스 전체가 아니라 사용자 한 명의 자료량에 비례한다. 공간당 수만 건을 넘으면 검토: 공간별 파티션, 검색 전용 요약 테이블, 또는 superuser가 만든 LEAKPROOF 래퍼.
@@ -486,10 +486,15 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - MCP(후속): OAuth 불투명 토큰 introspection(RFC 7662), 토큰 폐기 목록, `jti` 재사용 감지, 연결 관리 웹 화면 (지금은 `personal-api oauth-link`). 감사 기록 보존 기간·정리.
 - 실행(후속): 시스템 화면 실시간 갱신(SSE) — 지금은 활성 실행이 있을 때 몇 초마다 다시 읽는다.
 - ~~운영: 미확정 공고 초안 정리(`purge_unconfirmed`)·`pg_dump`를 주기 실행하는 내장 스케줄 (지금은 버튼·cron)~~ → 해결 (`serve`·`worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`마다 모든 공간 정리, advisory lock. `pg_dump`는 앱 밖 cron/systemd timer: `backup.md`).
-- 운영: 알림이 없는 경우 — lease가 끝난 `running` 작업(죽은 worker), worker 시작 전에 예약된 미래 작업 — 는 fallback 확인(기본 30초) 때 집힌다. 더 빨라야 하면 시작 때 다음 예정 시각 조회 함수를 둔다.
-- 운영: 주기 유지보수는 worker마다 간격마다 한 번씩 돈다 (lock은 동시 실행만 막는다, 멱등이라 결과는 같음). worker가 많아지면 마지막 실행 시각을 DB에 두고 간격 안이면 건너뛰기. 유지보수 화면에 마지막 자동 정리 시각 표시.
-- 운영: API 토큰 만료일·마지막 사용 시각, 웹에서 토큰 목록·폐기.
-- 실행: heartbeat는 worker 이벤트 루프의 작업이다. 단계가 동기 CPU 작업으로 루프를 lease(300초) 넘게 막으면 연장하지 못한다 — 그런 단계는 `asyncio.to_thread`로.
+- ~~운영: 알림이 없는 경우 — lease가 끝난 `running` 작업(죽은 worker), worker 시작 전에 예약된 미래 작업 — 는 fallback 확인(기본 30초) 때 집힌다. 더 빨라야 하면 시작 때 다음 예정 시각 조회 함수를 둔다.~~ → 해결 (c0020 `core.next_job_due`: 시각 하나만 돌려주는 SECURITY DEFINER. 유휴 worker가 그 시각까지만 자고 fallback 간격을 넘지 않는다).
+- ~~운영: 주기 유지보수는 worker마다 간격마다 한 번씩 돈다 (lock은 동시 실행만 막는다, 멱등이라 결과는 같음). worker가 많아지면 마지막 실행 시각을 DB에 두고 간격 안이면 건너뛰기. 유지보수 화면에 마지막 자동 정리 시각 표시.~~ → 해결 (c0020 `maintenance_schedule` + `maintenance_begin`: 설치 전체에서 간격마다 한 번, 공간별 결과 `maintenance_results`. `GET /core/maintenance`의 `auto`에 마지막·다음 실행·처리 수). 웹 표시는 아래 후속.
+- ~~운영: API 토큰 만료일·마지막 사용 시각, 웹에서 토큰 목록·폐기.~~ → 해결 (p0002 `expires_at`·`last_used_at`, `token issue --expires-days`, 마지막 사용은 5분에 한 번만 기록, 설정 화면 "토큰 관리"(소유자만, 원문은 발급 때 한 번, 지금 토큰은 폐기 불가), `/core/tokens` API는 원문·해시를 돌려주지 않음).
+- ~~실행: heartbeat는 worker 이벤트 루프의 작업이다. 단계가 동기 CPU 작업으로 루프를 lease(300초) 넘게 막으면 연장하지 못한다 — 그런 단계는 `asyncio.to_thread`로.~~ → 해결 (점검: 파싱·공고 HTML 해석·PDF 정리·렌더링·DOCX·해시를 스레드로, DB 세션은 넘기지 않음. CPU 무거운 파싱 중 lease 유지 시험. `runs.md`).
+- 운영(후속): 시스템 화면 유지보수 탭에 자동 유지보수(`auto`: 마지막·다음 실행, 이 공간 처리 수) 표시 — API만 있음.
+- 운영(후속): 토큰 만료 임박 알림, 웹에서 토큰 이름 바꾸기·만료 연장. 토큰 범위(읽기 전용 등)는 역할 모델과 함께.
+- 공고(후속): 스캔 PDF는 앞 4쪽만 읽고 쪽마다 이미지 한 장(비전 비용)이다. 긴 스캔 공고의 쪽 고르기, 비전 호출 전 예상 비용 표시.
+- 공고(후속): 그리팅 선택형 문항(`type 200·400`, 보기)은 넣지 않는다. 지원서 화면에 필요하면 별도 항목으로.
+- 공고(후속): 봇 차단 판단 표시는 알려진 서비스(Cloudflare·Imperva·DataDome·PerimeterX·AWS WAF)만이다. 새 차단 화면은 `rate_limited`·`source_unavailable`로 보일 수 있다.
 
 ## 확인한 공식 근거
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
@@ -30,6 +31,8 @@ class ActorContext:
     workspace_id: UUID
     scopes: frozenset[str] = field(default_factory=frozenset)
     kind: str = ACTOR_HUMAN
+    # 인증에 쓴 자격 증명(API 토큰 등)의 ID. 원문이 아니다. "지금 쓰는 토큰은 폐기하지 않는다"에 쓴다.
+    credential_id: UUID | None = None
 
     @property
     def is_human(self) -> bool:
@@ -165,6 +168,37 @@ class AuditSink(Protocol):
     async def record(self, actor: ActorContext | None, event: str, attributes: dict) -> None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class ApiTokenRecord:
+    """API 토큰 목록 한 줄. 토큰 원문·해시는 넣지 않는다."""
+
+    id: UUID
+    label: str
+    actor_id: UUID
+    created_at: datetime
+    expires_at: datetime | None = None
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+@runtime_checkable
+class ApiTokenAdmin(Protocol):
+    """actor 공간의 API 토큰 관리 (개인 앱의 로그인 토큰). 주입하지 않으면 토큰 경로가 없다.
+
+    권한 검사(소유자만)는 호출하는 쪽(HTTP 경로)이 한다. 구현은 그 공간 문맥 안에서만 읽고 쓴다.
+    """
+
+    async def list(self, actor: ActorContext) -> list[ApiTokenRecord]: ...
+
+    async def issue(
+        self, actor: ActorContext, *, label: str, expires_days: int | None
+    ) -> tuple[ApiTokenRecord, str]:
+        """새 토큰. (목록 한 줄, 원문) — 원문은 이때 한 번만 돌려준다."""
+        ...
+
+    async def revoke(self, actor: ActorContext, token_id: UUID) -> bool: ...
+
+
 class DenyAllPermissionPolicy:
     """주입이 빠졌을 때의 안전한 기본값."""
 
@@ -182,6 +216,8 @@ __all__ = [
     "ACTOR_HUMAN",
     "APPROVE_SCOPE",
     "ActorContext",
+    "ApiTokenAdmin",
+    "ApiTokenRecord",
     "AuditSink",
     "BlobStore",
     "BudgetPolicy",

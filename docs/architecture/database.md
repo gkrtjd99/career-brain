@@ -226,3 +226,21 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - trigger `approvals_wake_run` (AFTER UPDATE OF status ON approvals): 열린 승인이 `invalidated`·`expired`로 바뀌고 그 승인을 기다리던 실행(`waiting_approval`, 같은 `approval_id`)이 있으면 `queued`로 바꾸고 사건(`approval_invalidated`/`approval_expired`)과 `run` job을 넣는다. 다음 단계가 실패 처리한다.
 - 내보내기: `audit_events`·`deletions`는 묶음에 들어가고, `oauth_identities`는 `EXCLUDED_TABLES`(설치마다 다시 연결).
 - 상세: `docs/architecture/runs.md`(무효화를 trigger로 둔 이유), `docs/architecture/mcp.md`(감사·OAuth), `docs/operations/backup.md`(삭제 기록 재적용).
+
+## 작업 깨우기·주기 유지보수 기록 (c0020), 토큰 만료 (p0002)
+
+`c0020_ops_postings` (down_revision `c0015`).
+
+| 대상 | 내용 | 앱 role |
+|---|---|---|
+| `core.next_job_due(kinds)` | SECURITY DEFINER. 이 종류의 작업이 다음에 집힐 수 있는 **가장 이른 시각 하나**만 돌려준다: 대기(`queued`) 행의 `available_at`, 실행 중(`running`) 행의 `greatest(locked_until, available_at)` (lease 만료 = `claim_job`이 다시 집는 조건). 공간·ID·개수는 돌려주지 않는다 | EXECUTE |
+| `maintenance_schedule` | 설치 전체 1행(`name = 'default'`, CHECK): `interval_seconds`, `last_started_at`, `last_finished_at`. `workspace_id` 없음 | 권한 없음 (함수로만) |
+| `maintenance_begin(interval, force)` / `maintenance_finish(started_at)` / `maintenance_status()` | SECURITY DEFINER. begin은 행을 `FOR UPDATE`로 잡고 `last_started_at + interval > now()`이면 시작하지 않는다 (`force`면 무시). status는 시각·간격·다음 시각만 | EXECUTE |
+| `maintenance_results` | 공간마다 1행 (`uq_maintenance_results_workspace`): 마지막으로 **무언가 정리한** 실행의 `ran_at`, 작업별 `counts`(JSON 객체), `errors`. 한 일이 없는 공간은 쓰지 않는다 (공간 수만큼 쓰지 않게) | SELECT, INSERT, UPDATE |
+
+- `maintenance_schedule`은 RLS FORCE + 소유자 전용 정책 `maintenance_state` (`TO CURRENT_USER`, 함수 안의 `SET career.maintenance_state = on`일 때만). c0015 `maintenance_scan`과 같은 방식: 앱 역할이 설정을 켜도 정책 대상이 아니라 0행이고, 표 권한도 없다 (`test_jobs.py`).
+- `maintenance_results`는 `workspace_isolation` FORCE. 기록은 그 공간 문맥(`workspace_session`)에서 쓴다.
+- N개의 worker: advisory lock(동시 실행 하나) + `maintenance_begin`(간격 안에 한 번). 늦게 깬 worker는 `next_at`까지 기다렸다 다시 본다.
+- 내보내기: `maintenance_results`는 `EXCLUDED_TABLES` — 이 설치의 운영 기록이고, 복원한 설치에서 다시 쌓인다. `maintenance_schedule`은 공간 범위가 없어 대상이 아니다.
+
+`personal` 체인 `p0002_token_expiry` (`apps/personal-api`, down_revision `p0001`): `personal.api_tokens`에 `expires_at`(CHECK `expires_at > created_at`), `last_used_at`. `personal.lookup_api_token(hash)`가 폐기·**만료** 토큰을 빼고 `token_id`·`last_used_at`도 돌려준다. 마지막 사용 시각은 인증 때 5분에 한 번만 쓴다 (그 공간 문맥, `last_used_at < now() - 5분`일 때만). 토큰은 여전히 내보내기 대상 밖(`personal.*`).

@@ -62,6 +62,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0014 감사 기록(MCP 도구 호출)·외부 OAuth 신원 연결. 소유자만.
     "audit.read": "workspace-admin",
     "oauth.link": "workspace-admin",
+    # API 토큰 목록·발급·폐기 (personal-api 토큰, 원문·해시는 보이지 않는다). 소유자만.
+    "tokens.read": "workspace-admin",
+    "tokens.manage": "workspace-admin",
 }
 
 

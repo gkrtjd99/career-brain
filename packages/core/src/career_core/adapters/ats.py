@@ -422,6 +422,33 @@ def _greeting_career(c: dict) -> str | None:
     return kind if isinstance(kind, str) else None
 
 
+# `questionnairesInfo[].type` (2026-11-17 실제 공개 페이지 3곳·39건에서 확인한 값):
+# 100 = 서술형(글자 수 `maxLength`), 200·400 = 선택형(`optionItems`, 유입 경로 등). 서술형만 문항으로 둔다.
+GREETING_FREE_TEXT = 100
+MAX_QUESTIONS = 20
+
+
+def _greeting_questions(data: dict) -> tuple[list[dict], list[int]]:
+    """자기소개서 문항 (서술형만). (문항 [{prompt, char_limit}], 원래 순번)."""
+    out: list[dict] = []
+    index: list[int] = []
+    for i, raw in enumerate(_list(data.get("questionnairesInfo"))):
+        q = _dict(raw)
+        prompt = q.get("question")
+        if q.get("type") != GREETING_FREE_TEXT or not isinstance(prompt, str):
+            continue
+        prompt = " ".join(prompt.split())[:1000]
+        if not prompt:
+            continue
+        limit = q.get("maxLength")
+        ok = isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 100_000
+        out.append({"prompt": prompt, "char_limit": limit if ok else None})
+        index.append(i)
+        if len(out) >= MAX_QUESTIONS:
+            break
+    return out, index
+
+
 def _greeting_opening(page: PageData) -> dict | None:
     props = _dict(_dict(_dict(page.next_data).get("props")).get("pageProps"))
     for q in _list(_dict(props.get("dehydratedState")).get("queries")):
@@ -486,6 +513,15 @@ def from_greeting(page: PageData) -> tuple[dict, str | None]:
         _join_unique([_greeting_career(_dict(x.get("jobPositionCareer"))) for x in positions]),
         ev_structured(f"{path}.jobPositionCareer"),
     )
+    questions, index = _greeting_questions(data)
+    if questions:
+        at = ",".join(str(i) for i in index)
+        put(
+            out,
+            FieldName.QUESTIONS,
+            questions,
+            ev_structured(f"{p}.questionnairesInfo[{at}].question·maxLength"),
+        )
     detail = info.get("detail")
     if not isinstance(detail, str):
         return out, None

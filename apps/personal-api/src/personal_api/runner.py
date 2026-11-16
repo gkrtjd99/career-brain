@@ -27,7 +27,7 @@ from typing import Protocol
 from career_core.db import Database
 from career_core.jobs.maintenance import maintenance_loop
 from career_core.jobs.wake import JobWaker
-from career_core.jobs.worker import JobHandler, run_once
+from career_core.jobs.worker import JobHandler, next_due_seconds, run_once
 
 log = logging.getLogger("personal_api.worker")
 
@@ -35,6 +35,8 @@ Step = Callable[[], Awaitable[bool]]
 """작업 하나를 처리했으면 True, 대기 작업이 없으면 False."""
 
 MAX_ERROR_BACKOFF = 60.0
+# 예정 시각이 이미 지났는데 집지 못했을 때(다른 worker가 먼저 집음, 시계 차이) 바로 다시 돌지 않게
+MIN_DUE_DELAY = 0.05
 DEFAULT_MAINTENANCE_SECONDS = 6 * 3600
 
 
@@ -74,20 +76,46 @@ class Waker(Protocol):
 Background = Callable[[asyncio.Event], Awaitable[object]]
 """worker와 같은 루프에서 ``stop``까지 도는 일 (주기 유지보수)."""
 
+NextDue = Callable[[], Awaitable[float | None]]
+"""다음 작업을 집을 수 있을 때까지 남은 초 (없으면 None). ``career_core.jobs.worker.next_due_seconds``."""
+
 
 @dataclass(frozen=True, slots=True)
 class WorkerRuntime:
     step: Step
     waker: Waker | None = None
     background: Sequence[Background] = ()
+    next_due: NextDue | None = None
+
+
+async def _idle_delay(poll_seconds: float, next_due: NextDue | None) -> float:
+    """쉴 시간: 다음 예정 시각까지, 단 ``poll_seconds``를 넘지 않는다 (조회 실패면 그냥 간격)."""
+    if next_due is None:
+        return poll_seconds
+    try:
+        left = await next_due()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - 조회 실패는 간격 확인으로 대신한다
+        log.debug("next due lookup failed (%s)", type(exc).__name__)
+        return poll_seconds
+    if left is None:
+        return poll_seconds
+    return min(poll_seconds, max(left, MIN_DUE_DELAY))
 
 
 async def work_loop(
-    step: Step, stop: asyncio.Event, *, poll_seconds: float = 1.0, waker: Waker | None = None
+    step: Step,
+    stop: asyncio.Event,
+    *,
+    poll_seconds: float = 1.0,
+    waker: Waker | None = None,
+    next_due: NextDue | None = None,
 ) -> int:
     """``stop``이 켜질 때까지 작업을 처리한다. 처리한 작업 수를 돌려준다.
 
     ``waker``가 있으면 대기 작업이 없을 때 알림이나 ``poll_seconds`` 중 먼저 오는 것까지 쉰다.
+    ``next_due``가 있으면 알림이 없는 예정 작업(lease 만료·미리 예약된 작업)의 시각에도 깨어난다.
     """
     processed = 0
     errors = 0
@@ -107,10 +135,12 @@ async def work_loop(
         errors = 0
         if did:
             processed += 1
-        elif waker is not None:
-            await waker.wait(stop, poll_seconds)
+            continue
+        delay = await _idle_delay(poll_seconds, next_due)
+        if waker is not None:
+            await waker.wait(stop, delay)
         else:
-            await _wait(stop, poll_seconds)
+            await _wait(stop, delay)
     return processed
 
 
@@ -118,7 +148,9 @@ async def run_runtime(rt: WorkerRuntime, stop: asyncio.Event, *, poll_seconds: f
     """작업 루프 + 같이 도는 일. 정상 종료면 같이 도는 일도 끝나길 기다리고, 취소면 같이 취소한다."""
     extra = [asyncio.create_task(fn(stop)) for fn in rt.background]
     try:
-        processed = await work_loop(rt.step, stop, poll_seconds=poll_seconds, waker=rt.waker)
+        processed = await work_loop(
+            rt.step, stop, poll_seconds=poll_seconds, waker=rt.waker, next_due=rt.next_due
+        )
     except BaseException:
         for t in extra:
             t.cancel()
@@ -164,7 +196,13 @@ async def _runtime(
             background.append(
                 lambda stop: maintenance_loop(db, stop, interval_seconds=maintenance_seconds)
             )
-        yield WorkerRuntime(lambda: run_once(db, handlers), waker, background)
+        yield WorkerRuntime(
+            lambda: run_once(db, handlers),
+            waker,
+            background,
+            # 짧은 간격 확인(LISTEN 끔)이면 조회를 늘릴 뿐이라 쓰지 않는다
+            next_due=(lambda: next_due_seconds(db, handlers)) if listen else None,
+        )
 
 
 StepSource = Callable[[], AbstractAsyncContextManager[Step | WorkerRuntime]]

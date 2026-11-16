@@ -62,7 +62,7 @@ curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/api/core/me
 ```
 
 - `.env`는 compose 값 채우기용(DB 비밀번호·포트·빌드 옵션), `app.env`는 앱 환경변수(모델 키)다. DB 소유자 비밀번호는 app 컨테이너에 들어가지 않는다.
-- 빌드 옵션: `.env`의 `CAREER_EXTRAS=local-embed` (로컬 임베딩), `browser` (동적 공고 렌더링, `app.env`에 `CAREER_BROWSER_FETCH=1`도). 쉼표로 둘 다.
+- 빌드 옵션: `.env`의 `CAREER_EXTRAS=local-embed` (로컬 임베딩), `browser` (동적 공고 렌더링, `app.env`에 `CAREER_BROWSER_FETCH=1`도), `pdf-render` (스캔 PDF 공고를 쪽 이미지로 바꿔 비전 모델로: pypdfium2 ~8MB, `models.toml`에 `job_extract_image` 라우트도). 쉼표로 여럿. 로컬 `uv sync`에는 `pdf-render`가 기본으로 들어 있다.
 - 자료: 볼륨 `db-data`(PostgreSQL), `app-data`(`/data`: 업로드 원본, 로컬 모델 파일). 설정: `./config` → `/config` (읽기 전용).
 - 운영 명령: `docker compose run --rm app models`, `... app usage --by model` (`app.env`에 `CAREER_API_TOKEN`), `... app reindex`.
 - 로그: `docker compose logs -f app`. 접근 로그를 끄려면 `CAREER_ACCESS_LOG=0`.
@@ -143,23 +143,26 @@ cd deploy/docker && docker compose exec -T db pg_dump -U career -d career_brain 
 
 ## 6. API 토큰
 
-`CAREER_API_TOKEN`에 **소유자** 토큰을 두고 그 공간의 토큰을 관리한다. 토큰 원문은 DB에 없고(SHA-256만), 목록은 ID·이름·상태만 보인다. 새 토큰은 발급할 때 한 번만 출력한다.
+`CAREER_API_TOKEN`에 **소유자** 토큰을 두고 그 공간의 토큰을 관리한다. 토큰 원문은 DB에 없고(SHA-256만), 목록은 ID·이름·상태·만료·마지막 사용만 보인다. 새 토큰은 발급할 때 한 번만 출력한다. 웹의 **설정 → 토큰 관리**(소유자만)에서도 같은 목록·발급·폐기를 한다 (`GET/POST /api/core/tokens`, `POST /api/core/tokens/<id>/revoke`: 응답에 토큰 원문·해시는 없고, 발급 응답의 `secret`에만 한 번).
 
 ```bash
 personal-api token list                    # * = 지금 CAREER_API_TOKEN 토큰
 personal-api token issue --label laptop    # 새 토큰 (한 번만 출력)
+personal-api token issue --label ci-like --expires-days 90   # 90일 뒤 만료 (1~3650)
 personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MCP 모두 거부
 # Docker: docker compose run --rm app token list
 ```
 
 - 토큰이 샜으면: `issue`로 새 토큰 → `CAREER_API_TOKEN`·MCP 설정을 새 토큰으로 → 옛 토큰 `revoke`.
 - 지금 쓰는 토큰은 폐기하지 않는다 (잠겨 나가지 않게). 다른 공간 토큰은 보이지도, 폐기되지도 않는다 (RLS).
+- 만료: `--expires-days`를 주면 그 시각부터 API·MCP 모두 401이다 (목록에 `expired`). 기본은 만료 없음 (`bootstrap` 토큰 포함).
+- 마지막 사용 시각은 인증할 때 **5분에 한 번만** 기록한다 (요청마다 DB에 쓰지 않게). 그래서 최대 5분 늦다.
 
 ## 7. 작은 서버 조정
 
 - PostgreSQL: `deploy/docker/compose.yaml`의 `command`. 기본은 1GB 서버용(`shared_buffers=128MB`, `max_connections=40`, 병렬 질의·JIT 끔). RAM이 넉넉하면 `.env`의 `CAREER_PG_SHARED_BUFFERS`(RAM 25%)와 `CAREER_PG_EFFECTIVE_CACHE`(RAM 50%)를 올린다.
-- 작업 깨우기: worker는 `LISTEN career_jobs`로 새 작업을 바로 알아채고, 알림을 놓쳤을 때를 위해 `CAREER_WORKER_POLL_SECONDS`(기본 30초)마다 한 번 확인한다. DB 연결이 끊겨도 다시 연결하며, 그동안은 이 간격 확인으로 일한다. PgBouncer transaction 모드처럼 LISTEN이 안 되는 경로면 `CAREER_WORKER_LISTEN=0` (간격 기본 1초).
-- 주기 유지보수: `serve`(내장 worker)와 `worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 21600 = 6시간, `0`이면 끔)마다 모든 공간의 미확정 공고 초안(7일 지난 것)을 정리한다. 시작 60초 뒤 첫 실행. worker가 여럿이면 advisory lock으로 한 번에 하나만 하고, 정리는 멱등이다. 지금 바로: `personal-api maintenance`. `serve --no-worker`는 하지 않는다 (따로 띄운 `worker`가 한다). `pg_dump`는 앱이 하지 않는다: [backup.md](backup.md#4-일정-제안)의 cron/systemd timer.
+- 작업 깨우기: worker는 `LISTEN career_jobs`로 새 작업을 바로 알아채고, 알림을 놓쳤을 때를 위해 `CAREER_WORKER_POLL_SECONDS`(기본 30초)마다 한 번 확인한다. 알림이 오지 않는 작업(죽은 worker의 lease 만료, worker가 뜨기 전에 예약된 미래 작업)도 늦게 집지 않도록, 쉬기 전에 `core.next_job_due`로 다음 예정 시각을 보고 그때 깬다 (확인 간격보다 길게 자지 않는다. 조회가 실패하면 간격대로). DB 연결이 끊겨도 다시 연결하며, 그동안은 이 간격 확인으로 일한다. PgBouncer transaction 모드처럼 LISTEN이 안 되는 경로면 `CAREER_WORKER_LISTEN=0` (간격 기본 1초).
+- 주기 유지보수: `serve`(내장 worker)와 `worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 21600 = 6시간, `0`이면 끔)마다 모든 공간의 미확정 공고 초안(7일 지난 것)을 정리한다. 시작 60초 뒤 첫 시도. 마지막 실행 시각을 DB(`core.maintenance_schedule`)에 두므로 worker가 여럿이거나 재시작해도 **간격마다 한 번만** 돈다 (먼저 돈 worker가 있으면 그 다음 시각까지 기다림). 동시 실행은 advisory lock으로 막고, 정리는 멱등이다. 마지막·다음 실행과 이 공간의 처리 수는 `GET /api/core/maintenance`의 `auto`. 지금 바로: `personal-api maintenance` (간격과 상관없이 돈다). `serve --no-worker`는 하지 않는다 (따로 띄운 `worker`가 한다). `pg_dump`는 앱이 하지 않는다: [backup.md](backup.md#4-일정-제안)의 cron/systemd timer.
 - 업로드 크기: `CAREER_MAX_UPLOAD_MB`(기본 20).
 - 앱 프로세스는 하나로 둔다 (`--workers` 없음). 개인 자료 규모에서는 DB가 먼저 일하고 앱 CPU는 거의 쓰지 않는다. 판단 근거: [rust.md](../architecture/rust.md).
 
@@ -173,7 +176,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_EMBEDDED_WORKER` | `1` | `0`이면 `serve`는 API만 |
 | `CAREER_WORKER_LISTEN` | `1` | 새 작업을 `LISTEN/NOTIFY`로 깨우기. `0`이면 간격 확인만 |
 | `CAREER_WORKER_POLL_SECONDS` | `30` (LISTEN 끄면 `1`) | 대기 작업 확인 간격 (LISTEN일 때는 놓친 알림 대비) |
-| `CAREER_MAINTENANCE_INTERVAL_SECONDS` | `21600` | 주기 유지보수(초안 정리) 간격, `0`이면 끔 |
+| `CAREER_MAINTENANCE_INTERVAL_SECONDS` | `21600` | 주기 유지보수(초안 정리) 간격, `0`이면 끔. worker가 여럿이어도 설치 전체에서 간격마다 한 번 |
 | `CAREER_WEB_DIR` | `apps/personal-web/dist` (있을 때) | 웹 정적 파일. 빈 값이면 끔 |
 | `CAREER_BLOB_DIR` | `data/blobs` (이미지: `/data/blobs`) | 업로드 원본 |
 | `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |

@@ -22,11 +22,12 @@ class LocalBlobStore:
         return self.root / str(UUID(str(workspace_id))) / key[:2] / key
 
     async def put(self, workspace_id: UUID, key: str, data: bytes, content_type: str) -> str:
-        if hashlib.sha256(data).hexdigest() != key:
-            raise ValueError("blob key does not match content")
         path = self._path(workspace_id, key)
 
         def write() -> None:
+            # 해시 확인도 스레드에서 (업로드 상한 20MB: 이벤트 루프를 막지 않게)
+            if hashlib.sha256(data).hexdigest() != key:
+                raise ValueError("blob key does not match content")
             if path.exists():
                 return
             path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)

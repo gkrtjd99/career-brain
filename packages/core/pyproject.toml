@@ -26,6 +26,9 @@ local-embed = ["fastembed>=0.9,<1"]
 browser = ["playwright>=1.50"]
 # 원격 MCP의 외부 OAuth 액세스 토큰(JWT) 검증. 인가 서버는 포함하지 않는다 (docs/architecture/mcp.md).
 oauth = ["pyjwt[crypto]>=2.10,<3"]
+# 스캔 PDF 공고의 쪽을 이미지로 바꿔 비전 라우트로 (PDFium 바이너리 포함 휠 ~4MB, BSD-3/Apache-2.0).
+# 없으면 스캔 PDF는 `pdf_no_text`로 직접 확인 (docs/architecture/postings.md).
+pdf-render = ["pypdfium2>=4.30,<6"]
 # 내보내기 묶음 암호화 (age 형식). `age` 명령이 있으면 그것을 먼저 쓴다 (docs/operations/backup.md).
 age = ["pyrage>=1.2,<2"]
 
