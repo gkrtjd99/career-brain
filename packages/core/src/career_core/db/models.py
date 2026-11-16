@@ -752,3 +752,24 @@ class Approval(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- O11: 내보내기·복원
+
+
+class ExportRun(Base):
+    """내보내기·복원 1회 기록 (마지막 백업 시각 표시용). 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "export_runs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)  # export | restore
+    via: Mapped[str] = mapped_column(Text)  # cli | http
+    created_by: Mapped[UUID | None] = mapped_column(default=None)
+    format_version: Mapped[int] = mapped_column(Integer)
+    archive_sha256: Mapped[str] = mapped_column(Text)
+    archive_bytes: Mapped[int] = mapped_column(BigInteger)
+    rows_total: Mapped[int] = mapped_column(BigInteger)
+    blobs_total: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

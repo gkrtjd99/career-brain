@@ -164,3 +164,10 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 작업 큐 행은 `core.jobs(kind = 'run', target_id = runs.id)`. 승인 대기·중단 중에는 작업 행이 없다 (결정·재개 때 새로 넣는다).
 - 원문은 넣지 않는다. 입력·위치·결과·사건에는 ID·번호·짧은 코드만.
 - 상세: `docs/architecture/runs.md`, MCP: `docs/architecture/mcp.md`.
+
+## 내보내기·복원 (c0011)
+
+- `core.export_runs` — 내보내기·복원 1회 = 1행 (`kind` export/restore, `via` cli/http, 묶음 sha256·크기·행 수·원본 수). 마지막 백업 시각 표시용. RLS FORCE, 앱 role은 **SELECT, INSERT**.
+- 순환 FK 2개를 `DEFERRABLE INITIALLY IMMEDIATE`로: `fk_job_postings_confirmed_version`(공고 → 확정 버전), `fk_document_revisions_suggestion`(revision → 수정안). 평소엔 지금처럼 즉시 검사하고, 복원만 `SET CONSTRAINTS ALL DEFERRED`로 ID 그대로 넣은 뒤 commit 전에 검사한다. 추가만 되는 표를 UPDATE하지 않아도 되고, `ck_document_suggestions_applied` 같은 CHECK도 그대로 지킨다.
+- 내보내기·복원은 앱 계정이 그 공간 문맥(`app.workspace_id`) 안에서만 한다. 소유자 계정·BYPASSRLS가 필요 없다. 표는 카탈로그에서 찾고(`workspace_id` 칸), 빼는 표는 `EXCLUDED_TABLES`(`jobs`, `embeddings`)에 이유와 함께 둔다. 새 표가 미룰 수 없는 순환 FK나 내보내지 않는 표로의 FK를 만들면 계획 단계에서 오류가 난다.
+- 상세·형식·운영 절차: `docs/operations/backup.md`.

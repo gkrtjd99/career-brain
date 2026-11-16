@@ -1,0 +1,106 @@
+"""유지보수·내보내기 경로 (O11). 모두 소유자(workspace-admin)만.
+
+NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
+"""
+
+import shutil
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from starlette.background import BackgroundTask
+
+from career_core.ports import ActorContext
+from career_core.usecases.export import export_workspace
+from career_core.usecases.maintenance import RunView, maintenance_info, purge_drafts
+
+
+class RunOut(BaseModel):
+    kind: str
+    via: str
+    created_at: datetime
+    archive_sha256: str
+    archive_bytes: int
+    rows_total: int
+    blobs_total: int
+
+
+class BlobUsageOut(BaseModel):
+    referenced: int
+    files: int | None
+    bytes: int | None
+
+
+class MaintenanceOut(BaseModel):
+    tables: dict[str, int]
+    excluded: dict[str, int]
+    rows_total: int
+    blobs: BlobUsageOut
+    last_export: RunOut | None
+    last_restore: RunOut | None
+    drafts_purgeable: int
+    draft_retention_days: int
+    export_available: bool
+
+
+class PurgeOut(BaseModel):
+    deleted: int
+
+
+def _run(run: RunView | None) -> RunOut | None:
+    return None if run is None else RunOut.model_validate(run, from_attributes=True)
+
+
+def add_maintenance_routes(router: APIRouter, deps, authorize) -> None:
+    @router.get("/maintenance", response_model=MaintenanceOut)
+    async def maintenance(
+        actor: Annotated[ActorContext, Depends(authorize("maintenance.read"))],
+    ) -> MaintenanceOut:
+        info = await maintenance_info(deps.db, actor.workspace_id, deps.blobs)
+        return MaintenanceOut(
+            tables=info.tables,
+            excluded=info.excluded,
+            rows_total=info.rows_total,
+            blobs=BlobUsageOut(
+                referenced=info.blobs_referenced, files=info.blob_files, bytes=info.blob_bytes
+            ),
+            last_export=_run(info.last_export),
+            last_restore=_run(info.last_restore),
+            drafts_purgeable=info.drafts_purgeable,
+            draft_retention_days=info.draft_retention_days,
+            export_available=deps.blobs is not None,
+        )
+
+    @router.post("/maintenance/purge-drafts", response_model=PurgeOut)
+    async def purge(
+        actor: Annotated[ActorContext, Depends(authorize("maintenance.purge"))],
+    ) -> PurgeOut:
+        return PurgeOut(deleted=await purge_drafts(deps.db, actor.workspace_id))
+
+    if deps.blobs is None:
+        return  # 원본 저장소 없이는 온전한 묶음을 만들 수 없다
+
+    @router.get("/maintenance/export", response_class=FileResponse)
+    async def export(
+        actor: Annotated[ActorContext, Depends(authorize("workspace.export"))],
+    ) -> FileResponse:
+        tmp = Path(tempfile.mkdtemp(prefix="career-export-"))
+        name = f"career-export-{datetime.now(UTC):%Y%m%d-%H%M%S}.tar.gz"
+        try:
+            report = await export_workspace(
+                deps.db, deps.blobs, actor, tmp / name, via="http", permissions=deps.permissions
+            )
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return FileResponse(
+            report.path,
+            media_type="application/gzip",
+            filename=name,
+            headers={"X-Archive-SHA256": report.sha256, "Cache-Control": "no-store"},
+            background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
+        )

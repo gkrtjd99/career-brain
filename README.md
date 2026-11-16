@@ -13,7 +13,7 @@
 
 ## 설치 (Install)
 
-자세한 설명·백업·업데이트·리버스 프록시: [docs/operations/install.md](docs/operations/install.md)
+자세한 설명·백업·업데이트·리버스 프록시: [docs/operations/install.md](docs/operations/install.md) · 내보내기·복원·백업 일정: [docs/operations/backup.md](docs/operations/backup.md)
 
 **Docker (서버)** — 앱 1개(API + worker + 웹) + PostgreSQL/pgvector. 앱 유휴 메모리 약 100MB.
 
@@ -91,6 +91,7 @@ curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=
 AI 클라이언트(Claude Code·Desktop 등) 연결: 같은 API 토큰으로 MCP `http://127.0.0.1:8000/api/core/mcp` 또는 `personal-api mcp`(stdio). 업무 도구만 있고 승인은 사람만 한다. [docs/architecture/mcp.md](docs/architecture/mcp.md) · 실행·승인: [docs/architecture/runs.md](docs/architecture/runs.md)
 
 DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md) · 설치·운영: [docs/operations/install.md](docs/operations/install.md) · Rust 검토: [docs/architecture/rust.md](docs/architecture/rust.md)
+DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md) · 설치·운영: [docs/operations/install.md](docs/operations/install.md) · 백업·복원: [docs/operations/backup.md](docs/operations/backup.md) · Rust 검토: [docs/architecture/rust.md](docs/architecture/rust.md)
 
 ## 원칙
 

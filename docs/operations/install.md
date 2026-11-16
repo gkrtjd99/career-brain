@@ -129,18 +129,16 @@ docker image prune -f                     # 옛 이미지 정리
 
 ## 5. 백업·복원
 
-전체 내보내기·복원 기능(O11)은 아직 없다. 그때까지는 DB 덤프 + 원본 파일 볼륨을 같이 보관한다.
+자세히: [backup.md](backup.md). 요약:
 
 ```bash
-cd deploy/docker
-docker compose exec -T db pg_dump -U career -d career_brain -Fc > career-$(date +%F).dump
-docker run --rm -v career-brain_app-data:/data:ro -v "$PWD":/backup busybox \
-  tar czf /backup/career-data-$(date +%F).tar.gz -C /data blobs
+personal-api export --out career-$(date +%F).tar.gz     # 공간 하나 (소유자 토큰), 행 수·해시 manifest 포함
+personal-api restore career-YYYY-MM-DD.tar.gz --dry-run # 빈 설치에서 검사만 → 빼고 실행하면 복원 + 새 토큰
+cd deploy/docker && docker compose exec -T db pg_dump -U career -d career_brain -Fc > career-db-$(date +%F).dump
 ```
 
-- 실행 중인 DB 데이터 폴더를 그대로 복사하지 않는다 (plan §14). `pg_dump`를 쓴다.
-- 덤프와 원본은 서버 밖에 암호화해서 둔다. 덤프에는 API 토큰 해시와 개인 자료가 들어 있다.
-- 복원 예시: 빈 볼륨으로 `docker compose up -d db` → `docker compose exec -T db pg_restore -U career -d career_brain --clean --if-exists < career-YYYY-MM-DD.dump` → 원본 tar를 `app-data`에 풀기 → `docker compose up -d`.
+- 서버는 매일 `pg_dump` + 원본 볼륨, 매주 공간 내보내기를 서버 밖에 암호화해서 둔다. 실행 중인 DB 데이터 폴더를 그대로 복사하지 않는다 (plan §14).
+- 묶음과 덤프에는 개인 자료가 들어 있다. 묶음에는 API 토큰·모델 키·검색 벡터가 없다 (복원 후 새 토큰, 재색인).
 
 ## 6. 작은 서버 조정
 
