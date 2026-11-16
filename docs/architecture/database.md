@@ -226,3 +226,23 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - trigger `approvals_wake_run` (AFTER UPDATE OF status ON approvals): 열린 승인이 `invalidated`·`expired`로 바뀌고 그 승인을 기다리던 실행(`waiting_approval`, 같은 `approval_id`)이 있으면 `queued`로 바꾸고 사건(`approval_invalidated`/`approval_expired`)과 `run` job을 넣는다. 다음 단계가 실패 처리한다.
 - 내보내기: `audit_events`·`deletions`는 묶음에 들어가고, `oauth_identities`는 `EXCLUDED_TABLES`(설치마다 다시 연결).
 - 상세: `docs/architecture/runs.md`(무효화를 trigger로 둔 이유), `docs/architecture/mcp.md`(감사·OAuth), `docs/operations/backup.md`(삭제 기록 재적용).
+
+## 문서·인터뷰 요청 기록과 실행 비용 장부 (c0016)
+
+`down_revision = c0015`. 새 표는 RLS FORCE, `workspace_id` + 공간 복합 FK. 둘 다 내보내기·복원 대상이다(`test_export.py`).
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `model_calls.run_id`·`run_step` | 실행 안에서 부른 호출의 실행·단계. 복합 FK `(workspace_id, run_id)` → `runs` `ON DELETE SET NULL (run_id)`, `ck_model_calls_run_step`(단계 번호는 0 이상; 실행이 지워져도 단계 번호는 남는다), 부분 색인 `ix_model_calls_run (run_id) WHERE run_id IS NOT NULL` | (그대로 SELECT, INSERT) |
+| `runs.cost_from_ledger` | 비용을 장부에서 다시 세는 실행인지. 기존 행은 `false`(server default), 새 실행은 `true` (`runs.md` "비용") | (그대로) |
+| `document_suggestion_requests` (새 표) | 수정안 요청 1회 = 1행: `document_id`·`base_revision_id`(복합 FK CASCADE), `block_ids`·`questions`(JSONB 배열, CHECK), `proposed`·`rejected`·`dropped`(0 이상), `idempotency_key`, `run_id`(SET NULL), `model_call_id`, `created_by`. `uq_document_suggestion_requests_idempotency (document_id, idempotency_key)`, 색인 `(document_id, created_at)` | **SELECT, INSERT** |
+| `interview_sessions.idempotency_key` | 세션 만들기 멱등 키. `uq_interview_sessions_idempotency (workspace_id, idempotency_key)` | (그대로) |
+| `interview_question_requests` (새 표) | AI 질문 요청 1회 = 1행: `session_id`(복합 FK CASCADE), `requested`·`created`, `idempotency_key`, `run_id`(SET NULL), `model_call_id`, `created_by`. `uq_interview_question_requests_idempotency (session_id, idempotency_key)` | **SELECT, INSERT** |
+| `interview_questions.request_id` | 그 질문을 만든 요청. 복합 FK `fk_interview_questions_request` CASCADE, 부분 색인 | (그대로) |
+
+- 요청 표는 추가만 한다. 개수는 모델 응답을 검토한 뒤 정해진 값으로 한 번에 넣는다(UPDATE 없음). 요청 행과 수정안·질문 행은 같은 트랜잭션이다.
+- `model_call_id`는 FK가 아닌 참고용 ID다(장부에서 그 호출을 찾을 때 쓴다).
+- 실행이 지워지면 장부·요청 행은 남고 `run_id`만 NULL이 된다(비용 기록은 지우지 않는다).
+- 새 순환 FK는 없다(`test_export.py`의 미루는 FK 목록 그대로).
+- downgrade: 두 표와 추가한 칸·제약·색인을 지운다.
+

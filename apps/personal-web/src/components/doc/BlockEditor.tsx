@@ -145,6 +145,8 @@ export function BlockEditor({
   // 문단 안에서 고른 글 (문장 단위 근거용)
   const [selection, setSelection] = useState<{ key: string; start: number; end: number } | null>(null);
   const pending = useRef<{ key: string; at: number } | null>(null);
+  // 문장 근거를 끊을 때 그 근거가 문단 근거에도 있으면 같이 뺄지 묻는다 (shared = 같이 뺄 수 있는 claim)
+  const [unlinking, setUnlinking] = useState<{ key: string; si: number; shared: string[] } | null>(null);
 
   useEffect(() => {
     if (!pending.current) return;
@@ -169,6 +171,29 @@ export function BlockEditor({
 
   const update = (i: number, patch: Partial<DraftBlock>) =>
     onChange(blocks.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+
+  /** 문장 근거 끊기. 같은 근거가 문단 근거에도 있고 다른 문장이 쓰지 않으면 먼저 묻는다. */
+  const unlinkSpan = (i: number, b: DraftBlock, si: number) => {
+    const spans = b.spans ?? [];
+    const others = spans.filter((_, j) => j !== si);
+    const shared = (spans[si]?.claim_ids ?? []).filter(
+      (c) => b.claim_ids.includes(c) && !others.some((o) => o.claim_ids.includes(c)),
+    );
+    if (!shared.length) {
+      update(i, { spans: others });
+      return;
+    }
+    setUnlinking({ key: b.key, si, shared });
+  };
+  const finishUnlink = (i: number, b: DraftBlock, alsoParagraph: boolean) => {
+    if (!unlinking) return;
+    const others = (b.spans ?? []).filter((_, j) => j !== unlinking.si);
+    update(i, {
+      spans: others,
+      ...(alsoParagraph ? { claim_ids: b.claim_ids.filter((c) => !unlinking.shared.includes(c)) } : {}),
+    });
+    setUnlinking(null);
+  };
 
   const onKeyDown = (i: number) => (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (readOnly || e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -317,13 +342,33 @@ export function BlockEditor({
                     <button
                       aria-label="문장 근거 끊기"
                       className="rounded p-0.5 text-muted hover:text-danger"
-                      onClick={() => update(i, { spans: (b.spans ?? []).filter((_, j) => j !== si) })}
+                      onClick={() => unlinkSpan(i, b, si)}
                     >
                       <X size={12} />
                     </button>
                   ) : null}
                 </span>
               ))}
+              {unlinking?.key === b.key && !readOnly ? (
+                <span
+                  role="group"
+                  aria-label="문장 근거 끊기 확인"
+                  className="flex w-full flex-wrap items-center gap-1.5 rounded-md border border-line bg-subtle/60 px-2 py-1.5 text-xs"
+                >
+                  <span className="min-w-0 flex-1">
+                    이 문장의 근거 {unlinking.shared.length}개는 문단 근거에도 연결돼 있습니다. 문단 근거에서도 뺄까요?
+                  </span>
+                  <Button size="sm" onClick={() => finishUnlink(i, b, false)}>
+                    문장만 끊기
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => finishUnlink(i, b, true)}>
+                    문단 근거에서도 빼기
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setUnlinking(null)}>
+                    취소
+                  </Button>
+                </span>
+              ) : null}
               {marks.map((code) => {
                 const info = FINDING[code];
                 const tone = info ? FINDING_GROUP[info.group].tone : "neutral";

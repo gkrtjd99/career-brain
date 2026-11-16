@@ -38,7 +38,16 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 
 ## 비용
 
-`StepContext.model(purpose, request)`는 모델 게이트웨이를 거친다 (egress·단가·예산·장부 순서 동일). 호출마다 `model_calls`를 올리고 종량제 실지출을 `cost_usd`에 더한다. 단가를 모르면 `cost_unknown`. 구독 프록시의 정가 환산액은 더하지 않는다. 실패·대기한 단계에서 이미 쓴 비용도 남긴다.
+`StepContext.model(purpose, request)`는 모델 게이트웨이를 거친다 (egress·단가·예산·장부 순서 동일). 단가를 모르면 `cost_unknown`. 구독 프록시의 정가 환산액은 더하지 않는다. 실패·대기한 단계에서 이미 쓴 비용도 남긴다.
+
+장부 기준 (c0016):
+
+- 게이트웨이는 실행 안에서 부른 호출의 장부 행에 `run_id`·`run_step`(단계 번호)을 붙인다. 예약(`reserved`) 행과 실패·거부 행도 붙는다.
+- c0016 뒤에 시작한 실행은 `runs.cost_from_ledger = true`다. 단계를 저장할 때마다 `model_calls`·`cost_usd`·`cost_unknown`을 **장부에서 다시 센다**
+  (`ledger_cost`: `status = 'ok'` 행 수, `cost_usd`가 있고 근거가 `list_price_equivalent`·`none`이 아닌 행의 합, 근거 `unknown`이 하나라도 있으면 미상).
+  그래서 단계 도중 죽은 시도가 장부에 남긴 호출도 run 비용에 들어가고, lease를 잃은 옛 worker가 늦게 저장해도 두 번 더해지지 않는다.
+- 재개 때(`resumed` 사건) 먼저 장부와 맞추고 바뀐 만큼을 사건 데이터 `{"step", "reconciled": {"model_calls", "cost_usd"}}`에 남긴다(죽은 시도가 쓴 비용).
+- c0016 전 실행(`cost_from_ledger = false`, migration 기본값)은 예전처럼 이번 시도 값을 더한다. 장부 행에 실행 표시가 없으므로 다시 세지 않는다.
 
 ## 외부 한도 (§17.14)
 
@@ -55,7 +64,8 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 |---|---|---|
 | `save_job_urls` | `jobs.write` | URL 하나씩 저장 (`{"urls": [...]}`, 최대 50). 같은 공고는 기존 항목 |
 | `submit_application` | `applications.write` | 제출 승인 요청 → 사람 결정 대기 → 승인으로 제출 (`{"application_id", "revisions", "note", "sensitive_ack"?}`). 민감 정보 경고가 있으면 `sensitive_ack`도 승인 내용에 들어간다 |
-| `suggest_document_batch` | `documents.ai` | 문서의 문단마다 AI 수정안 1회 (`{"application_id", "document_id", "base_revision", "block_ids"?, "instruction"?}`, 지원 문서만, 최대 50문단). 비용은 run에, 문단별 `effect_key`로 재개 시 중복 없음 (`applications.md`) |
+| `suggest_document_batch` | `documents.ai` | 문서의 문단마다 AI 수정안 1회 (`{"application_id", "document_id", "base_revision", "block_ids"?, "instruction"?}`, 지원 문서만, 최대 50문단). 비용은 run에, 문단별 `effect_key`로 재개 시 중복 없음. 요청 기록(질문 포함)은 `document_suggestion_requests`에 남아 0개 문단도 다시 부르지 않는다 (`applications.md`) |
+| `interview_question_batch` | `interview.ai` (+ 시작할 때 `brain.write`) | 경험마다 인터뷰 세션 1개 + AI 질문 1회 (`{"experience_ids": [...] (1–20, 중복 불가), "count"?: 1–5 (기본 3)}`). 세션은 `effect_key("session:{경험}")`, 질문은 `effect_key("questions:{경험}")`로 멱등이라 재개해도 세션·질문이 늘지 않는다. 결과 `{experiences, sessions, questions}`(ID·개수만, 질문 문장은 `interview_question_requests`·`interview_questions`에) |
 
 새 workflow는 `career_core.workflows.builtin.WORKFLOWS`에 `Workflow(name, action, steps, validate)`로 추가한다. `action`은 `ACTION_SCOPES`에 등록된 행동이어야 한다.
 

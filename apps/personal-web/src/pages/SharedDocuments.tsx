@@ -5,6 +5,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, FileText, Plus } from "lucide-react";
 import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
+import { HiddenTextCheck } from "../components/doc/ExportSheet";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/format";
 import { DOC_KIND } from "../lib/labels";
@@ -43,6 +44,9 @@ export function SharedDocumentsPage() {
           )
         }
       </Loaded>
+      <div className="mt-6">
+        <HiddenTextCheck />
+      </div>
       <AddSharedSheet open={adding} onClose={() => setAdding(false)} />
     </div>
   );

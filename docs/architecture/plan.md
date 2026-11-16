@@ -458,21 +458,27 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 학습: 표시 시간대를 공간 공용 설정(다른 화면의 날짜 표시)으로 넓히기. 지금은 학습 마감·D-day에만 쓴다.
 - ~~학습: 시험 일정의 오늘 화면 D-day, 학습 항목 삭제·병합, 공고에서 빠진 요건(`current: false`) 정리.~~ → 해결 (`assessments/upcoming`, 항목 `merge`·`DELETE`(고치지 않는 기록이 있으면 409), `requirements/cleanup`, `study.md`).
 - 실행(O08): `outbox` 테이블 — 알림·외부 전송처럼 DB 밖 부수효과가 생길 때 (지금은 모든 단계가 DB 안의 멱등 usecase).
-- ~~실행(O08): AI 장기 작업 workflow (문서별 수정안 일괄, 인터뷰 질문 묶음) — `StepContext.model()`로 비용이 실행에 쌓인다. 수정안은 재개 시 중복 생성을 막을 멱등 키(`document_suggestions`에 `idempotency_key`)가 먼저 필요하다.~~ → 수정안 부분 해결 (`document_suggestions.idempotency_key`, workflow `suggest_document_batch`, 재개 시 중복 없음 시험). 인터뷰 질문 묶음은 남음.
+- ~~실행(O08): AI 장기 작업 workflow (문서별 수정안 일괄, 인터뷰 질문 묶음) — `StepContext.model()`로 비용이 실행에 쌓인다. 수정안은 재개 시 중복 생성을 막을 멱등 키(`document_suggestions`에 `idempotency_key`)가 먼저 필요하다.~~ → 해결 (수정안: `document_suggestions.idempotency_key`, workflow `suggest_document_batch`. 인터뷰 질문: c0016 workflow `interview_question_batch`. 둘 다 재개 시 중복 없음 시험).
 - ~~실행(O08): 웹 화면 — 오늘 화면 "승인 요청", 시스템 화면 실행 목록·사건·취소/중단/재개 (API는 있음).~~ → 해결 (`/system` 실행·승인 탭, 오늘 화면 "승인 요청" 카드, `web.md`).
 - ~~실행(O08): 실행 중 단계 heartbeat로 lease 연장 (지금은 단계가 lease 300초 안에 끝난다고 가정)~~ → 해결 (`run_once`가 처리 중 lease의 1/3마다 연장, lease를 잃은 worker는 결과를 덮지 않음, `runs.md`).
 - ~~승인(O08): 승인 화면의 변경 비교 (요청 때 `summary`와 현재 대상의 차이), 대상 변경 시 열린 승인을 즉시 무효로 표시 (지금은 조회·결정·사용 때 확인).~~ → 해결 (`GET /core/approvals/{id}/diff`, c0014 DB trigger로 즉시 무효·대기 실행 깨우기, 조회 때 해시 비교는 뒷받침으로 유지, `runs.md`).
 - ~~MCP(O08): 원격 연결용 OAuth 2.1 (보호 자원 메타데이터, 토큰 대상 검증) — 지금은 공간 범위 API 토큰 Bearer. 도구별 호출 감사 기록 (`AuditSink`).~~ → 해결 (자원 서버 부분만: RFC 9728 메타데이터, 외부 JWT의 iss·aud·exp·서명 검증, (issuer, sub) → 공간 연결, 범위 → 역할 교집합. 감사 기록 `core.audit_events`, `/system` MCP 기록 탭, `mcp.md`).
 - ~~MCP(O08): `list_pending_claims`가 경험마다 조회한다 (N+1). 확인 대기 주장 목록 usecase가 생기면 바꾼다.~~ → 해결 (`brain.list_pending_claims`, 경험 수와 무관하게 쿼리 하나).
 - ~~지원: 제출 전 민감 정보·회사 기밀 재검사(§11)는 아직. 제출 승인 묶음(`applications.submit`)은 O08에서 연결됨.~~ → 해결 (`GET .../sensitive-check`, 경고가 있으면 `sensitive_ack` 확인 필요, 자동 삭제 없음, 승인 해시에 포함).
-- 실행(O08): AI 인터뷰 질문 묶음 workflow (`suggest_document_batch`와 같은 방식).
-- 실행(O08): 단계 도중 worker가 죽으면 그 시도의 모델 비용이 run `cost_usd`에 더해지지 않는다 (장부 `model_calls`에만). 재개 때 장부에서 run 비용을 맞추는 보정.
-- 문서: 일괄 수정안 실행이 모델이 돌려준 질문을 개수만 남긴다 (실행 기록에 글을 넣지 않는 규칙). 질문을 보여 주려면 문서 쪽 표에 저장. 수정안 0개였던 문단은 재개 때 다시 부른다.
-- 문서: 공용 문서 revision을 "최근 활동"에 넣기 (지금 활동 목록은 지원과 inner join).
+- ~~실행(O08): AI 인터뷰 질문 묶음 workflow (`suggest_document_batch`와 같은 방식).~~ → 해결 (c0016 `interview_question_batch`: 경험마다 세션·질문 `effect_key`, 요청 기록 `interview_question_requests`, 비용은 run에, 재개 시 중복 없음 시험, `runs.md`).
+- ~~실행(O08): 단계 도중 worker가 죽으면 그 시도의 모델 비용이 run `cost_usd`에 더해지지 않는다 (장부 `model_calls`에만). 재개 때 장부에서 run 비용을 맞추는 보정.~~ → 해결 (c0016 장부 `model_calls.run_id`·`run_step`, 새 실행은 `cost_from_ledger`로 단계마다 장부에서 다시 셈, 재개 사건에 `reconciled`, 죽은 시도 비용 시험, `runs.md` "비용").
+- ~~문서: 일괄 수정안 실행이 모델이 돌려준 질문을 개수만 남긴다 (실행 기록에 글을 넣지 않는 규칙). 질문을 보여 주려면 문서 쪽 표에 저장. 수정안 0개였던 문단은 재개 때 다시 부른다.~~ → 해결 (c0016 `document_suggestion_requests`: 요청마다 질문·개수, 멱등 키 UNIQUE라 0개 문단도 다시 부르지 않음, 실행 사건엔 글 없음, 웹 수정안 탭 "지난 요청에서 AI가 물어본 것").
+- ~~문서: 공용 문서 revision을 "최근 활동"에 넣기 (지금 활동 목록은 지원과 inner join).~~ → 해결 (left join, "공용 문서 · rN", `refs.shared`, 오늘 화면에서 공용 문서로 연결).
 - 문서: 한국어 형태소 분석 (어간·조사 분리) — 지금은 조사 떼기 + 수 표현·별칭 규칙. 기술명 별칭 표를 사용자가 고치기(공간 설정).
-- 문서: 서버 PDF 생성 (한글 글꼴 포함) — 지금은 브라우저 인쇄. 사용자가 올린 DOCX·PDF의 숨김 텍스트 검사.
-- 지원: 제출본(스냅샷)을 파일로 내보내기 (지금은 문서 revision만).
-- 문서(웹): 문장 근거를 끊어도 그 주장이 문단 근거로 남는다 (span 주장을 문단 `claim_ids`에 합치므로). 끊을 때 함께 뺄지 묻기.
+- ~~문서: 서버 PDF 생성 (한글 글꼴 포함) — 지금은 브라우저 인쇄. 사용자가 올린 DOCX·PDF의 숨김 텍스트 검사.~~ → 해결 (숨김 글 검사: `domain/hidden_text.py`, `POST /core/file-checks/hidden-text`·`GET /core/sources/{id}/hidden-text`, 경고만, 의존성 추가 없음(pypdf 기존). 서버 PDF는 검토 후 보류: 가볍고 라이선스 깨끗한 한글 글꼴 선택지가 없어 브라우저 인쇄 유지, 이유는 `applications.md` "서버 PDF를 만들지 않는 이유").
+- ~~지원: 제출본(스냅샷)을 파일로 내보내기 (지금은 문서 revision만).~~ → 해결 (`GET /applications/{id}/submission/export[/check]`, 문서 내보내기와 같은 writer·검사, 웹 제출본 화면 "제출본 내보내기").
+- ~~문서(웹): 문장 근거를 끊어도 그 주장이 문단 근거로 남는다 (span 주장을 문단 `claim_ids`에 합치므로). 끊을 때 함께 뺄지 묻기.~~ → 해결 (다른 문장이 쓰지 않는 문단 근거가 겹치면 "문장만 끊기 / 문단 근거에서도 빼기 / 취소").
+- 문서(후속): 올린 PDF의 흰 글씨는 채움 색만 본다 — 배경 도형과 비교해 어두운 배경 위 흰 글씨(정상) 오탐, 흰색이 아닌 배경색 글 미탐. 주석·양식 칸·이미지 글은 보지 않는다.
+- 문서(후속): DOCX를 원본(`sources`)으로 올릴 수 없어 저장한 DOCX 다시 검사가 없다 (검사 경로만). 원본 형식에 DOCX를 넣을지 파서와 같이 결정.
+- 문서(후속): 정해진 쪽수가 필요해지면 서버 PDF 재검토 (Noto Sans KR 부분 집합 + fpdf2/ReportLab, 글꼴 크기·라이선스 표기).
+- 실행(후속): 웹에서 일괄 실행(`suggest_document_batch`·`interview_question_batch`) 시작하기 — 지금은 API·MCP로 시작하고 웹은 결과(수정안 탭·인터뷰)만 보여 준다.
+- 실행(후속): c0016 전 실행(`cost_from_ledger = false`)은 장부 표시가 없어 예전처럼 시도 값을 더한다(죽은 시도 비용 누락 그대로). 장부 비용 외 `position`·결과는 lease를 잃은 옛 worker가 덮지 않게 `attempts` 비교에만 기댄다.
+- 인터뷰(후속): 일괄 실행으로 만든 질문의 웹 표시는 기존 인터뷰 화면 그대로다 (실행 ID 표시·묶음 보기 없음).
 - 내보내기(후속): 기존 공간에 합치기(중복 정책), 다른 버전 묶음의 변환 (§15). ID 재매핑은 `restore --new-ids`로 해결 (아래).
 - ~~내보내기: 웹 시스템 메뉴의 유지보수·내보내기 화면 (API `GET /core/maintenance`, `/maintenance/export`, `POST /maintenance/purge-drafts`는 있음).~~ → 해결 (`/system` 백업·유지보수 탭).
 - ~~내보내기: 큰 공간용 스트리밍 — 지금은 표 하나·묶음의 표 파일 전부를 메모리에 올린다 (개인 자료 규모 가정). 묶음 암호화(age 등)를 명령 옵션으로.~~ → 해결 (표·묶음을 임시 파일로 흘려 쓰고 읽기, `export --recipient` / `restore --identity` age 암호화).

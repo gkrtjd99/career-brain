@@ -2,8 +2,6 @@ import type {
   AppDocument,
   ClaimBrief,
   CountRule,
-  ExportCheck,
-  ExportFormat,
   RevisionConflictDetail,
   TextCounts,
 } from "@career-brain/client";
@@ -16,10 +14,11 @@ import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
 import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "../components/doc/BlockEditor";
 import { ChecksPanel } from "../components/doc/ChecksPanel";
+import { ExportSheet } from "../components/doc/ExportSheet";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime, int } from "../lib/format";
-import { DOC_KIND, EXPORT_FORMAT, FINDING, FINDING_GROUP, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
+import { DOC_KIND, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
 
 const route = getRouteApi("/applications/$applicationId/documents/$documentId");
 const sharedRoute = getRouteApi("/documents/$documentId");
@@ -456,7 +455,7 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
           );
         }}
       />
-      <ExportSheet appId={appId} doc={doc} dirty={dirty} open={exporting} onClose={() => setExporting(false)} />
+      <DocumentExportSheet appId={appId} doc={doc} dirty={dirty} open={exporting} onClose={() => setExporting(false)} />
       <SettingsSheet appId={appId} doc={doc} open={settings} onClose={() => setSettings(false)} />
       <CompareSheet
         open={compare}
@@ -690,41 +689,8 @@ function RevisionSheet({ appId, docId, revision, onClose }: { appId: string | nu
 
 // ---------------------------------------------------------------- 내보내기
 
-const FORMATS: ExportFormat[] = ["md", "docx", "html"];
-
-/** 받은 파일을 저장한다 */
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-/**
- * PDF: 서버가 만든 인쇄용 HTML(스크립트 없음)을 새 창에 열고 인쇄 대화상자를 띄운다.
- * 한글 글꼴을 서버에 싣지 않으려고 브라우저의 "PDF로 저장"을 쓴다. 창을 못 열면 HTML 파일로 받는다.
- */
-function printHtml(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(new Blob([blob], { type: "text/html;charset=utf-8" }));
-  const w = window.open(url, "_blank");
-  if (!w) {
-    URL.revokeObjectURL(url);
-    saveBlob(blob, filename);
-    return;
-  }
-  w.addEventListener("load", () => {
-    w.focus();
-    w.print();
-  });
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-/** 내보내기 전에 서버가 만든 파일을 다시 읽어 검사한 결과(숨김 글·조작 문구·민감 정보)를 보이고, 확인한 뒤 받는다. */
-function ExportSheet({
+/** 저장한 최신 revision 내보내기. 시트·검사 표시는 components/doc/ExportSheet 를 제출본과 같이 쓴다. */
+function DocumentExportSheet({
   appId,
   doc,
   dirty,
@@ -737,89 +703,17 @@ function ExportSheet({
   open: boolean;
   onClose: () => void;
 }) {
-  const [format, setFormat] = useState<ExportFormat>("docx");
-  const [confirmed, setConfirmed] = useState(false);
-  const check = useQuery({
-    queryKey: ["export-check", doc.id, doc.current_revision, format],
-    queryFn: () => api.exportCheck(appId, doc.id, format),
-    enabled: open && doc.current_revision > 0,
-    staleTime: Infinity,
-  });
-  useEffect(() => setConfirmed(false), [format, open, check.data]);
-  const download = useMutation({
-    mutationFn: () => api.exportFile(appId, doc.id, format, check.data?.revision),
-    onSuccess: (f) => {
-      if (format === "html") printHtml(f.blob, f.filename);
-      else saveBlob(f.blob, f.filename);
-    },
-  });
-  const warnings = check.data?.findings.length ?? 0;
   return (
-    <Sheet
+    <ExportSheet
       open={open}
-      onOpenChange={(o) => !o && onClose()}
+      onClose={onClose}
       title="내보내기"
       description="저장한 최신 revision 을 파일로 만듭니다. 만든 파일을 다시 읽어 숨김 글·조작 문구·민감 정보를 검사합니다. 경고만 하고 지우지 않습니다."
-    >
-      <div className="space-y-3">
-        <div>
-          <Label htmlFor="ex-format">형식</Label>
-          <Select id="ex-format" value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
-            {FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {EXPORT_FORMAT[f]}
-              </option>
-            ))}
-          </Select>
-          {format === "html" ? (
-            <p className="mt-1 text-xs text-muted">인쇄 화면을 새 창에 엽니다. 인쇄 대화상자에서 "PDF로 저장"을 고르세요.</p>
-          ) : null}
-        </div>
-        {dirty ? <p className="text-xs text-warn">저장하지 않은 편집은 들어가지 않습니다.</p> : null}
-        <Loaded query={check}>{(c) => <ExportFindings check={c} />}</Loaded>
-        {warnings ? (
-          <label className="flex items-start gap-2 text-[13px]">
-            <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-            <span>경고 {warnings}개를 확인했고 이대로 내보냅니다.</span>
-          </label>
-        ) : null}
-        <ErrorText error={download.error} />
-        <Button
-          variant="primary"
-          onClick={() => download.mutate()}
-          disabled={!check.data || download.isPending || (warnings > 0 && !confirmed)}
-        >
-          <Download size={14} /> {format === "html" ? "인쇄 화면 열기" : "파일 받기"}
-        </Button>
-      </div>
-    </Sheet>
-  );
-}
-
-function ExportFindings({ check }: { check: ExportCheck }) {
-  if (!check.findings.length)
-    return (
-      <p className="rounded-md border border-line bg-surface px-3 py-2 text-[13px]">
-        r{check.revision} · {check.filename} · {int(check.bytes)} byte · 경고 없음
-      </p>
-    );
-  return (
-    <div className="space-y-1.5">
-      <p className="text-[13px]">
-        r{check.revision} · {check.filename} · 경고 {check.findings.length}개
-      </p>
-      <ul className="space-y-1.5">
-        {check.findings.map((f, i) => {
-          const info = FINDING[f.code];
-          const tone = info ? FINDING_GROUP[info.group].tone : "neutral";
-          return (
-            <li key={`${f.code}-${i}`} className="rounded-md border border-line bg-surface px-2.5 py-2 text-[13px]">
-              <Badge tone={tone}>{info?.label ?? f.code}</Badge>
-              <p className="mt-1 leading-5">{f.message}</p>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+      queryKey={["export-check", doc.id, doc.current_revision]}
+      enabled={doc.current_revision > 0}
+      check={(format) => api.exportCheck(appId, doc.id, format)}
+      download={(format, c) => api.exportFile(appId, doc.id, format, c.revision)}
+      note={dirty ? <p className="text-xs text-warn">저장하지 않은 편집은 들어가지 않습니다.</p> : null}
+    />
   );
 }

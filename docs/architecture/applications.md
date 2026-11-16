@@ -35,10 +35,14 @@ AI 수정안(선택) ─▶ 코드가 사실 변경·조작 문구 거부 ─▶
 | `POST .../documents/{doc}/validate {revision?, extra_cliches?}` | read | 검사 결과 (artifact_validate) |
 | `POST .../documents/{doc}/suggestions {base_revision, block_ids?, instruction?}` | `documents.ai` → egress | AI 수정안. 모델 미설정 503 `models_not_configured` |
 | `GET .../documents/{doc}/suggestions` | read | 수정안 목록(거부 사유 포함) |
+| `GET .../documents/{doc}/suggestion-requests?run_id=&limit=` | read | 요청 기록(c0016): 문단 ID·모델 질문·제안/거부/버림 수·실행 ID. 최근 순 (limit 기본 20, 최대 100) |
 | `POST .../suggestions/{sid}/apply {base_revision}` · `/dismiss` | write | 적용(새 revision) / 닫기 |
 | `GET /applications/{id}/checks` | read | 문서별 경고 요약 + 모든 문서를 합친 요건 가시성 |
 | `POST /applications/{id}/submit {revisions: {doc_id: n}, note?}` | `applications.submit` → approve | 제출본 고정 (201, 확인한 revision이 최신과 다르면 409) |
 | `GET /applications/{id}/submission` | read | 제출본 |
+| `GET /applications/{id}/submission/export/check?format=md\|docx\|html` · `/submission/export?format=` | read | 제출본 파일(문서 내보내기와 같은 writer). 검사만 / 파일. 제출본이 없으면 404 |
+| `POST /file-checks/hidden-text` (multipart `file`) | `applications.read` → read | 올린 DOCX·PDF 숨김 글 검사. 저장하지 않는다. 빈 파일 400, 크기 초과 413, 다른 형식 415, 깨진·암호 파일 422 |
+| `GET /sources/{source_id}/hidden-text?version_id=` | `sources.read` → read | 이미 올린 원본(파일 저장소가 있을 때) 한 버전의 같은 검사 |
 | `POST /applications/{id}/documents/copy {source_document_id, revision?, title?}` | write | 공용 문서의 revision(기본 최신)을 새 지원 문서로 복사 (201) |
 | `GET /applications/{id}/sensitive-check` | read | 제출 전 재검사 결과 `{sensitive_hash, requires_ack, findings, summary}` |
 | `GET/POST /applications/{id}/stages` · `PATCH/DELETE .../stages/{sid}` | read / write | 전형 단계. 제출본이 있어야 추가 (없으면 409 `not_submitted`) |
@@ -151,6 +155,10 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
 7. 일괄 수정안 workflow `suggest_document_batch` (`documents.ai`): `{application_id, document_id, base_revision, block_ids?, instruction?}` (지원 문서만). 문단마다 한 단계로 `StepContext.model`을 불러 비용이 실행(run)에 쌓이고,
    문단마다 `effect_key("block:{id}")`를 멱등 키로 쓰므로 중간에 멈춘 실행을 이어도 이미 만든 문단의 수정안을 다시 만들지 않는다. 문서가 그사이 바뀌면 `revision_conflict`로 멈춘다.
    실행 기록에는 문단 ID·개수만 남기고 글·질문 문장은 넣지 않는다(결과: `{blocks, proposed, rejected, questions}`).
+8. 요청 기록 `document_suggestion_requests` (c0016, SELECT/INSERT만): 요청 한 번(직접 요청이든 일괄 실행의 문단 하나든)마다 한 행.
+   기준 revision, 문단 ID, 모델 질문(`questions`), 제안·거부·버림 수, 실행 ID, 모델 호출 ID. 수정안 행과 같은 트랜잭션에 쓴다.
+   멱등 키가 있으면 `(document_id, idempotency_key)` UNIQUE라 수정안이 0개여도 기록이 남고, 재개·재시도는 이 행을 보고 모델을 다시 부르지 않는다
+   (c0016 전 수정안 행만 있는 키는 예전처럼 수정안 행으로 돌려준다). 웹 수정안 탭은 "지난 요청에서 AI가 물어본 것"으로 질문을 보여 준다(일괄 실행 표시 포함).
 
 ## 제출본 (§17.12)
 
@@ -159,6 +167,8 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
   공고의 그때 `fields`·`confirmed_version_id`·`pending_changes`, 당시 검사 결과. 전체의 `content_hash`.
 - `application_submissions`는 SELECT/INSERT만. 이후 주장 문장·공고 항목을 고쳐도 제출본은 바뀌지 않는다(시험으로 확인).
 - 확인 대기 중인 공고 변경(`pending_changes`)이 있으면 스냅샷에 같이 남는다.
+- 파일로 내보내기(c0016): 제목은 지원 제목, 첫 줄에 `제출본 · 고정 시각 · 내용 해시 앞 12자`, 문서마다 소제목(문서 제목)과 `문항: …` 메모를 단다.
+  문서 내보내기와 같은 writer(`domain/document_export.py`의 `sections`)라 escape·DOCX 형식·검사가 같다. 스냅샷의 제출 문자열(`text`)을 줄 단위로 쓰고 지금 문서는 읽지 않는다.
 
 ### 제출 전 민감 정보 재검사
 
@@ -183,6 +193,34 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
   한글 글꼴을 서버 PDF 라이브러리에 싣는 비용(수 MB 글꼴 + 의존성)을 피하려는 선택이다. 파일 이름은 `….pdf.html`.
 - 만든 파일을 다시 읽어 검사한다: DOCX는 XML에서 숨김(`w:vanish`·`webHidden`)·흰 글씨·크기 0/1 서식과 본문 글을, HTML은 원본과 보이는 글을 본다. 그 위에 숨김 문자·심사 지시문 검사와 민감 정보 검사.
   경고만 하고(`export/check`로 먼저 보여 준다) 파일은 그대로 준다. 웹은 경고가 있으면 확인 체크를 받은 뒤 받게 한다.
+  문서 화면과 제출본 화면이 같은 시트(`components/doc/ExportSheet.tsx`)를 쓴다.
+
+### 올린 DOCX·PDF 숨김 글 검사 (c0016)
+
+다른 도구로 만든 이력서·포트폴리오를 내기 전에 본다(`domain/hidden_text.py`). 경고만 하고 파일을 고치거나 막지 않으며, 검사 경로는 파일을 저장하지 않는다.
+
+- DOCX(표준 라이브러리 `zipfile` + `xml.etree`): 본문·머리글·바닥글·각주의 run마다 `w:vanish`/`specVanish`(스타일 상속 포함) → `hidden_text_vanish`,
+  `webHidden` → `hidden_text_invisible`, 흰 글씨(`FFFFFF`·`white`, 어두운 음영 위는 제외) → `hidden_text_white`, 1pt 미만(`w:sz` < 2) → `hidden_text_tiny`,
+  쪽 밖으로 민 글상자·frame(음수·쪽 크기 넘는 위치) → `hidden_text_outside_page`. DTD/ENTITY가 있는 XML, 압축 해제 크기·항목 수 초과는 거부한다.
+- PDF(`pypdf`, 이미 쓰던 의존성): 내용 스트림을 따라가며 그래픽 상태(q/Q, 색 `rg/g/k/sc/scn`, 글자 렌더 모드 `Tr`, 글자 크기·행렬)를 추적한다.
+  렌더 모드 3·7 → `invisible`, 흰 채움 → `white`, 실제 크기 1pt 미만 → `tiny`, 보이는 상자(CropBox) 밖 → `outside_page`. 100쪽까지 보고 나머지는 `pages_not_checked`, 글을 못 읽은 쪽은 `pages_unreadable`.
+  암호 PDF는 422 `pdf_encrypted`.
+- 숨김 글이 아닌 전체 글에도 숨김 문자·심사 지시문·키워드 반복 검사를 돌린다. 지시문이 숨긴 글 안에 있으면 `detail.in_hidden_text`.
+- 각 경고는 `detail.count`와 앞 몇 곳의 `samples`(쪽·위치·글 일부)를 준다. 웹: 공용 문서 화면의 "제출할 파일 숨김 글 검사" 카드.
+
+### 서버 PDF를 만들지 않는 이유 (c0016 검토)
+
+가벼우면서 라이선스가 깨끗한 선택지가 없어 브라우저 인쇄를 유지한다.
+
+| 후보 | 걸리는 점 |
+|---|---|
+| WeasyPrint | Pango·cairo·HarfBuzz 같은 시스템 라이브러리가 필요하다(설치 문서·컨테이너가 무거워진다). 한글 글꼴도 따로 설치 |
+| ReportLab / fpdf2 + 임베드 글꼴 | 한글 TTF를 레포나 패키지에 실어야 한다. Noto Sans KR/CJK(OFL)는 굵기 하나에 수 MB~16MB, Pretendard·나눔(OFL)도 부분 집합으로 줄여도 굵기마다 수 MB. fpdf2는 LGPL |
+| ReportLab 내장 CID 글꼴(HYGothic·HYSMyeongJo) | 글꼴을 넣지 않고 이름만 쓴다 → 보는 프로그램에 그 글꼴이 없으면 대체 글꼴로 바뀐다(모양·줄바꿈이 사람마다 달라진다) |
+| headless Chromium | 수백 MB 런타임 |
+
+브라우저 인쇄는 사용자 컴퓨터의 한글 글꼴을 쓰므로 추가 의존성이 없고, 서버가 만든 인쇄용 HTML은 숨김 글 검사를 거친다.
+대신 쪽 나눔·여백은 브라우저마다 조금 다르다. 정해진 쪽수가 꼭 필요해지면 그때 Noto Sans KR 부분 집합 + fpdf2/ReportLab을 다시 검토한다.
 
 ## plan과 다른 점
 
@@ -198,9 +236,9 @@ plan이 말한 교체 가능한 판정 모델(게이트웨이 뒤)은 아직 붙
 - 한국어 처리는 조사 떼기·불용어와 규칙 기반 수 표현·기술명 별칭 표다. 형태소 분석이 없어 놓치거나 과하게 잡는다
   (예: 단위 명사 목록에 없는 "두 군데", 띄어 쓰지 않은 "세명이서"는 잡고 "한 명"은 일부러 뺀다). 별칭 표는 코드에 있고 사용자가 고칠 수 없다.
 - 역할 대조는 정해진 단어 목록이다("맡아 이끌었다" 같은 표현은 놓칠 수 있다).
-- 숨김 서식 검사는 붙여 넣은 HTML/CSS 흔적과 우리가 만든 DOCX·HTML만 본다. 사용자가 올린 DOCX·PDF를 검사하지는 않는다. 서버가 PDF를 만들지 않는다(브라우저 인쇄).
-- 제출본(스냅샷)은 아직 파일로 내보내지 않는다(문서 revision만).
-- 일괄 수정안 workflow: 한 단계 도중 worker가 죽으면 그 시도의 모델 비용은 `model_calls` 장부에만 있고 run의 `cost_usd`에는 더해지지 않는다.
-  모델이 수정안 0개를 돌려준 문단은 기록이 없어 재개 때 다시 부른다. 모델이 돌려준 질문은 개수만 남는다(글은 실행 기록에 넣지 않는다).
-- 공용 문서의 revision은 "최근 활동"에 나오지 않는다(활동 목록이 지원과 join한다).
-- 웹 편집기에서 문장 근거를 끊어도 그 주장은 문단 근거로 남는다(서버가 span 주장을 문단 `claim_ids`에 합쳐 두므로). 문단 근거에서 따로 끊어야 한다.
+- 서버가 PDF를 만들지 않는다(브라우저 인쇄, 위 검토).
+- 올린 PDF 검사는 흰 글씨를 "채움 색이 흰색"으로만 본다. 어두운 배경 도형 위의 흰 글씨(정상)도 경고하고, 배경과 같은 색(흰색이 아닌)으로 숨긴 글은 놓친다.
+  이미지로 된 글·주석(annotation)·양식 칸은 보지 않는다. DOCX는 테마 색·조건부 서식·글자 색과 같은 강조 색 같은 경우를 다 따지지 않는다.
+- 숨김 글 검사는 원본(`sources`)으로 올린 파일만 다시 검사할 수 있다. 지금 원본 업로드는 PDF 등 기존 형식만 받으므로 DOCX는 검사 경로(`POST /file-checks/hidden-text`)로만 본다.
+- 공용 문서의 revision은 "최근 활동"에 지원 제목 대신 "공용 문서"로 나온다(c0016, `refs.shared = "true"`, 활동 목록이 지원과 left join한다).
+- 웹 편집기에서 문장 근거를 끊을 때, 그 주장이 문단 근거에도 있고 다른 문장이 쓰지 않으면 "문장만 끊기 / 문단 근거에서도 빼기"를 묻는다(c0016).
