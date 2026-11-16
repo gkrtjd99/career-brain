@@ -36,6 +36,8 @@ ACTION_SCOPES: dict[str, str] = {
     "interview.ai": "egress",
     "search.read": "read",
     "search.reindex": "draft-write",
+    "jobs.read": "read",
+    "jobs.write": "draft-write",
 }
 
 

@@ -19,7 +19,7 @@ from sqlalchemy import (
     Numeric,
     Text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from career_core.db.base import CORE_SCHEMA, Base, utcnow
@@ -314,6 +314,71 @@ class Embedding(Base):
     content_hash: Mapped[str] = mapped_column(Text)
     embedding: Mapped[list[float]] = mapped_column(Vector())
     model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class JobPosting(Base):
+    __tablename__ = "job_postings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    canonical_url: Mapped[str] = mapped_column(Text)
+    source_url: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="draft")
+    fields: Mapped[dict] = mapped_column(JSONB, default=dict)
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    confirmed_version_id: Mapped[UUID | None] = mapped_column(default=None)
+    pending_changes: Mapped[list] = mapped_column(JSONB, default=list)
+    saved_by: Mapped[UUID | None] = mapped_column(default=None)
+    saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class JobPostingVersion(Base):
+    """가져온 공고 스냅샷. 앱 role은 추가·조회만 한다."""
+
+    __tablename__ = "job_posting_versions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    version_no: Mapped[int] = mapped_column(Integer)
+    final_url: Mapped[str] = mapped_column(Text)
+    http_status: Mapped[int | None] = mapped_column(Integer, default=None)
+    method: Mapped[str] = mapped_column(Text)
+    adapter: Mapped[str] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    extracted: Mapped[dict] = mapped_column(JSONB)
+    missing: Mapped[list] = mapped_column(JSONB)
+    changed_fields: Mapped[list] = mapped_column(JSONB)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    screenshot_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class JobFetchRun(Base):
+    __tablename__ = "job_fetch_runs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    status: Mapped[str] = mapped_column(Text, default="pending")
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    http_status: Mapped[int | None] = mapped_column(Integer, default=None)
+    version_id: Mapped[UUID | None] = mapped_column(default=None)
+    unchanged: Mapped[bool] = mapped_column(default=False)
+    candidates: Mapped[list] = mapped_column(JSONB, default=list)
+    notes: Mapped[list] = mapped_column(JSONB, default=list)
+    requested_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
