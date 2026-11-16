@@ -38,6 +38,7 @@ from career_core.domain.brain import (
     confirmed_status,
 )
 from career_core.ports import ActorContext
+from career_core.usecases.index_queue import request_index
 
 APPROVE_SCOPE = "approve"
 
@@ -397,6 +398,7 @@ async def add_claim(
             await _attach_span(s, actor, claim, span_id)
         if can_confirm(actor) and claim.contribution != Contribution.UNKNOWN:
             _mark_confirmed(claim, actor, has_span=bool(span_ids))
+        await request_index(s, actor.workspace_id)
     return claim.id
 
 
@@ -455,6 +457,7 @@ async def confirm_claim(
             claim.contribution = _contribution(contribution)
         if statement is not None:
             claim.statement = _statement(statement)
+            await request_index(s, actor.workspace_id)
         _mark_confirmed(claim, actor, has_span=await _has_span(s, claim.id))
         return claim.status
 
@@ -476,6 +479,7 @@ async def edit_claim(
             raise ClaimRuleError("claim_retired")
         if statement is not None:
             claim.statement = _statement(statement)
+            await request_index(s, actor.workspace_id)
         if kind is not None:
             claim.kind = _kind(kind)
         if contribution is not None:

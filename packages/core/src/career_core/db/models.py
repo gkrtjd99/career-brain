@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from career_core.db.base import CORE_SCHEMA, Base, utcnow
+from career_core.db.types import Vector
 
 
 class Workspace(Base):
@@ -297,3 +298,23 @@ class InterviewAnswer(Base):
     answer: Mapped[str] = mapped_column(Text)
     answered_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Embedding(Base):
+    """검색용 벡터. 본문 원문은 두지 않고 대상 ID와 본문 해시만 둔다."""
+
+    __tablename__ = "embeddings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    target_kind: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[UUID]
+    space: Mapped[str] = mapped_column(Text)
+    dims: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector())
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

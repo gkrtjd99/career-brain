@@ -43,6 +43,7 @@ from career_core.usecases.brain import (
     can_confirm,
 )
 from career_core.usecases.extraction import parse_model_json
+from career_core.usecases.index_queue import request_index
 
 INTERVIEW_PURPOSE = "interview"
 MAX_AI_QUESTIONS = 5
@@ -278,6 +279,7 @@ async def answer_question(
         )
         s.add(ans)
         await s.flush()
+        await request_index(s, actor.workspace_id)
         if not make_claim:
             return AnswerResult(ans.id, None, None)
         target = experience_id or session.experience_id

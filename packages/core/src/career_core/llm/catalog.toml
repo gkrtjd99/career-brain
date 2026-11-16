@@ -114,6 +114,19 @@ output = "5"
 source = "https://developers.openai.com/api/docs/pricing"
 as_of = 2026-11-16
 
+# 임베딩: 입력 토큰만 과금된다.
+[[models]]
+provider = "openai"
+model = "text-embedding-3-small"
+input = "0.02"
+output = "0"
+
+[[models]]
+provider = "openai"
+model = "text-embedding-3-large"
+input = "0.13"
+output = "0"
+
 [[models]]
 provider = "openai"
 model = "gpt-6-astra"

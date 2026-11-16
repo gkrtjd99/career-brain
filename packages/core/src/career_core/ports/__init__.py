@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from career_core.llm.types import ModelCompletion, ModelRequest
+from career_core.llm.types import EmbeddingCompletion, ModelCompletion, ModelRequest
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +50,18 @@ class ModelClient(Protocol):
     """LLM 제공자 하나. 게이트웨이(`career_core.llm.gateway`)만 직접 부른다."""
 
     async def complete(self, model: str, request: ModelRequest) -> ModelCompletion: ...
+
+
+@runtime_checkable
+class EmbeddingClient(Protocol):
+    """임베딩 제공자 하나 (API 또는 로컬 모델). 게이트웨이만 직접 부른다.
+
+    input_type: "query"(검색어) 또는 "passage"(색인할 본문). 모델에 따라 접두어가 다르다.
+    """
+
+    async def embed(
+        self, model: str, texts: Sequence[str], *, input_type: str, dimensions: int | None
+    ) -> EmbeddingCompletion: ...
 
 
 @runtime_checkable
@@ -158,6 +170,7 @@ __all__ = [
     "DenyAllEgressPolicy",
     "DenyAllPermissionPolicy",
     "EgressPolicy",
+    "EmbeddingClient",
     "IdentityResolver",
     "LocalParseResult",
     "LocalParser",

@@ -110,3 +110,9 @@ def extraction_handlers(deps) -> dict[str, JobHandler]:
             give_up=lambda ws, target: give_up_extraction(deps, ws, target),
         )
     }
+
+
+def index_handlers(deps) -> dict[str, JobHandler]:
+    from career_core.usecases.indexing import INDEX_JOB, process_index
+
+    return {INDEX_JOB: JobHandler(run=lambda ws, target: process_index(deps, ws, target))}

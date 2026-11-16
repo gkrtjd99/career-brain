@@ -2,7 +2,7 @@
 name = "career-brain-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
-dependencies = ["career-core", "personal-api"]
+dependencies = ["career-core[local-embed]", "personal-api"]
 
 [tool.uv]
 package = false

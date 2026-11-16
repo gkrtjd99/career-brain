@@ -5,11 +5,13 @@ OpenAI, xAI(Grok), Gemini의 OpenAI 호환 엔드포인트, CLIProxyAPI, OpenRou
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
 from career_core.llm.config import EndpointConfig
 from career_core.llm.types import (
+    EmbeddingCompletion,
     ModelCallError,
     ModelCompletion,
     ModelRequest,
@@ -68,6 +70,26 @@ def reported_cost(raw: Any) -> Decimal | None:
         return None
 
 
+def _call_error(sdk: Any, exc: Exception) -> ModelCallError:
+    if isinstance(exc, sdk.APITimeoutError):
+        return ModelCallError("timeout", retryable=True)
+    if isinstance(exc, sdk.RateLimitError):
+        return ModelCallError("rate_limited", retryable=True)
+    if isinstance(exc, sdk.AuthenticationError):
+        return ModelCallError("auth_failed")
+    if isinstance(exc, sdk.PermissionDeniedError):
+        return ModelCallError("permission_denied")
+    if isinstance(exc, sdk.NotFoundError):
+        return ModelCallError("model_not_found")
+    if isinstance(exc, sdk.BadRequestError):
+        return ModelCallError("bad_request")
+    if isinstance(exc, sdk.APIStatusError):
+        return ModelCallError(f"http_{exc.status_code}", retryable=exc.status_code >= 500)
+    if isinstance(exc, sdk.APIConnectionError):
+        return ModelCallError("connection_error", retryable=True)
+    return ModelCallError(type(exc).__name__)
+
+
 class OpenAICompatibleClient:
     def __init__(
         self, endpoint: EndpointConfig, api_key: str | None, *, http_client: Any = None
@@ -100,23 +122,8 @@ class OpenAICompatibleClient:
                 messages=messages,
                 **{self._token_param: request.max_output_tokens},
             )
-        except sdk.APITimeoutError as exc:
-            raise ModelCallError("timeout", retryable=True) from exc
-        except sdk.RateLimitError as exc:
-            raise ModelCallError("rate_limited", retryable=True) from exc
-        except sdk.AuthenticationError as exc:
-            raise ModelCallError("auth_failed") from exc
-        except sdk.PermissionDeniedError as exc:
-            raise ModelCallError("permission_denied") from exc
-        except sdk.NotFoundError as exc:
-            raise ModelCallError("model_not_found") from exc
-        except sdk.BadRequestError as exc:
-            raise ModelCallError("bad_request") from exc
-        except sdk.APIStatusError as exc:
-            retryable = exc.status_code >= 500
-            raise ModelCallError(f"http_{exc.status_code}", retryable=retryable) from exc
-        except sdk.APIConnectionError as exc:
-            raise ModelCallError("connection_error", retryable=True) from exc
+        except sdk.OpenAIError as exc:
+            raise _call_error(sdk, exc) from exc
 
         choice = resp.choices[0] if resp.choices else None
         served = resp.model or model
@@ -128,4 +135,26 @@ class OpenAICompatibleClient:
             parts=parts,
             request_id=getattr(resp, "_request_id", None) or resp.id,
             reported_cost_usd=reported_cost(resp.usage) if resp.usage else None,
+        )
+
+    async def embed(
+        self, model: str, texts: Sequence[str], *, input_type: str, dimensions: int | None
+    ) -> EmbeddingCompletion:
+        """OpenAI Embeddings API. input_type은 OpenAI 모델에는 쓰지 않는다 (접두어 없음)."""
+        kwargs: dict[str, Any] = {"model": model, "input": list(texts), "encoding_format": "float"}
+        if dimensions is not None:
+            kwargs["dimensions"] = dimensions
+        try:
+            resp = await self._client.embeddings.create(**kwargs)
+        except self._sdk.OpenAIError as exc:
+            raise _call_error(self._sdk, exc) from exc
+        rows = sorted(resp.data, key=lambda d: d.index)
+        served = resp.model or model
+        prompt = getattr(resp.usage, "prompt_tokens", 0) if resp.usage else 0
+        parts = (UsagePart(served, TokenUsage(input_tokens=prompt or 0)),) if resp.usage else ()
+        return EmbeddingCompletion(
+            vectors=tuple(tuple(r.embedding) for r in rows),
+            model=served,
+            parts=parts,
+            request_id=getattr(resp, "_request_id", None),
         )

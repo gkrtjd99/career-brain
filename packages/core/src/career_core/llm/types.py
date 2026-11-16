@@ -116,3 +116,39 @@ class ModelDenied(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+EMBED_QUERY = "query"
+EMBED_PASSAGE = "passage"
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingCompletion:
+    """임베딩 어댑터의 원시 결과. 장부 기록을 위해 ModelCompletion과 같은 이름의 필드를 둔다."""
+
+    vectors: tuple[tuple[float, ...], ...]
+    model: str
+    parts: tuple[UsagePart, ...] = ()
+    request_id: str | None = None
+    stop_reason: str | None = None
+    reported_cost_usd: Decimal | None = None
+
+    @property
+    def usage(self) -> TokenUsage:
+        total = TokenUsage()
+        for part in self.parts:
+            total = total + part.usage
+        return total
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingResult:
+    vectors: tuple[tuple[float, ...], ...]
+    endpoint: str
+    model: str
+    dimensions: int
+    # 같은 검색 공간에 넣어도 되는지 판단하는 이름. 모델·차원이 다르면 공간이 다르다.
+    space: str
+    cost_usd: str | None
+    cost_basis: str
+    call_id: str

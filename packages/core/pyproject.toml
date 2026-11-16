@@ -19,6 +19,8 @@ dependencies = [
 anthropic = ["anthropic>=2.8,<3"]
 openai = ["openai>=3.51,<4"]
 llm = ["anthropic>=2.8,<3", "openai>=3.51,<4"]
+# 로컬 임베딩 (ONNX Runtime, torch 없음). 이미지·설치를 가볍게 두려면 빼도 된다.
+local-embed = ["fastembed>=0.9,<1"]
 
 [build-system]
 requires = ["hatchling"]
