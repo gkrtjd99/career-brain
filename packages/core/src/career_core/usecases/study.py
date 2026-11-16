@@ -2019,7 +2019,12 @@ async def _judge_lines(
             if c.claim_id not in blocked and c.claim_id in texts
         ]
         verdicts, _ = await judges.judge_claims(
-            call_model, ln.text, send, data_classes=classes, tally=tally
+            call_model,
+            ln.text,
+            send,
+            data_classes=classes,
+            tally=tally,
+            claim_ids=[c.claim_id for c in ln.candidates if str(c.claim_id) in dict(send)],
         )
         out.append(
             replace(

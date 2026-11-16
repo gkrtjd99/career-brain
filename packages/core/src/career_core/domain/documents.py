@@ -450,6 +450,8 @@ def rule_from_prompt(
 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 _LATIN = re.compile(r"[A-Za-z][A-Za-z0-9+#]*(?:[.\-][A-Za-z0-9+#]+)*")
+# 요건의 어절(띄어 쓰지 않은 한글 묶음). 형태소 모드에서 복합명사를 한 낱말로 세는 데 쓴다 (`key_terms`).
+_HANGUL_CHUNK = re.compile(r"[가-힣]+")
 # 한글 낱말의 조사·어미 떼기는 domain.korean.content_words (규칙 기반 기본, 선택 설치 형태소 분석기).
 # 요건 문장에 흔하지만 무엇을 요구하는지는 말해 주지 않는 말.
 KO_STOPWORDS = frozenset(
@@ -560,16 +562,24 @@ def korean_terms(text: str) -> list[str]:
 
 @dataclass(frozen=True, slots=True)
 class Terms:
-    """요건 하나를 판정할 단어들. latin이 있으면 그중 하나(“Python 또는 Go”), 한국어만 있으면 두 개 이상."""
+    """요건 하나를 판정할 단어들. latin이 있으면 그중 하나(“Python 또는 Go”), 한국어만 있으면 두 개 이상.
+
+    `groups`: 형태소 분석기 모드에서 요건의 한 어절(띄어 쓰지 않은 한글 묶음)에서 나온 내용어 묶음.
+    "머신러닝"이 머신·러닝으로 나뉘어도 낱말 하나로 센다. 비어 있으면 낱말마다 한 묶음(규칙 기반).
+    """
 
     words: tuple[str, ...]
     latin: bool
+    groups: tuple[tuple[str, ...], ...] = ()
+
+    def units(self) -> tuple[tuple[str, ...], ...]:
+        return self.groups or tuple((w,) for w in self.words)
 
     @property
     def needed(self) -> int:
         if not self.words:
             return 0
-        return 1 if self.latin else min(2, len(self.words))
+        return 1 if self.latin else min(2, len(self.units()))
 
 
 def tech_terms(text: str) -> list[str]:
@@ -583,7 +593,22 @@ def key_terms(requirement: str) -> Terms:
     latin = tech_terms(requirement)
     if latin:
         return Terms(tuple(latin), True)
-    return Terms(tuple(dict.fromkeys(korean_terms(requirement))), False)
+    words = tuple(dict.fromkeys(korean_terms(requirement)))
+    analyzer = korean_analyzer()
+    if not analyzer.morphological:
+        return Terms(words, False)
+    # 복합명사는 한 낱말로 센다: 요건 전체를 분석한 내용어를 원문 위치로 어절에 나눈다
+    # (어절만 따로 분석하면 형태소 분할이 달라질 수 있다). 같은 묶음이 두 번 나오면 한 번.
+    chunks = [m.span() for m in _HANGUL_CHUNK.finditer(requirement or "")]
+    by_chunk: dict[int, list[str]] = {}
+    for w, start, _ in analyzer.content_spans(requirement):
+        if len(w) < 2 or w in KO_STOPWORDS:
+            continue
+        at = next((i for i, (a, b) in enumerate(chunks) if a <= start < b), -1 - start)
+        if w not in by_chunk.setdefault(at, []):
+            by_chunk[at].append(w)
+    groups = tuple(dict.fromkeys(tuple(g) for g in by_chunk.values()))
+    return Terms(words, False, groups)
 
 
 def _has_latin(text: str, term: str) -> bool:
@@ -605,8 +630,12 @@ def matched_terms(text: str, terms: Terms) -> list[str]:
     if terms.latin:
         hits = [w for w in terms.words if found_spellings(text, w)]
     elif korean_analyzer().morphological:
+        # 복합명사(한 어절의 내용어 묶음)는 모든 부분이 있어야 맞은 것으로 센다. 앞부분만 같은 경우
+        # ("결제시스템" ↔ "결제 화면")는 다른 것을 가리키므로 맞지 않는다. 묶음 하나는 한 낱말로 센다.
         found = set(content_words(text))
-        hits = [w for w in terms.words if w in found]
+        units = [g for g in terms.units() if all(w in found for w in g)]
+        hits = list(dict.fromkeys(w for g in units for w in g))
+        return hits if len(units) >= terms.needed else []
     else:
         hits = [w for w in terms.words if w in text]
     return hits if len(hits) >= terms.needed else []

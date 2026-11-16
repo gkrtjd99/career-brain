@@ -97,7 +97,8 @@ export function WorkspaceSettingsSection() {
             disabled={!d}
           />
           <p className="text-xs text-muted">
-            문서 검사(요건이 문서에 보이는지, 사실 바뀜)와 학습 화면의 요건 빈도 묶기가 같은 기술로 봅니다. 기본 표 위에 합쳐지며, 같은
+            문서 검사(요건이 문서에 보이는지, 사실 바뀜)와 학습 화면의 요건 빈도 묶기가 같은 기술로 보고, 키워드 검색도 다른 표기까지
+            넓혀 찾습니다(의미 검색 질문은 그대로). 기본 표 위에 합쳐지며, 같은
             대표 표기를 적으면 기본 표 항목을 대신합니다. 200개, 항목당 다른 표기 20개, 40자까지.
           </p>
           <ErrorText error={saveAliases.error} />

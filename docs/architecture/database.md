@@ -372,3 +372,19 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내기·복원 대상이 자동으로 된다 (`test_export.py`). 원문 토큰·키·PDF 바이트는 들어 있지 않다.
 - downgrade: 표를 지우고 `needs_confirmation` 실행을 `failed`/`needs_manual_check`로 돌린 뒤 CHECK를 되돌린다 (FORCE RLS는 소유자에게도 걸리므로 그동안만 `NO FORCE`, c0021과 같은 방식).
 - 흐름·규칙: `postings.md` "스캔 PDF 쪽 고르기·비용 확인".
+
+## 판정 캐시 대상 ID (c0026)
+
+`c0026_judge_cache_targets` (`down_revision = c0025`). 판정 응답 캐시(c0022)에 응답을 만든 요청의 대상을 적고, 대상을 지우면 응답도 지운다.
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `judge_cache.claim_ids` · `document_ids` | uuid[], NOT NULL, 기본 `'{}'`. 주장 판정에 보낸 후보 주장 / 가시성 판정에 합친 지원 문서 | 기존 권한 그대로 |
+| `judge_cache_forget()` | trigger 함수 (plpgsql, SECURITY INVOKER, `search_path = pg_catalog`). 지운 행의 전이 표 `gone`을 공간별로 모아 `workspace_id`가 같고 배열이 겹치는(`&&`) 캐시 행을 지운다 | – |
+| trigger `judge_cache_forget` | `AFTER DELETE … REFERENCING OLD TABLE AS gone FOR EACH STATEMENT`, `core.claims`·`core.application_documents` 두 표 | – |
+
+- 문장 단위라 경험·지원을 지울 때의 CASCADE나 복원의 삭제 기록 재적용처럼 많이 지워도 캐시 DELETE는 문장마다 한 번이다.
+- FORCE RLS 그대로: 지우는 세션의 공간 문맥 아래에서 돈다. 공간 문맥 없이 지운 관리 작업은 캐시 행을 보지 못해 남기고(만료·비우기로 정리), 공간을 지우면 c0022의 CASCADE.
+- c0026 전의 행은 빈 배열이다 (대상을 알 수 없음). 만료(기본 30일)나 `DELETE /core/judges/cache`로만 지워진다.
+- 내보내지 않는 표라 묶음 변환은 `no_data_change("c0026")`. downgrade: trigger·함수·칸을 지운다.
+- 시험: `test_korean_search_judges_more.py` (주장·경험·지원 문서·지원 삭제, 다른 공간 그대로, trigger 위치·설정).

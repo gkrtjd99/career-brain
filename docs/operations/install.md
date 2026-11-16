@@ -200,6 +200,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_OAUTH_INTROSPECT_JWT` | `0` | `1`이면 검증한 JWT도 introspection으로 폐기 확인 ([mcp.md](../architecture/mcp.md)) |
 | `CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS` | `10` | introspection 활성 결과 캐시 시간(프로세스마다), `0`이면 매 요청 묻는다 |
 | `CAREER_KOREAN_ANALYZER` | `rule` | `kiwi`면 한국어 형태소 분석 (korean extra 필요, 프로세스마다 RSS ~0.42GB). 없으면 규칙 기반으로 돌아감 |
+| `CAREER_KOREAN_IDLE_SECONDS` | `300` | kiwi 모델을 이 시간(초) 동안 안 쓰면 내리고 다음에 다시 올린다, `0`이면 계속 들고 있음. 프로세스 안에서 내리므로 운영체제에 돌려주는 메모리는 일부다 ([search.md](../architecture/search.md#쉬면-내리기-career_korean_idle_seconds-2026-11-17)) |
 | `CAREER_JUDGE_CACHE_DAYS` | `30` | 판정 모델 응답 캐시 보관 일수, `0`이면 캐시 안 씀 |
 | `CAREER_LOG_LEVEL` / `CAREER_ACCESS_LOG` | `info` / `1` | 로그 |
 | `CAREER_ENV_FILE` | `.env` | 로컬 실행 때 읽는 키 파일 (셸 변수가 우선) |

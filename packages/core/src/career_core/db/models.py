@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     Text,
+    Uuid,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1089,3 +1090,6 @@ class JudgeCache(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # c0026: 요청에 들어간 주장·지원 문서. 그 행을 지우면 trigger `judge_cache_forget`이 이 응답도 지운다
+    claim_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid), default=list)
+    document_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid), default=list)

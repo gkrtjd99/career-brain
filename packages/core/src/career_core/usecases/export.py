@@ -1192,6 +1192,9 @@ def _c0025_fetch_confirmations(arc) -> None:
         arc.add_table("core.job_fetch_confirmations")
 
 
+no_data_change("c0026", "judge_cache 대상 ID·삭제 trigger (judge_cache는 내보내지 않음)")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
