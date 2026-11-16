@@ -78,3 +78,8 @@ __all__ += [
     "StudyReview",
     "StudySession",
 ]
+
+# O08 실행·승인
+from career_core.db.models import Approval, Run, RunEvent
+
+__all__ += ["Approval", "Run", "RunEvent"]

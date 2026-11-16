@@ -74,6 +74,9 @@ def _call_error(sdk: Any, exc: Exception) -> ModelCallError:
     if isinstance(exc, sdk.APITimeoutError):
         return ModelCallError("timeout", retryable=True)
     if isinstance(exc, sdk.RateLimitError):
+        # 크레딧·월 한도 소진(429 insufficient_quota)은 기다려도 풀리지 않는다 (§17.14)
+        if getattr(exc, "code", None) == "insufficient_quota":
+            return ModelCallError("quota_exceeded")
         return ModelCallError("rate_limited", retryable=True)
     if isinstance(exc, sdk.AuthenticationError):
         return ModelCallError("auth_failed")

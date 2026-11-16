@@ -88,6 +88,8 @@ curl -H "Authorization: Bearer <token>" "localhost:8000/api/core/usage?group_by=
 
 웹(개인 대시보드): `npm run dev` 후 설정 화면에 API 토큰을 넣는다. API 주소가 8000이 아니면 `CAREER_API_PROXY=http://127.0.0.1:8765 npm run dev`. 배포용 정적 파일은 `npm run build` → `apps/personal-web/dist`. 화면 구성: [docs/architecture/web.md](docs/architecture/web.md)
 
+AI 클라이언트(Claude Code·Desktop 등) 연결: 같은 API 토큰으로 MCP `http://127.0.0.1:8000/api/core/mcp` 또는 `personal-api mcp`(stdio). 업무 도구만 있고 승인은 사람만 한다. [docs/architecture/mcp.md](docs/architecture/mcp.md) · 실행·승인: [docs/architecture/runs.md](docs/architecture/runs.md)
+
 DB 구조·역할·RLS 규칙: [docs/architecture/database.md](docs/architecture/database.md) · 모델 게이트웨이: [docs/architecture/models.md](docs/architecture/models.md) · 설치·운영: [docs/operations/install.md](docs/operations/install.md) · Rust 검토: [docs/architecture/rust.md](docs/architecture/rust.md)
 
 ## 원칙
