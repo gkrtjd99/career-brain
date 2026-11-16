@@ -122,3 +122,115 @@ def test_token_subcommands_parse(monkeypatch):
     with pytest.raises(SystemExit):
         cli.main(["token", "revoke", "1234"])
     assert seen["action"] == "revoke" and seen["token_id"] == "1234"
+
+
+# --- token rename · extend (웹·HTTP PATCH /core/tokens/{id}와 같은 update_token) -------------
+
+
+async def test_rename_and_extend(settings, db, monkeypatch, capsys):
+    from datetime import timedelta
+
+    from career_core.db.base import utcnow
+
+    token = await cli._bootstrap(settings, "합성 공간", "me")
+    actor = await PersonalTokenResolver(db).resolve(token)
+    monkeypatch.setenv(cli.TOKEN_ENV, token)
+    assert await cli._token(settings, "issue", label="laptop", expires_days=10) == 0
+    laptop = new_token(capsys.readouterr().out)
+    rows = await list_tokens(db, workspace_id=actor.workspace_id, current_token=token)
+    boot, lap = rows
+
+    # 이름 바꾸기: 공백 정리, 원문은 그대로 통하고 출력에 나오지 않는다
+    assert await cli._token(settings, "rename", token_id=str(lap.id), label="  work   laptop ") == 0
+    out = capsys.readouterr().out
+    assert out == f"renamed {lap.id} to work laptop\n"
+    assert laptop not in out and token not in out and "cbp_" not in out
+    assert (await PersonalTokenResolver(db).resolve(laptop)) is not None
+    # 지금 쓰는 토큰도 이름은 바꿀 수 있다 (폐기와 달리 잠겨 나가지 않는다)
+    assert await cli._token(settings, "rename", token_id=str(boot.id), label="main") == 0
+    capsys.readouterr()
+
+    # 만료 연장: 지금부터 N일 뒤로, 연장만
+    assert await cli._token(settings, "extend", token_id=str(lap.id), expires_days=90) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"extended {lap.id} (work laptop): expires ") and "cbp_" not in out
+    rows = await list_tokens(db, workspace_id=actor.workspace_id)
+    assert [r.label for r in rows] == ["main", "work laptop"]
+    assert abs(rows[1].expires_at - (utcnow() + timedelta(days=90))) < timedelta(minutes=5)
+    assert await cli._token(settings, "extend", token_id=str(lap.id), expires_days=30) == 1
+    assert "later than the current one" in capsys.readouterr().out
+    # 만료가 없는 토큰에 만료를 달지 않는다 (줄이기)
+    assert await cli._token(settings, "extend", token_id=str(boot.id), expires_days=30) == 1
+    assert "refused" in capsys.readouterr().out
+    assert (await list_tokens(db, workspace_id=actor.workspace_id))[0].expires_at is None
+
+    # 폐기한 토큰은 되살리지 않는다
+    assert await revoke_token(db, workspace_id=actor.workspace_id, token_id=lap.id)
+    assert await cli._token(settings, "extend", token_id=str(lap.id), expires_days=365) == 1
+    assert "revoked" in capsys.readouterr().out
+    assert await cli._token(settings, "rename", token_id=str(lap.id), label="x") == 1
+    assert await PersonalTokenResolver(db).resolve(laptop) is None
+
+
+async def test_rename_extend_reject_bad_input_and_other_workspaces(
+    settings, db, monkeypatch, capsys
+):
+    mine = await cli._bootstrap(settings, "A", "me")
+    other = await cli._bootstrap(settings, "B", "you")
+    other_actor = await PersonalTokenResolver(db).resolve(other)
+    [other_row] = await list_tokens(db, workspace_id=other_actor.workspace_id)
+    monkeypatch.setenv(cli.TOKEN_ENV, mine)
+    me = await PersonalTokenResolver(db).resolve(mine)
+    [row] = await list_tokens(db, workspace_id=me.workspace_id)
+
+    assert await cli._token(settings, "rename", token_id=str(other_row.id), label="mine") == 1
+    assert "no token with that id" in capsys.readouterr().out
+    [still] = await list_tokens(db, workspace_id=other_actor.workspace_id)
+    assert still.label == "bootstrap"
+    assert await cli._token(settings, "rename", token_id="not-a-uuid", label="x") == 1
+    assert "rename needs a token id" in capsys.readouterr().out
+    assert await cli._token(settings, "rename", token_id=str(row.id), label="   ") == 1
+    assert await cli._token(settings, "rename", token_id=str(row.id), label="x" * 101) == 1
+    for days in (None, 0, cli.MAX_EXPIRES_DAYS + 1):
+        assert await cli._token(settings, "extend", token_id=str(row.id), expires_days=days) == 1
+    assert "--days must be" in capsys.readouterr().out
+    assert (await list_tokens(db, workspace_id=me.workspace_id))[0].label == "bootstrap"
+
+
+async def test_rename_extend_need_an_owner_token(settings, db, monkeypatch, capsys):
+    ws, owner = await create_workspace(db, name="w", owner_display_name="me")
+    async with db.workspace_session(ws) as s:
+        m = await s.scalar(select(Membership).where(Membership.actor_id == owner))
+        m.role = "editor"
+    token = await issue_token(db, workspace_id=ws, actor_id=owner, label="editor")
+    monkeypatch.setenv(cli.TOKEN_ENV, token)
+    [row] = await list_tokens(db, workspace_id=ws)
+    assert await cli._token(settings, "rename", token_id=str(row.id), label="owner now") == 1
+    assert await cli._token(settings, "extend", token_id=str(row.id), expires_days=30) == 1
+    assert "owner" in capsys.readouterr().out
+    assert (await list_tokens(db, workspace_id=ws))[0].label == "editor"
+
+
+def test_rename_extend_subcommands_parse(monkeypatch):
+    seen = {}
+
+    async def fake(settings, action, *, token_id=None, label=None, expires_days=None):
+        seen.update(action=action, token_id=token_id, label=label, expires_days=expires_days)
+        return 0
+
+    monkeypatch.setattr(cli, "_token", fake)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["token", "rename", "1234", "new name"])
+    assert exc.value.code == 0
+    assert seen == {
+        "action": "rename",
+        "token_id": "1234",
+        "label": "new name",
+        "expires_days": None,
+    }
+    with pytest.raises(SystemExit):
+        cli.main(["token", "extend", "1234", "--days", "45"])
+    assert seen == {"action": "extend", "token_id": "1234", "label": None, "expires_days": 45}
+    with pytest.raises(SystemExit) as exc:  # --days는 꼭 준다
+        cli.main(["token", "extend", "1234"])
+    assert exc.value.code == 2

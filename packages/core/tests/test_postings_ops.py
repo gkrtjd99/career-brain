@@ -885,3 +885,195 @@ async def test_unknown_challenges_say_maybe_blocked_and_are_not_retried(db, env)
     # 요청은 URL마다 한 번 (다시 시도·우회 없음)
     paths = [p for h, p, _, _ in site.requests if h == "guard.fake.test"]
     assert sorted(paths) == ["/a", "/b", "/c", "/d"]
+
+
+# --- 비용 확인: 비전 + 뒤의 항목 추출(job_extract) 합친 추정 ----------------------------------
+
+MIXED_BILLING = (
+    '[endpoints.oa]\npreset = "openai"\ndata_classes = ["public"]\n'
+    '[endpoints.proxy]\npreset = "cliproxyapi"\nprice_as = "openai"\ndata_classes = ["public"]\n'
+    '[routes]\ndefault = "proxy/gpt-6.1-sol"\njob_extract_image = "oa/gpt-6.1-sol"\n'
+)
+
+
+def _deps_with(db, env, tmp_path, config, threshold):
+    deps = metered_deps(db, env, tmp_path, threshold)
+    gw = ModelGateway(
+        db,
+        parse_models_config(config),
+        PriceBook.load(),
+        client_factory=lambda ep, key: env["model"],
+        env={"OPENAI_API_KEY": "k", "CLIPROXY_API_KEY": "k"},
+    )
+    return uc.PostingDeps(
+        db=db, fetcher=deps.fetcher, gateway=gw, blobs=deps.blobs, vision_confirm_usd=threshold
+    )
+
+
+def test_extract_output_estimate_uses_history_or_a_constant():
+    assert uc.extract_output_estimate([]) == (uc.EXTRACT_OUTPUT_TOKENS_DEFAULT, "default")
+    assert uc.extract_output_estimate([900, 1100]) == (uc.EXTRACT_OUTPUT_TOKENS_DEFAULT, "default")
+    assert uc.extract_output_estimate([900, 1100, 1001]) == (1001, "history_3")
+    assert uc.extract_output_estimate([99_999] * 3) == (uc.EXTRACT_MAX_OUTPUT, "history_3")
+
+
+def test_cost_part_note_round_trips():
+    from decimal import Decimal
+
+    part = uc.CostPart(
+        purpose="job_extract",
+        endpoint="local",
+        model="qwen3:8b",  # 모델 이름의 ':'도 그대로
+        billing="free",
+        input_tokens=10,
+        max_input_tokens=20,
+        output_tokens=30,
+        max_output_tokens=40,
+        usd=None,
+        max_usd=Decimal("0.000012"),
+        basis="history_4",
+    )
+    assert uc.parse_cost_part(part.note()) == part
+    assert uc.parse_cost_part("estimate_part:job_extract:metered:x") is None
+    assert uc.parse_cost_part("vision_estimate_usd:0.1") is None
+
+
+@needs_renderer
+async def test_confirmation_includes_the_following_extract_call(db, env, tmp_path):
+    from decimal import Decimal
+
+    from career_core.interfaces.http.postings import PostingOut
+
+    actor = env["actor"]
+    deps = metered_deps(db, env, tmp_path, Decimal("0.01"))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    run = (await uc.get_posting(db, actor, r.posting_id)).runs[0]
+    c = run.confirmation
+    vision, extract = c.parts
+    assert (vision.purpose, extract.purpose) == ("job_extract_image", "job_extract")
+    assert vision.billing == extract.billing == "metered" and vision.basis == "per_page"
+    # 추출 입력 = 안내문 + 옮긴 글(비전 예상 출력), 최대는 비전 출력 상한. 출력은 상수 (지난 호출 없음)
+    prompt = len(uc.SYSTEM_PROMPT) + len("<posting>\n\n</posting>")
+    assert extract.input_tokens == prompt + vision.output_tokens
+    assert extract.max_input_tokens == prompt + uc.PDF_OCR_MAX_OUTPUT
+    assert (extract.output_tokens, extract.basis) == (uc.EXTRACT_OUTPUT_TOKENS_DEFAULT, "default")
+    assert extract.max_output_tokens == uc.EXTRACT_MAX_OUTPUT
+    # 합계 = 두 호출 (확인 행의 토큰·금액도 합계)
+    assert c.input_tokens == vision.input_tokens + extract.input_tokens
+    assert c.output_tokens == vision.output_tokens + extract.output_tokens
+    assert Decimal(c.max_usd) == Decimal(vision.max_usd) + Decimal(extract.max_usd)
+    assert Decimal(c.estimated_usd) == Decimal(vision.estimated_usd) + Decimal(
+        extract.estimated_usd
+    )
+    assert sum(n.startswith("estimate_part:") for n in run.notes) == 2
+
+    # HTTP 응답에도 호출별 예상이 붙는다
+    out = PostingOut.model_validate(
+        await uc.get_posting(db, actor, r.posting_id), from_attributes=True
+    )
+    assert [p.purpose for p in out.runs[0].confirmation.parts] == [
+        "job_extract_image",
+        "job_extract",
+    ]
+
+    # 비전만으로는 기준 이하지만 추출까지 합치면 넘는다 → 묻는다 (예전 추정은 묻지 않았다)
+    deps2 = metered_deps(db, env, tmp_path, Decimal(vision.max_usd))
+    [r2] = await uc.save_urls(db, actor, ["https://scan.fake.test/scan.pdf"])
+    await run_until_idle(db, posting_handlers(deps2))
+    c2 = (await uc.get_posting(db, actor, r2.posting_id)).runs[0].confirmation
+    assert c2 is not None and c2.status == "pending"
+    assert Decimal(c2.parts[0].max_usd) <= Decimal(vision.max_usd) < Decimal(c2.max_usd)
+    assert env["model"].requests == []
+
+
+@needs_renderer
+async def test_extract_output_estimate_follows_past_calls(db, env, tmp_path):
+    from decimal import Decimal
+
+    actor = env["actor"]
+
+    def call(purpose, status, output_tokens):
+        return ModelCall(
+            workspace_id=actor.workspace_id,
+            purpose=purpose,
+            endpoint="oa",
+            requested_model="gpt-6.1-sol",
+            status=status,
+            output_tokens=output_tokens,
+            billing="metered",
+            cost_basis="estimated",
+        )
+
+    async with db.workspace_session(actor.workspace_id) as s:
+        for n in (800, 1000, 1200):
+            s.add(call("job_extract", "ok", n))
+        s.add(call("job_extract_image", "ok", 5000))  # 다른 목적은 세지 않는다
+        s.add(call("job_extract", "error", 9000))  # 실패한 호출도
+    assert sorted(await uc.extract_output_history(db, actor.workspace_id)) == [800, 1000, 1200]
+    deps = metered_deps(db, env, tmp_path, Decimal("0.01"))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/scan.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    extract = (await uc.get_posting(db, actor, r.posting_id)).runs[0].confirmation.parts[1]
+    assert (extract.output_tokens, extract.basis) == (1000, "history_3")
+
+
+@needs_renderer
+async def test_only_metered_calls_count_toward_the_threshold(db, env, tmp_path):
+    from decimal import Decimal
+
+    actor = env["actor"]
+    # 비전은 종량제, 추출은 구독 프록시: 추출은 "API였다면" 값만 보이고 합계·상한에 넣지 않는다
+    deps = _deps_with(db, env, tmp_path, MIXED_BILLING, Decimal("0.01"))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    c = (await uc.get_posting(db, actor, r.posting_id)).runs[0].confirmation
+    vision, extract = c.parts
+    assert (vision.billing, extract.billing) == ("metered", "subscription")
+    assert extract.max_usd is not None  # price_as 환산
+    assert c.max_usd == vision.max_usd and c.estimated_usd == vision.estimated_usd
+    assert (c.endpoint, c.model) == ("oa", "gpt-6.1-sol")
+
+
+@needs_renderer
+async def test_subscription_vision_is_not_asked_even_with_a_metered_extract(db, env, tmp_path):
+    from decimal import Decimal
+
+    actor = env["actor"]
+    config = (
+        '[endpoints.oa]\npreset = "openai"\ndata_classes = ["public"]\n'
+        '[endpoints.proxy]\npreset = "cliproxyapi"\nprice_as = "openai"\n'
+        'data_classes = ["public"]\n'
+        '[routes]\ndefault = "oa/gpt-6.1-sol"\njob_extract_image = "proxy/gpt-6.1-sol"\n'
+    )
+    # 상한 0이어도 비전이 구독이면 묻지 않는다 (추출은 다른 공고처럼 게이트웨이 예산·장부 규칙만)
+    deps = _deps_with(db, env, tmp_path, config, Decimal(0))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/long.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    run = (await uc.get_posting(db, actor, r.posting_id)).runs[0]
+    assert run.status == "done" and run.confirmation is None
+    parts = [uc.parse_cost_part(n) for n in run.notes if n.startswith("estimate_part:")]
+    assert [(p.purpose, p.billing) for p in parts] == [
+        ("job_extract_image", "subscription"),
+        ("job_extract", "metered"),
+    ]
+    assert len([q for q in env["model"].requests if q.images]) == 1
+
+
+@needs_renderer
+async def test_unknown_extract_price_asks(db, env, tmp_path):
+    from decimal import Decimal
+
+    actor = env["actor"]
+    config = (
+        '[endpoints.oa]\npreset = "openai"\ndata_classes = ["public"]\n'
+        '[routes]\ndefault = "oa/synthetic-unpriced-model"\njob_extract_image = "oa/gpt-6.1-sol"\n'
+    )
+    # 기준이 넉넉해도 종량제 추출 호출의 단가를 모르면 최대 비용을 모른다 → 묻는다
+    deps = _deps_with(db, env, tmp_path, config, Decimal(100))
+    [r] = await uc.save_urls(db, actor, ["https://scan.fake.test/scan.pdf"])
+    await run_until_idle(db, posting_handlers(deps))
+    run = (await uc.get_posting(db, actor, r.posting_id)).runs[0]
+    assert run.status == "needs_confirmation"
+    c = run.confirmation
+    assert c.max_usd is None and c.parts[0].max_usd is not None and c.parts[1].max_usd is None

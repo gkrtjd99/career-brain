@@ -15,6 +15,8 @@ personal-api restore FILE --merge  # CAREER_API_TOKEN 공간에 합치기 (--on-
 personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
 personal-api token list|issue|revoke ID  # CAREER_API_TOKEN 공간의 API 토큰 (소유자만, 새 토큰은 한 번만 출력,
                                          #   issue --expires-days N: N일 뒤 만료)
+personal-api token rename ID LABEL       # 토큰 이름 바꾸기 (원문은 그대로, 출력하지 않음)
+personal-api token extend ID --days N    # 만료를 지금부터 N일 뒤로 (연장만, 웹 PATCH /core/tokens/{id}와 같은 규칙)
 personal-api maintenance         # 모든 공간 주기 유지보수(초안 정리)를 지금 한 번 (serve·worker는 자동)
 """
 
@@ -60,6 +62,7 @@ from personal_api.identity import (
     issue_token,
     list_tokens,
     revoke_token,
+    update_token,
 )
 from personal_api.models import build_gateway, load_config, load_prices
 from personal_api.runner import (
@@ -579,12 +582,14 @@ async def _token(
             print("new API token (shown once, store it safely):")
             print(token)
             return 0
-        # revoke
         try:
             target = UUID(token_id or "")
         except ValueError:
-            print("revoke needs a token id from `personal-api token list`")
+            print(f"{action} needs a token id from `personal-api token list`")
             return 1
+        if action in ("rename", "extend"):
+            return await _token_update(db, ws, target, action, label, expires_days)
+        # revoke
         rows = await list_tokens(db, workspace_id=ws, current_token=current)
         row = next((r for r in rows if r.id == target), None)
         if row is not None and row.current:
@@ -600,6 +605,61 @@ async def _token(
         return 0
     finally:
         await db.dispose()
+
+
+# 토큰 이름 바꾸기·만료 연장 실패 코드 (웹·HTTP ``PATCH /core/tokens/{id}``의 409와 같은 코드)
+TOKEN_UPDATE_ERRORS = {
+    "token_revoked": "that token is revoked (revoked tokens stay revoked)",
+    "token_expired": "that token has already expired: issue a new one",
+    "not_an_extension": (
+        "the new expiry must be later than the current one, and tokens without an expiry "
+        "stay without one (to shorten: issue a new token and revoke this one)"
+    ),
+}
+
+
+async def _token_update(
+    db: Database,
+    ws,
+    target,
+    action: str,
+    label: str | None,
+    expires_days: int | None,
+) -> int:
+    """``token rename ID LABEL``·``token extend ID --days N``: 웹·HTTP와 같은 ``update_token``.
+
+    원문·해시는 바뀌지 않는다 (같은 토큰이 계속 통한다). 출력에는 ID·이름·만료일만.
+    """
+    from career_core.ports import ApiTokenUpdateError
+
+    name = None
+    if action == "rename":
+        name = " ".join((label or "").split())  # HTTP 경로와 같은 공백 정리
+        if not name or len(name) > MAX_TOKEN_LABEL:
+            print(f"label must be 1..{MAX_TOKEN_LABEL} characters")
+            return 1
+    elif expires_days is None or not 1 <= expires_days <= MAX_EXPIRES_DAYS:
+        print(f"--days must be 1..{MAX_EXPIRES_DAYS}")
+        return 1
+    try:
+        row = await update_token(
+            db,
+            workspace_id=ws,
+            token_id=target,
+            label=name,
+            expires_days=expires_days if action == "extend" else None,
+        )
+    except ApiTokenUpdateError as exc:
+        print(f"{action} refused: {TOKEN_UPDATE_ERRORS.get(exc.code, exc.code)}")
+        return 1
+    if row is None:
+        print("no token with that id in this workspace")
+        return 1
+    if action == "rename":
+        print(f"renamed {row.id} to {row.label}")
+    else:
+        print(f"extended {row.id} ({row.label}): expires {row.expires_at:%Y-%m-%d %H:%M} UTC")
+    return 0
 
 
 async def _maintenance(settings: Settings) -> int:
@@ -682,7 +742,9 @@ def main(argv: list[str] | None = None) -> None:
     ol.add_argument("--subject", help="the 'sub' claim from your authorization server")
     ol.add_argument("--issuer", help="defaults to CAREER_OAUTH_ISSUER")
     ol.add_argument("--revoke", metavar="ID", help="revoke a link (id from the list)")
-    tk = sub.add_parser("token", help=f"list, issue or revoke API tokens ({TOKEN_ENV}, owner only)")
+    tk = sub.add_parser(
+        "token", help=f"list, issue, rename, extend or revoke API tokens ({TOKEN_ENV}, owner only)"
+    )
     tk_sub = tk.add_subparsers(dest="token_cmd", required=True)
     tk_sub.add_parser("list", help="token ids, labels and status (never the tokens)")
     ti = tk_sub.add_parser("issue", help="issue a new owner token (printed once)")
@@ -692,6 +754,14 @@ def main(argv: list[str] | None = None) -> None:
     )
     tr = tk_sub.add_parser("revoke", help="revoke a token by id")
     tr.add_argument("id")
+    tn = tk_sub.add_parser("rename", help="rename a token by id (the token itself is unchanged)")
+    tn.add_argument("id")
+    tn.add_argument("label")
+    te = tk_sub.add_parser(
+        "extend", help="move a token's expiry to N days from now (later only, never shortens)"
+    )
+    te.add_argument("id")
+    te.add_argument("--days", dest="expires_days", type=int, required=True)
     sub.add_parser("maintenance", help="run periodic maintenance (draft purge) for all workspaces")
     args = parser.parse_args(argv)
     settings = Settings.from_env()

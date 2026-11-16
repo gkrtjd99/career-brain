@@ -157,6 +157,8 @@ personal-api token list                    # * = 지금 CAREER_API_TOKEN 토큰
 personal-api token issue --label laptop    # 새 토큰 (한 번만 출력)
 personal-api token issue --label ci-like --expires-days 90   # 90일 뒤 만료 (1~3650)
 personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MCP 모두 거부
+personal-api token rename <id> "work laptop"   # 이름 바꾸기 (토큰은 그대로)
+personal-api token extend <id> --days 90   # 만료를 지금부터 90일 뒤로 (연장만, 1~3650)
 # Docker: docker compose run --rm app token list
 ```
 
@@ -164,7 +166,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 - 지금 쓰는 토큰은 폐기하지 않는다 (잠겨 나가지 않게). 다른 공간 토큰은 보이지도, 폐기되지도 않는다 (RLS).
 - 만료: `--expires-days`를 주면 그 시각부터 API·MCP 모두 401이다 (목록에 `expired`). 기본은 만료 없음 (`bootstrap` 토큰 포함).
 - 마지막 사용 시각은 인증할 때 **5분에 한 번만** 기록한다 (요청마다 DB에 쓰지 않게). 그래서 최대 5분 늦다.
-- 이름 바꾸기·만료 연장 (c0025, 웹 **설정 → 토큰 관리**의 "고치기", 소유자만): `PATCH /api/core/tokens/<id>` `{label?, expires_days?}`. 연장만 된다: 새 만료(지금부터 30·90·365일 등)가 지금 만료보다 늦어야 하고, 만료 없는 토큰·폐기한 토큰·이미 만료된 토큰은 바꿀 수 없다 (409 `not_an_extension`·`token_revoked`·`token_expired`. 만료된 토큰은 새로 발급). 만료를 앞당기려면 새 토큰을 발급하고 옛 토큰을 폐기한다. 이름·만료만 바뀌고 원문·해시는 그대로라 토큰을 쓰는 곳은 고칠 필요가 없다.
+- 이름 바꾸기·만료 연장 (c0025, 웹 **설정 → 토큰 관리**의 "고치기", 소유자만): `PATCH /api/core/tokens/<id>` `{label?, expires_days?}`. 연장만 된다: 새 만료(지금부터 30·90·365일 등)가 지금 만료보다 늦어야 하고, 만료 없는 토큰·폐기한 토큰·이미 만료된 토큰은 바꿀 수 없다 (409 `not_an_extension`·`token_revoked`·`token_expired`. 만료된 토큰은 새로 발급). 만료를 앞당기려면 새 토큰을 발급하고 옛 토큰을 폐기한다. 이름·만료만 바뀌고 원문·해시는 그대로라 토큰을 쓰는 곳은 고칠 필요가 없다. CLI `token rename`·`token extend`도 같은 함수(`update_token`)·같은 규칙이고 (지금 쓰는 토큰도 이름·만료는 고칠 수 있다), 출력은 ID·이름·새 만료일뿐 토큰 원문은 나오지 않는다. 거절 사유는 위 409 코드와 같다.
 - 만료 임박 알림 (c0025): 만료까지 14일 이하인 토큰은 토큰 관리 목록에 "곧 만료"로 보이고, **지금 쓰는 토큰**이면 오늘 화면과 설정 화면(소유자가 아니면 알림, 소유자는 토큰 관리 위 "곧 만료" 목록)에 보인다 (`GET /api/core/tokens/current`: 지금 인증한 API 토큰의 ID·이름·만료, 모든 역할. OAuth·로컬 세션이면 404 `no_api_token`).
 - 토큰 범위(권한 줄이기)는 두지 않는다: 토큰의 권한은 토큰 주인(사람)의 역할에서 온다. 범위를 따로 두면 역할 모델(소유자·편집자·보기) 위에 두 번째 권한 축이 생기고, 역할을 바꿀 때 범위와의 교집합·승격 규칙을 다시 정해야 한다. 원격 MCP처럼 권한을 줄여야 하는 곳은 OAuth 범위(`career:read` 등, 역할 범위와 교집합)를 쓴다 ([mcp.md](../architecture/mcp.md)).
 
@@ -196,7 +198,7 @@ personal-api token revoke <id>             # 폐기: 다음 요청부터 API·MC
 | `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |
 | `CAREER_RESTORE_DIR` | 시스템 임시 디렉터리 | 웹 복원 업로드를 받는 폴더. API 프로세스가 여럿이면 모두 보는 같은 폴더로 ([backup.md](backup.md#웹-복원-system--백업유지보수--복원)) |
 | `CAREER_BROWSER_FETCH` | `0` | 동적 공고 렌더링 (browser extra 필요) |
-| `CAREER_VISION_CONFIRM_USD` | `0.10` | 스캔 PDF 이미지 읽기(종량제 모델)의 예상 최대 비용이 이 금액(USD)을 넘으면 웹에서 확인을 받는다. `off`면 묻지 않음 |
+| `CAREER_VISION_CONFIRM_USD` | `0.10` | 스캔 PDF 이미지 읽기가 종량제 모델일 때, 이미지 읽기 + 뒤의 항목 추출(종량제 호출만)의 예상 최대 비용이 이 금액(USD)을 넘으면 웹에서 확인을 받는다. 이미지 읽기가 구독·로컬이면 묻지 않는다. `off`면 묻지 않음 |
 | `CAREER_OAUTH_INTROSPECT_JWT` | `0` | `1`이면 검증한 JWT도 introspection으로 폐기 확인 ([mcp.md](../architecture/mcp.md)) |
 | `CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS` | `10` | introspection 활성 결과 캐시 시간(프로세스마다), `0`이면 매 요청 묻는다 |
 | `CAREER_KOREAN_ANALYZER` | `rule` | `kiwi`면 한국어 형태소 분석 (korean extra 필요, 프로세스마다 RSS ~0.42GB). 없으면 규칙 기반으로 돌아감 |

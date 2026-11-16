@@ -46,21 +46,38 @@ class SummaryOut(BaseModel):
     saved_at: datetime | None
 
 
+class CostPartOut(BaseModel):
+    """호출 하나의 예상 (비전 읽기 ``job_extract_image``, 항목 추출 ``job_extract``)."""
+
+    purpose: str
+    endpoint: str
+    model: str
+    billing: str  # metered | subscription | free. 종량제만 합계·상한 비교에 들어간다
+    input_tokens: int
+    max_input_tokens: int
+    output_tokens: int
+    max_output_tokens: int
+    estimated_usd: str | None
+    max_usd: str | None
+    basis: str  # 출력 추정 근거: per_page | history_<n>(지난 호출 n개 평균) | default(상수)
+
+
 class ConfirmationOut(BaseModel):
     id: UUID
     status: str  # pending | confirmed | declined | used | superseded
     pages: list[int]  # 읽을 쪽 (1부터)
     pages_total: int
     images: int
-    input_tokens: int  # 추정
-    output_tokens: int  # 예상 출력 (추정)
-    estimated_usd: str | None  # 예상 (단가를 모르면 null)
-    max_usd: str | None  # 출력이 상한까지 나올 때. 상한 비교는 이 값으로 한다
+    input_tokens: int  # 추정, 호출 합계
+    output_tokens: int  # 예상 출력 (추정), 호출 합계
+    estimated_usd: str | None  # 예상, 종량제 호출 합계 (단가를 모르면 null)
+    max_usd: str | None  # 입력·출력이 상한까지 나올 때. 상한 비교는 이 값으로 한다
     threshold_usd: str
-    endpoint: str
+    endpoint: str  # 비전 읽기 호출의 엔드포인트·모델
     model: str
     created_at: datetime
     decided_at: datetime | None
+    parts: list[CostPartOut] = []  # 호출별 예상 (옛 요청은 빈 목록)
 
 
 class RunOut(BaseModel):

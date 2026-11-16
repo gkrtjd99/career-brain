@@ -40,7 +40,14 @@ from career_core.adapters.pdf_render import (
     render_pages,
 )
 from career_core.adapters.web_fetch import FetchedPage, FetchFailure
-from career_core.db import Database, Job, JobFetchRun, JobPosting, JobPostingVersion
+from career_core.db import (
+    Database,
+    Job,
+    JobFetchRun,
+    JobPosting,
+    JobPostingVersion,
+    ModelCall,
+)
 from career_core.db.base import utcnow
 from career_core.db.models import JobFetchConfirmation
 from career_core.domain.postings import (
@@ -81,6 +88,13 @@ DEFAULT_VISION_CONFIRM_USD = Decimal("0.10")
 PDF_OCR_MAX_OUTPUT = 6000
 # 예상 출력: 쪽마다 이만큼 (빽빽한 한국어 공고 한 쪽 근처). 최대는 PDF_OCR_MAX_OUTPUT
 OCR_OUTPUT_TOKENS_PER_PAGE = 1200
+# 항목 추출(job_extract) 호출의 출력 상한. 비용 확인의 최대 추정도 이 값으로 한다
+EXTRACT_MAX_OUTPUT = 6000
+# 항목 추출 예상 출력: 이 공간의 지난 성공 호출이 EXTRACT_HISTORY_MIN개 이상이면 최근
+# EXTRACT_HISTORY_LIMIT개 평균, 모자라면 이 상수 (측정값이 아니라 항목 JSON + 인용 몇십 개 어림)
+EXTRACT_OUTPUT_TOKENS_DEFAULT = 1500
+EXTRACT_HISTORY_MIN = 3
+EXTRACT_HISTORY_LIMIT = 20
 
 FIELDS = [f.value for f in FieldName]
 
@@ -530,7 +544,7 @@ async def extract_fields(
         request = ModelRequest(
             messages=(ChatMessage("user", f"<posting>\n{text[:MAX_TEXT_CHARS]}\n</posting>"),),
             system=SYSTEM_PROMPT,
-            max_output_tokens=6000,
+            max_output_tokens=EXTRACT_MAX_OUTPUT,
             data_classes=frozenset({"public"}),  # 공개 웹페이지 본문
         )
         try:
@@ -785,12 +799,15 @@ async def _process_scanned_pdf(
         data_classes=frozenset({"public"}),  # 공개 공고 PDF
         images=tuple(ImageInput("image/png", png) for png in rendered.images),
     )
-    estimate = vision_estimate(gateway, rendered, request)
+    # 비전 호출 + 그 뒤의 항목 추출(job_extract)까지 합친 예상 (호출·장부 기록 없음)
+    history = await extract_output_history(db, ws)
+    estimate = vision_estimate(gateway, rendered, request, extract_history=history)
     pick_notes = ["pdf_pages_read:" + ",".join(str(i + 1) for i in rendered.pages)]
     if pick.blank:
         pick_notes.append(f"pdf_blank_pages:{len(pick.blank)}")
     if estimate is not None:
-        pick_notes.append(f"vision_estimate_usd:{_usd_note(estimate.max_usd)}")
+        pick_notes.append(f"vision_estimate_usd:{_usd_note(estimate.vision.max_usd)}")
+        pick_notes.extend(part.note() for part in estimate.parts)
     threshold = deps.vision_confirm_usd
     if (
         threshold is not None
@@ -845,24 +862,138 @@ async def _process_scanned_pdf(
 
 
 @dataclass(frozen=True, slots=True)
-class VisionEstimate:
-    """스캔 PDF 비전 호출 한 번의 예상. 토큰은 추정값, USD는 단가표 기준 (모르면 None)."""
+class CostPart:
+    """예상 비용의 호출 하나 (비전 읽기 또는 항목 추출). 토큰은 추정값, USD는 단가표 기준 (모르면 None).
 
-    pages: tuple[int, ...]  # 1부터
-    pages_total: int
-    images: int
-    input_tokens: int
-    output_tokens: int  # 예상 출력
-    max_output_tokens: int
-    usd: Decimal | None  # 예상
-    max_usd: Decimal | None  # 출력이 상한까지 나올 때
+    구독·무료 엔드포인트의 USD는 ``price_as`` 환산("API였다면")이라 합계·상한 비교에 넣지 않는다.
+    """
+
+    purpose: str
     endpoint: str
     model: str
     billing: str
+    input_tokens: int  # 예상
+    max_input_tokens: int
+    output_tokens: int  # 예상
+    max_output_tokens: int
+    usd: Decimal | None  # 예상
+    max_usd: Decimal | None  # 입력·출력이 최대일 때
+    basis: str  # 출력 추정 근거: per_page(쪽마다) | history_<n>(지난 호출 n개 평균) | default(상수)
 
     @property
     def metered(self) -> bool:
         return self.billing == "metered"
+
+    def note(self) -> str:
+        """실행 메모 한 줄 (``parse_cost_part``로 되읽는다). 모델 이름에 ``:``가 들 수 있어 맨 끝에 둔다."""
+        return ":".join(
+            [
+                COST_PART_NOTE,
+                self.purpose,
+                self.billing,
+                str(self.input_tokens),
+                str(self.max_input_tokens),
+                str(self.output_tokens),
+                str(self.max_output_tokens),
+                _money(self.usd) or "unknown",
+                _money(self.max_usd) or "unknown",
+                self.basis,
+                self.endpoint,
+                self.model,
+            ]
+        )
+
+
+COST_PART_NOTE = "estimate_part"
+
+
+def parse_cost_part(note: str) -> CostPart | None:
+    """``CostPart.note()``로 쓴 메모를 되읽는다. 꼴이 다르면 None."""
+    bits = note.split(":")
+    if len(bits) < 12 or bits[0] != COST_PART_NOTE:
+        return None
+    try:
+        return CostPart(
+            purpose=bits[1],
+            billing=bits[2],
+            input_tokens=int(bits[3]),
+            max_input_tokens=int(bits[4]),
+            output_tokens=int(bits[5]),
+            max_output_tokens=int(bits[6]),
+            usd=None if bits[7] == "unknown" else Decimal(bits[7]),
+            max_usd=None if bits[8] == "unknown" else Decimal(bits[8]),
+            basis=bits[9],
+            endpoint=bits[10],
+            model=":".join(bits[11:]),
+        )
+    except (ValueError, ArithmeticError):
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class VisionEstimate:
+    """스캔 PDF 가져오기의 예상: 비전 호출(``parts[0]``) + 뒤의 항목 추출(라우트가 있으면 ``parts[1]``).
+
+    ``usd``·``max_usd``는 종량제 호출만 더한 값이다 (구독·로컬은 쓴 만큼 돈이 나가지 않는다). 종량제 호출
+    하나라도 단가를 모르면 None. 묻는지는 비전 호출이 종량제인지로 정한다 (``metered``): 비전이 구독·로컬이면
+    추출 호출은 다른 공고와 같이 게이트웨이 예산·장부 규칙만 따른다.
+    """
+
+    pages: tuple[int, ...]  # 1부터
+    pages_total: int
+    images: int
+    parts: tuple[CostPart, ...]
+
+    @property
+    def vision(self) -> CostPart:
+        return self.parts[0]
+
+    @property
+    def endpoint(self) -> str:
+        return self.vision.endpoint
+
+    @property
+    def model(self) -> str:
+        return self.vision.model
+
+    @property
+    def billing(self) -> str:
+        return self.vision.billing
+
+    @property
+    def metered(self) -> bool:
+        return self.vision.metered
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(p.input_tokens for p in self.parts)
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(p.output_tokens for p in self.parts)
+
+    @property
+    def max_output_tokens(self) -> int:
+        return sum(p.max_output_tokens for p in self.parts)
+
+    def _metered_sum(self, worst: bool) -> Decimal | None:
+        total = Decimal(0)
+        for p in self.parts:
+            if not p.metered:
+                continue
+            v = p.max_usd if worst else p.usd
+            if v is None:
+                return None
+            total += v
+        return total
+
+    @property
+    def usd(self) -> Decimal | None:
+        return self._metered_sum(worst=False)
+
+    @property
+    def max_usd(self) -> Decimal | None:
+        return self._metered_sum(worst=True)
 
 
 def image_tokens(width: int, height: int) -> int:
@@ -882,32 +1013,114 @@ def image_tokens(width: int, height: int) -> int:
     return max(anthropic, openai)
 
 
+async def extract_output_history(db: Database, ws: UUID) -> list[int]:
+    """이 공간의 최근 성공한 항목 추출(``job_extract``) 호출의 출력 토큰 (장부의 수만, 본문 없음). 새것부터."""
+    async with db.workspace_session(ws) as s:
+        rows = await s.scalars(
+            select(ModelCall.output_tokens)
+            .where(
+                ModelCall.purpose == EXTRACT_PURPOSE,
+                ModelCall.status == "ok",
+                ModelCall.output_tokens > 0,
+            )
+            .order_by(ModelCall.created_at.desc())
+            .limit(EXTRACT_HISTORY_LIMIT)
+        )
+        return [int(v) for v in rows.all()]
+
+
+def extract_output_estimate(history: list[int]) -> tuple[int, str]:
+    """항목 추출 예상 출력 토큰과 근거. 지난 호출이 충분하면 평균(상한 이하), 아니면 상수."""
+    if len(history) >= EXTRACT_HISTORY_MIN:
+        mean = math.ceil(sum(history) / len(history))
+        return min(EXTRACT_MAX_OUTPUT, mean), f"history_{len(history)}"
+    return EXTRACT_OUTPUT_TOKENS_DEFAULT, "default"
+
+
+def _cost_part(
+    gateway: ModelGateway,
+    purpose: str,
+    *,
+    input_tokens: int,
+    max_input_tokens: int,
+    output_tokens: int,
+    max_output_tokens: int,
+    basis: str,
+) -> CostPart | None:
+    expected = gateway.estimate_cost(
+        purpose, input_tokens=input_tokens, output_tokens=output_tokens
+    )
+    worst = gateway.estimate_cost(
+        purpose, input_tokens=max_input_tokens, output_tokens=max_output_tokens
+    )
+    if expected is None or worst is None:
+        return None
+    return CostPart(
+        purpose=purpose,
+        endpoint=expected.endpoint,
+        model=expected.model,
+        billing=expected.billing,
+        input_tokens=input_tokens,
+        max_input_tokens=max_input_tokens,
+        output_tokens=output_tokens,
+        max_output_tokens=max_output_tokens,
+        usd=expected.usd,
+        max_usd=worst.usd,
+        basis=basis,
+    )
+
+
 def vision_estimate(
-    gateway: ModelGateway, rendered: RenderedPages, request: ModelRequest
+    gateway: ModelGateway,
+    rendered: RenderedPages,
+    request: ModelRequest,
+    *,
+    extract_history: list[int] | None = None,
 ) -> VisionEstimate | None:
-    """그린 쪽 이미지로 비전 호출 비용을 미리 센다 (호출·장부 기록 없음). 라우트가 없으면 None."""
+    """그린 쪽 이미지로 비전 호출과 뒤의 항목 추출 비용을 미리 센다 (호출·장부 기록 없음).
+
+    - 비전: 입력 = 이미지 토큰 + 안내문(글자 수, 넘치게), 출력 = 쪽마다 ``OCR_OUTPUT_TOKENS_PER_PAGE``
+      (최대 ``request.max_output_tokens``).
+    - 항목 추출: 입력 = 안내문(글자 수) + 옮긴 글. 옮긴 글은 비전의 출력이라 예상은 비전의 예상 출력, 최대는
+      비전 출력 상한 (본문 상한 ``MAX_TEXT_CHARS`` 이하). 출력은 지난 호출 평균 또는 상수
+      (``extract_output_estimate``), 최대 ``EXTRACT_MAX_OUTPUT``. 추출 라우트가 없으면 빠진다.
+
+    비전 라우트가 없으면 None.
+    """
     prompt = len(request.system or "") + sum(len(m.content) for m in request.messages)
     input_tokens = sum(image_tokens(w, h) for w, h in rendered.sizes) + prompt
     images = max(1, len(rendered.images))
     out = min(request.max_output_tokens, OCR_OUTPUT_TOKENS_PER_PAGE * images)
-    expected = gateway.estimate_cost(VISION_PURPOSE, input_tokens=input_tokens, output_tokens=out)
-    worst = gateway.estimate_cost(
-        VISION_PURPOSE, input_tokens=input_tokens, output_tokens=request.max_output_tokens
+    vision = _cost_part(
+        gateway,
+        VISION_PURPOSE,
+        input_tokens=input_tokens,
+        max_input_tokens=input_tokens,
+        output_tokens=out,
+        max_output_tokens=request.max_output_tokens,
+        basis="per_page",
     )
-    if expected is None or worst is None:
+    if vision is None:
         return None
+    parts = [vision]
+    extract_prompt = len(SYSTEM_PROMPT) + len("<posting>\n\n</posting>")
+    extract_out, basis = extract_output_estimate(extract_history or [])
+    extract = _cost_part(
+        gateway,
+        EXTRACT_PURPOSE,
+        input_tokens=extract_prompt + min(out, MAX_TEXT_CHARS),
+        max_input_tokens=extract_prompt + min(request.max_output_tokens, MAX_TEXT_CHARS),
+        output_tokens=extract_out,
+        max_output_tokens=EXTRACT_MAX_OUTPUT,
+        basis=basis,
+    )
+    if extract is not None:
+        parts.append(extract)
     return VisionEstimate(
         pages=tuple(i + 1 for i in rendered.pages),
         pages_total=rendered.pages_total,
         images=len(rendered.images),
-        input_tokens=input_tokens,
-        output_tokens=out,
-        max_output_tokens=request.max_output_tokens,
-        usd=expected.usd,
-        max_usd=worst.usd,
-        endpoint=expected.endpoint,
-        model=expected.model,
-        billing=expected.billing,
+        parts=tuple(parts),
     )
 
 
@@ -1008,13 +1221,53 @@ class ConfirmationView:
     model: str
     created_at: datetime
     decided_at: datetime | None
+    # 호출별 예상 (비전 읽기, 항목 추출). 실행 메모(estimate_part)에서 읽는다. 옛 요청은 빈 목록
+    parts: list[CostPartView] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class CostPartView:
+    purpose: str  # job_extract_image | job_extract
+    endpoint: str
+    model: str
+    billing: str  # metered | subscription | free. 종량제만 합계·상한 비교에 들어간다
+    input_tokens: int
+    max_input_tokens: int
+    output_tokens: int
+    max_output_tokens: int
+    estimated_usd: str | None
+    max_usd: str | None
+    basis: str  # 출력 추정 근거: per_page | history_<n> | default
 
 
 def _money(v: Decimal | None) -> str | None:
     return None if v is None else str(v.quantize(Decimal("0.000001")))
 
 
-def _confirmation_view(c: JobFetchConfirmation) -> ConfirmationView:
+def _cost_parts(notes: list[str]) -> list[CostPartView]:
+    out = []
+    for n in notes:
+        p = parse_cost_part(n)
+        if p is not None:
+            out.append(
+                CostPartView(
+                    p.purpose,
+                    p.endpoint,
+                    p.model,
+                    p.billing,
+                    p.input_tokens,
+                    p.max_input_tokens,
+                    p.output_tokens,
+                    p.max_output_tokens,
+                    _money(p.usd),
+                    _money(p.max_usd),
+                    p.basis,
+                )
+            )
+    return out
+
+
+def _confirmation_view(c: JobFetchConfirmation, notes: list[str]) -> ConfirmationView:
     return ConfirmationView(
         c.id,
         c.status,
@@ -1030,6 +1283,7 @@ def _confirmation_view(c: JobFetchConfirmation) -> ConfirmationView:
         c.model,
         c.created_at,
         c.decided_at,
+        _cost_parts(notes),
     )
 
 
@@ -1581,8 +1835,9 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
             .scalars()
             .all()
         )
+        run_notes = {r.id: list(r.notes) for r in runs}
         asks = {
-            c.fetch_run_id: _confirmation_view(c)
+            c.fetch_run_id: _confirmation_view(c, run_notes.get(c.fetch_run_id, []))
             for c in (
                 await s.scalars(
                     select(JobFetchConfirmation).where(
