@@ -83,3 +83,8 @@ __all__ += [
 from career_core.db.models import Approval, Run, RunEvent
 
 __all__ += ["Approval", "Run", "RunEvent"]
+
+# O11 내보내기·복원
+from career_core.db.models import ExportRun
+
+__all__ += ["ExportRun"]

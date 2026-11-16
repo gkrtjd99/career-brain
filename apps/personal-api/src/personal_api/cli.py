@@ -9,6 +9,8 @@ personal-api pricing     # 단가표 점검 (오래된 항목, 단가 없는 라
 personal-api usage       # 모델 사용량·비용 (CAREER_API_TOKEN 의 공간)
 personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 설정을 확인 (과금됨)
 personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구는 docs/architecture/mcp.md)
+personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.gz)로 (소유자만)
+personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
 """
 
 from __future__ import annotations
@@ -278,6 +280,66 @@ async def _mcp(settings: Settings) -> None:
         await db.dispose()
 
 
+async def _export(settings: Settings, out: str) -> int:
+    from career_core.usecases.export import ExportError, export_workspace
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        try:
+            report = await export_workspace(db, LocalBlobStore(settings.blob_dir), actor, out)
+        except ExportError as exc:
+            print(f"export failed: {exc}")
+            return 1
+    finally:
+        await db.dispose()
+    print(f"wrote {report.path} ({report.bytes} bytes, sha256 {report.sha256})")
+    print(f"workspace {report.workspace_id}: {report.rows_total} rows, {report.blobs} blob(s)")
+    for t in report.tables:
+        if t.rows:
+            print(f"  {t.name:<36} {t.rows:>7}")
+    for m in report.missing_blobs:
+        print(f"warning: blob {m['key'][:12]}… {m['reason']} ({', '.join(m['refs'])})")
+    print("the archive contains personal data: keep it encrypted, off this server")
+    return 0
+
+
+async def _restore(settings: Settings, path: str, *, dry_run: bool) -> int:
+    from career_core.usecases.export import ExportError, restore_workspace
+    from career_core.usecases.index_queue import enqueue_index
+
+    db = Database(settings.database_url)
+    try:
+        try:
+            report = await restore_workspace(
+                db, LocalBlobStore(settings.blob_dir), path, dry_run=dry_run
+            )
+        except ExportError as exc:
+            print(f"restore failed: {exc}")
+            return 1
+        print(
+            f"{'checked' if dry_run else 'restored'} workspace {report.workspace_id} "
+            f"({report.workspace_name}): {report.rows_total} rows, {report.blobs} blob(s), "
+            "counts and hashes match"
+        )
+        for note in report.notes:
+            print(f"note: {note}")
+        if dry_run:
+            print("dry run: nothing was written")
+            return 0
+        await enqueue_index(db, report.workspace_id)  # 검색 벡터는 묶음에 없다
+        if report.owners:
+            token = await issue_token(
+                db, workspace_id=report.workspace_id, actor_id=report.owners[0], label="restore"
+            )
+            print("new API token for the restored owner (shown once, store it safely):")
+            print(token)
+        print("search index job queued; run the worker (or serve) to rebuild it")
+    finally:
+        await db.dispose()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="personal-api")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -309,6 +371,11 @@ def main(argv: list[str] | None = None) -> None:
     pg = sub.add_parser("ping", help="send a tiny synthetic request through a route (billed)")
     pg.add_argument("purpose", nargs="?", default="default")
     sub.add_parser("mcp", help=f"MCP server over stdio for the {TOKEN_ENV} workspace")
+    ex = sub.add_parser("export", help=f"export the {TOKEN_ENV} workspace to a .tar.gz archive")
+    ex.add_argument("--out", required=True, help="archive path (e.g. career-export.tar.gz)")
+    rs = sub.add_parser("restore", help="restore an export archive into an empty install")
+    rs.add_argument("file")
+    rs.add_argument("--dry-run", action="store_true", help="check everything, write nothing")
     args = parser.parse_args(argv)
     settings = Settings.from_env()
 
@@ -344,6 +411,10 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(asyncio.run(_ping(settings, args.purpose)))
     elif args.cmd == "mcp":
         asyncio.run(_mcp(settings))
+    elif args.cmd == "export":
+        sys.exit(asyncio.run(_export(settings, args.out)))
+    elif args.cmd == "restore":
+        sys.exit(asyncio.run(_restore(settings, args.file, dry_run=args.dry_run)))
 
 
 if __name__ == "__main__":

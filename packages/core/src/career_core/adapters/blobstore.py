@@ -39,3 +39,19 @@ class LocalBlobStore:
 
     async def get(self, workspace_id: UUID, key: str) -> bytes:
         return await asyncio.to_thread(self._path(workspace_id, key).read_bytes)
+
+    async def disk_usage(self, workspace_id: UUID) -> tuple[int, int]:
+        """공간 디렉터리의 (파일 수, 바이트). 쓰다 만 임시 파일은 세지 않는다."""
+        base = self.root / str(UUID(str(workspace_id)))
+
+        def walk() -> tuple[int, int]:
+            files = size = 0
+            if not base.is_dir():
+                return 0, 0
+            for path in base.rglob("*"):
+                if path.is_file() and _KEY.fullmatch(path.name):
+                    files += 1
+                    size += path.stat().st_size
+            return files, size
+
+        return await asyncio.to_thread(walk)

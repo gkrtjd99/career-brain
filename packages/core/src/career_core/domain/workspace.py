@@ -55,6 +55,10 @@ ACTION_SCOPES: dict[str, str] = {
     "approvals.decide": "approve",
     # 승인 묶음을 가진 제출은 편집자·AI도 실행할 수 있다 (승인 자체는 사람이 이미 했다).
     "applications.submit_approved": "draft-write",
+    # O11 내보내기·유지보수. 공간 전체 자료를 다루므로 소유자만.
+    "workspace.export": "workspace-admin",
+    "maintenance.read": "workspace-admin",
+    "maintenance.purge": "workspace-admin",
 }
 
 
