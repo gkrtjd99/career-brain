@@ -1,5 +1,7 @@
+import { systemEndpoints } from "./system";
 import type * as T from "./types";
 
+export * from "./system";
 export * from "./types";
 
 export interface ClientOptions {
@@ -443,6 +445,8 @@ export function createClient({
         include_archived: opts.include_archived ? "true" : undefined,
         min_postings: opts.min_postings,
       }),
+
+    ...systemEndpoints({ request, get, post }),
   };
 }
 

@@ -477,7 +477,11 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
             assert info.last_export.archive_sha256 == again.sha256
             assert info.blobs_referenced == len(manifest["blobs"]) == info.blob_files
             # 작업 큐·벡터는 따라오지 않는다 (재색인 job은 CLI가 복원 뒤에 넣는다)
-            assert info.excluded == {"core.jobs": 0, "core.embeddings": 0}
+            assert info.excluded == {
+                "core.jobs": 0,
+                "core.embeddings": 0,
+                "core.oauth_identities": 0,
+            }
         finally:
             await target.dispose()
 
@@ -660,3 +664,169 @@ async def test_maintenance_http(db, env):
         assert info["drafts_purgeable"] == 0
         assert info["last_export"]["via"] == "http"
         assert info["last_export"]["archive_sha256"] == exported_sha
+
+        # 정리한 초안은 삭제 기록에 남고, 삭제 기록만 따로 받을 수 있다
+        assert (
+            await client.get("/core/maintenance/deletions", headers=h("editor"))
+        ).status_code == 403
+        r = await client.get("/core/maintenance/deletions", headers=h("owner"))
+        assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+        head, *rows = (json.loads(x) for x in r.text.splitlines())
+        assert head["format"] == "career-brain-deletions"
+        assert [x["target_table"] for x in rows] == ["core.job_postings"]
+        r = await client.get(
+            "/core/maintenance/export", params={"recipient": "age1bad"}, headers=h("owner")
+        )
+        assert r.status_code == 400 and r.json()["detail"] == "invalid_recipient"
+
+
+# ---------------------------------------------------------------- 새 ID·암호화·대기 작업·삭제 기록
+
+
+async def test_restore_with_new_ids_into_the_same_install(db, env, tmp_path):
+    """같은 설치에 사본을 만든다: 모든 ID가 새로 생기고 FK·참조가 같이 바뀐다. 원래 공간은 그대로."""
+    from career_core.db.models import Approval
+
+    owner, a = env["owner"], env["a"]
+    # 열린 승인: 복원이 문서 행을 넣어도 (c0014 무효화 trigger) 묶음의 상태 그대로 남는다
+    async with db.workspace_session(owner.workspace_id) as s:
+        s.add(
+            Approval(
+                workspace_id=owner.workspace_id,
+                action="applications.submit",
+                target_kind="application",
+                target_id=a["application"],
+                target_version="0" * 64,
+                payload_hash="0" * 64,
+                requested_by=owner.subject_id,
+                expires_at=datetime.now(UTC) + timedelta(days=1),
+            )
+        )
+    out = tmp_path / "a.tar.gz"
+    report = await export_workspace(db, env["blobs"], owner, out)
+    copy = await restore_workspace(db, env["blobs"], out, new_ids=True)
+    async with db.workspace_session(copy.workspace_id) as s:
+        statuses = (await s.execute(select(Approval.status))).scalars().all()
+    assert statuses == ["pending"]
+    assert copy.workspace_id != owner.workspace_id
+    assert copy.source_workspace_id == owner.workspace_id
+    assert copy.rows_total == report.rows_total and copy.blobs == report.blobs
+    [new_owner] = copy.owners
+    assert new_owner != owner.subject_id
+    actor = owner_of(copy.workspace_id, new_owner)
+    titles = [e.title for e in await brain.list_experiences(db, actor)]
+    assert titles == [e.title for e in await brain.list_experiences(db, owner)]
+    assert a["experience"] not in {e.id for e in await brain.list_experiences(db, actor)}
+    # 원래 공간은 바뀌지 않았다
+    assert await brain.get_experience(db, owner, a["experience"])
+
+    # 사본을 다시 내보내면 옛 ID가 하나도 없다 (FK 없는 참조까지 바뀌었다)
+    again = tmp_path / "copy.tar.gz"
+    await export_workspace(db, env["blobs"], actor, again)
+    data = b"".join(v for k, v in members(again).items() if k.startswith("tables/"))
+    for old in (owner.workspace_id, owner.subject_id, a["experience"], a["claim"], a["posting"]):
+        assert str(old).encode() not in data
+    assert str(copy.workspace_id).encode() in data
+    # 같은 묶음을 또 가져와도 충돌하지 않는다 (매번 새 ID)
+    second = await restore_workspace(db, env["blobs"], out, new_ids=True, dry_run=True)
+    assert second.workspace_id not in (owner.workspace_id, copy.workspace_id)
+
+
+async def test_encrypted_archive_roundtrip(db, env, tmp_path, monkeypatch):
+    pyrage = pytest.importorskip("pyrage")
+    from career_core.adapters.age_crypt import is_encrypted
+
+    monkeypatch.setenv("CAREER_AGE_BACKEND", "pyrage")
+    key, wrong = pyrage.x25519.Identity.generate(), pyrage.x25519.Identity.generate()
+    (tmp_path / "key.txt").write_text(f"# synthetic test key\n{key}\n")
+    (tmp_path / "wrong.txt").write_text(f"{wrong}\n")
+    out = tmp_path / "a.tar.gz.age"
+    with pytest.raises(ExportError, match="invalid_recipient"):
+        await export_workspace(db, env["blobs"], env["owner"], out, recipients=["age1nope"])
+    report = await export_workspace(
+        db, env["blobs"], env["owner"], out, recipients=[str(key.to_public())]
+    )
+    assert report.encrypted and is_encrypted(out)
+    assert b"tag-alpha" not in out.read_bytes()
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".part")]  # 평문 임시 파일 없음
+    with pytest.raises(ArchiveError, match="encrypted_archive"):
+        await restore_workspace(db, env["blobs"], out, new_ids=True, dry_run=True)
+    with pytest.raises(ArchiveError, match="decrypt_failed"):
+        await restore_workspace(
+            db, env["blobs"], out, new_ids=True, dry_run=True, identities=[tmp_path / "wrong.txt"]
+        )
+    checked = await restore_workspace(
+        db, env["blobs"], out, new_ids=True, dry_run=True, identities=[tmp_path / "key.txt"]
+    )
+    assert checked.encrypted and checked.archive_sha256 == report.sha256
+    assert checked.rows_total == report.rows_total
+
+
+async def test_pending_work_is_requeued_and_later_deletions_are_replayed(db, tmp_path):
+    from career_core.db.models import Deletion
+    from career_core.usecases.export import export_deletions
+    from career_core.usecases.maintenance import purge_drafts
+
+    blobs = LocalBlobStore(tmp_path / "blobs")
+    ws, me = await create_workspace(db, name="대기 작업 (합성)", owner_display_name="carol")
+    owner = owner_of(ws, me)
+    await upload_source(
+        db,
+        blobs,
+        owner,
+        filename="queued.txt",
+        data=b"synthetic note waiting for the parser",
+        declared_mime="text/plain",
+        max_bytes=1 << 20,
+    )
+    draft = JobPosting(
+        workspace_id=ws,
+        canonical_url=f"https://jobs.example.test/draft-{uuid4().hex[:8]}",
+        source_url="https://jobs.example.test/draft",
+        status="draft",
+        created_by=me,
+        created_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    async with db.workspace_session(ws) as s:
+        s.add(draft)
+    out = tmp_path / "before.tar.gz"
+    report = await export_workspace(db, blobs, owner, out)
+    assert report.pending_work == 1
+    [work] = report.manifest["pending_work"]
+    assert (work["kind"], work["target_table"]) == ("parse", "core.parse_runs")
+
+    # 내보낸 뒤 지운 자료는 삭제 기록(trigger)에 남는다
+    assert await purge_drafts(db, ws) == 1
+    async with db.workspace_session(ws) as s:
+        [tomb] = (await s.execute(select(Deletion))).scalars().all()
+    assert (tomb.target_table, tomb.target_id) == ("core.job_postings", draft.id)
+    log = tmp_path / "deletions.jsonl"
+    assert await export_deletions(db, owner, log) == 1
+    head, row = (json.loads(x) for x in log.read_text().splitlines())
+    assert head["workspace_id"] == str(ws) and row["target_id"] == str(draft.id)
+
+    restored = await restore_workspace(db, blobs, out, new_ids=True, deletion_logs=[log])
+    assert restored.requeued == {"parse": 1}
+    assert (restored.deletions_applied, restored.deletions_skipped) == (1, 0)
+    new_ws = restored.workspace_id
+    async with db.workspace_session(new_ws) as s:
+        assert await s.scalar(select(func.count()).select_from(JobPosting)) == 0
+        [tomb] = (await s.execute(select(Deletion))).scalars().all()
+        assert tomb.deleted_at < datetime.now(UTC) and tomb.target_table == "core.job_postings"
+        jobs = (
+            await s.execute(
+                text(
+                    "SELECT j.kind FROM core.jobs j JOIN core.parse_runs r ON r.id = j.target_id "
+                    "WHERE j.workspace_id = :ws AND j.status = 'queued'"
+                ),
+                {"ws": str(new_ws)},
+            )
+        ).scalars()
+        assert list(jobs) == ["parse"]
+
+    # 다른 공간의 삭제 기록은 받지 않는다
+    other_ws, other = await create_workspace(db, name="다른 (합성)", owner_display_name="dan")
+    wrong = tmp_path / "other.jsonl"
+    await export_deletions(db, owner_of(other_ws, other), wrong)
+    with pytest.raises(ArchiveError, match="deletions_workspace_mismatch"):
+        await restore_workspace(db, blobs, out, new_ids=True, deletion_logs=[wrong])

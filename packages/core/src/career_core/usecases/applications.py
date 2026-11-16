@@ -1525,6 +1525,9 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
                 "title": d.title,
                 "revision": d.current_revision,
                 "content_hash": rev.content_hash if rev else None,
+                # 승인 변경 비교용 (O08 백로그): 글자 규칙
+                "char_limit": d.char_limit,
+                "byte_limit": d.byte_limit,
             }
         )
     state = {
@@ -1545,6 +1548,10 @@ async def submission_target(s: AsyncSession, application_id: UUID) -> tuple[str,
         "documents": summary_docs,
         # 승인하는 사람이 보도록: 민감 정보 경고 수와 확인에 쓸 지문
         "sensitive": {"hash": sensitive_digest, "count": len(sensitive)},
+        # 승인 변경 비교용 (O08 백로그): 지원 상태, 공고 확정 값 해시, 공고 변경 대기 항목
+        "status": app.status,
+        "posting_fields": state["posting_fields"],
+        "posting_pending_changes": state["posting_pending_changes"],
     }
     return content_hash(state), summary
 

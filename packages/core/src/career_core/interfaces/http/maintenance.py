@@ -9,13 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from career_core.ports import ActorContext
-from career_core.usecases.export import export_workspace
+from career_core.usecases.export import ExportError, export_deletions, export_workspace
 from career_core.usecases.maintenance import RunView, maintenance_info, purge_drafts
 
 
@@ -81,25 +81,60 @@ def add_maintenance_routes(router: APIRouter, deps, authorize) -> None:
     ) -> PurgeOut:
         return PurgeOut(deleted=await purge_drafts(deps.db, actor.workspace_id))
 
+    @router.get("/maintenance/deletions", response_class=FileResponse)
+    async def deletions(
+        actor: Annotated[ActorContext, Depends(authorize("workspace.export"))],
+    ) -> FileResponse:
+        """삭제 기록(JSONL). 묶음보다 자주 받아 두면 오래된 묶음을 복원한 뒤 다시 적용한다."""
+        tmp = Path(tempfile.mkdtemp(prefix="career-deletions-"))
+        name = f"career-deletions-{datetime.now(UTC):%Y%m%d-%H%M%S}.jsonl"
+        try:
+            await export_deletions(deps.db, actor, tmp / name, permissions=deps.permissions)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return FileResponse(
+            tmp / name,
+            media_type="application/x-ndjson",
+            filename=name,
+            headers={"Cache-Control": "no-store"},
+            background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
+        )
+
     if deps.blobs is None:
         return  # 원본 저장소 없이는 온전한 묶음을 만들 수 없다
 
     @router.get("/maintenance/export", response_class=FileResponse)
     async def export(
         actor: Annotated[ActorContext, Depends(authorize("workspace.export"))],
+        recipient: Annotated[list[str] | None, Query()] = None,
     ) -> FileResponse:
+        """``recipient``(age 공개 키, 여러 번 가능)를 주면 암호화한 묶음(``.tar.gz.age``)을 돌려준다."""
         tmp = Path(tempfile.mkdtemp(prefix="career-export-"))
         name = f"career-export-{datetime.now(UTC):%Y%m%d-%H%M%S}.tar.gz"
+        if recipient:
+            name += ".age"
         try:
             report = await export_workspace(
-                deps.db, deps.blobs, actor, tmp / name, via="http", permissions=deps.permissions
+                deps.db,
+                deps.blobs,
+                actor,
+                tmp / name,
+                via="http",
+                permissions=deps.permissions,
+                recipients=recipient,
             )
+        except ExportError as exc:
+            shutil.rmtree(tmp, ignore_errors=True)
+            if exc.code == "forbidden":
+                raise HTTPException(403, "forbidden") from exc
+            raise HTTPException(400, exc.code) from exc
         except BaseException:
             shutil.rmtree(tmp, ignore_errors=True)
             raise
         return FileResponse(
             report.path,
-            media_type="application/gzip",
+            media_type="application/octet-stream" if report.encrypted else "application/gzip",
             filename=name,
             headers={"X-Archive-SHA256": report.sha256, "Cache-Control": "no-store"},
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),

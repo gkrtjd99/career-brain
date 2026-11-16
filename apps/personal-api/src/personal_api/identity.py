@@ -93,3 +93,33 @@ class PersonalTokenResolver:
         return ActorContext(
             subject_id=row.actor_id, workspace_id=row.workspace_id, scopes=scopes_for_role(role)
         )
+
+
+MCP_PATH = "/api/core/mcp"
+
+
+def mcp_oauth_from_settings(settings, db: Database):
+    """``CAREER_OAUTH_ISSUER``가 있으면 원격 MCP용 외부 JWT 검증을 켠다. 없으면 None (API 토큰만).
+
+    필요한 값: ``CAREER_PUBLIC_URL``(자원 주소의 앞부분), ``CAREER_OAUTH_JWKS_URL``.
+    """
+    if not settings.oauth_issuer:
+        return None
+    from career_core.interfaces.mcp.oauth import (
+        McpOAuth,
+        OAuthConfig,
+        OAuthConfigError,
+        OAuthIdentityResolver,
+    )
+
+    if not settings.public_url or not settings.oauth_jwks_url:
+        raise OAuthConfigError(
+            "CAREER_OAUTH_ISSUER needs CAREER_PUBLIC_URL and CAREER_OAUTH_JWKS_URL"
+        )
+    config = OAuthConfig(
+        resource=settings.public_url.rstrip("/") + MCP_PATH,
+        issuer=settings.oauth_issuer,
+        jwks_url=settings.oauth_jwks_url,
+        audience=settings.oauth_audience,
+    )
+    return McpOAuth(config=config, resolver=OAuthIdentityResolver(db, config))

@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import time
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,7 +26,8 @@ from career_core.interfaces.mcp.tools import (
     ToolFailed,
     jsonable,
 )
-from career_core.ports import ACTOR_AGENT, ActorContext
+from career_core.ports import ACTOR_AGENT, ActorContext, AuditSink
+from career_core.usecases.audit import args_digest
 from career_core.usecases.brain import NotFound
 
 log = logging.getLogger(__name__)
@@ -69,11 +71,28 @@ def _tool_error(code: str) -> dict[str, Any]:
     }
 
 
-class McpServer:
-    """``deps``: CoreDeps (db, permissions, models). 공간은 호출마다 받은 actor가 정한다."""
+MAX_AUDIT_TOOL_CHARS = 100
 
-    def __init__(self, deps: Any) -> None:
+
+class McpServer:
+    """``deps``: CoreDeps (db, permissions, models). 공간은 호출마다 받은 actor가 정한다.
+
+    도구 호출마다 감사 기록(``AuditSink``)을 남긴다: 도구·actor·결과·소요 시간·인자 sha256.
+    인자 원문은 남기지 않는다. ``channel``은 전송 이름(``mcp-http``·``mcp-stdio``).
+    """
+
+    def __init__(
+        self, deps: Any, *, channel: str = "mcp-http", audit: AuditSink | None = None
+    ) -> None:
         self.deps = deps
+        self.channel = channel
+        if audit is None:
+            audit = getattr(deps, "audit", None)
+        if audit is None:
+            from career_core.adapters.audit import DbAuditSink
+
+            audit = DbAuditSink(deps.db)
+        self.audit = audit
 
     async def handle(self, message: Any, actor: ActorContext) -> dict[str, Any] | None:
         """요청 하나 처리. 알림(notification)이면 None."""
@@ -100,8 +119,10 @@ class McpServer:
             name = params.get("name")
             args = params.get("arguments") or {}
             if not isinstance(name, str) or name not in TOOLS_BY_NAME:
+                await self._audit(actor, name, args, "unknown_tool", 0.0)
                 return _error(id_, INVALID_PARAMS, "unknown tool")
             if not isinstance(args, dict):
+                await self._audit(actor, name, None, "invalid_arguments", 0.0)
                 return _error(id_, INVALID_PARAMS, "arguments must be an object")
             return _result(id_, await self.call_tool(name, args, actor))
         return _error(id_, METHOD_NOT_FOUND, "method not found")
@@ -117,6 +138,37 @@ class McpServer:
         }
 
     async def call_tool(
+        self, name: str, arguments: dict[str, Any], actor: ActorContext
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        result = await self._call_tool(name, arguments, actor)
+        error = result["structuredContent"].get("error") if result.get("isError") else None
+        await self._audit(actor, name, arguments, error, started)
+        return result
+
+    async def _audit(
+        self, actor: ActorContext, name: Any, arguments: Any, error: str | None, started: float
+    ) -> None:
+        """감사 한 줄. 실패해도 도구 결과는 그대로 돌려준다 (DbAuditSink가 경고만 남긴다)."""
+        elapsed = (time.perf_counter() - started) * 1000 if started else 0.0
+        try:
+            digest = args_digest(arguments) if arguments is not None else None
+        except (TypeError, ValueError):
+            digest = None
+        await self.audit.record(
+            as_agent(actor),
+            "tool_call",
+            {
+                "channel": self.channel,
+                "tool": str(name)[:MAX_AUDIT_TOOL_CHARS] if name is not None else None,
+                "status": "ok" if error is None else "error",
+                "error_code": error,
+                "duration_ms": round(elapsed),
+                "args_sha256": digest,
+            },
+        )
+
+    async def _call_tool(
         self, name: str, arguments: dict[str, Any], actor: ActorContext
     ) -> dict[str, Any]:
         tool = TOOLS_BY_NAME[name]

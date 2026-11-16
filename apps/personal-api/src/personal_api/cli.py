@@ -11,6 +11,7 @@ personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 �
 personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구는 docs/architecture/mcp.md)
 personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.gz)로 (소유자만)
 personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
+personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
 """
 
 from __future__ import annotations
@@ -274,20 +275,22 @@ async def _mcp(settings: Settings) -> None:
             sys.exit(f"{TOKEN_ENV} is not a valid token")
 
         deps = CoreDeps(identity=resolver, db=db, models=build_gateway(settings, db))
-        server = McpServer(deps)
+        server = McpServer(deps, channel="mcp-stdio")
         await run_stdio(server, lambda: resolver.resolve(token))
     finally:
         await db.dispose()
 
 
-async def _export(settings: Settings, out: str) -> int:
+async def _export(settings: Settings, out: str, recipients: list[str] | None = None) -> int:
     from career_core.usecases.export import ExportError, export_workspace
 
     db = Database(settings.database_url)
     try:
         actor = await _actor(db)
         try:
-            report = await export_workspace(db, LocalBlobStore(settings.blob_dir), actor, out)
+            report = await export_workspace(
+                db, LocalBlobStore(settings.blob_dir), actor, out, recipients=recipients or None
+            )
         except ExportError as exc:
             print(f"export failed: {exc}")
             return 1
@@ -300,11 +303,41 @@ async def _export(settings: Settings, out: str) -> int:
             print(f"  {t.name:<36} {t.rows:>7}")
     for m in report.missing_blobs:
         print(f"warning: blob {m['key'][:12]}… {m['reason']} ({', '.join(m['refs'])})")
-    print("the archive contains personal data: keep it encrypted, off this server")
+    if report.pending_work:
+        print(f"{report.pending_work} pending job(s) recorded; restore re-queues them")
+    if report.encrypted:
+        print("encrypted with age: keep the identity file off this server")
+    else:
+        print("the archive contains personal data: keep it encrypted, off this server")
     return 0
 
 
-async def _restore(settings: Settings, path: str, *, dry_run: bool) -> int:
+async def _export_deletions(settings: Settings, out: str) -> int:
+    from career_core.usecases.export import ExportError, export_deletions
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        try:
+            n = await export_deletions(db, actor, out)
+        except ExportError as exc:
+            print(f"export failed: {exc}")
+            return 1
+    finally:
+        await db.dispose()
+    print(f"wrote {out} ({n} deletion record(s)); pass it to restore --deletions")
+    return 0
+
+
+async def _restore(
+    settings: Settings,
+    path: str,
+    *,
+    dry_run: bool,
+    new_ids: bool = False,
+    identities: list[str] | None = None,
+    deletions: list[str] | None = None,
+) -> int:
     from career_core.usecases.export import ExportError, restore_workspace
     from career_core.usecases.index_queue import enqueue_index
 
@@ -312,7 +345,13 @@ async def _restore(settings: Settings, path: str, *, dry_run: bool) -> int:
     try:
         try:
             report = await restore_workspace(
-                db, LocalBlobStore(settings.blob_dir), path, dry_run=dry_run
+                db,
+                LocalBlobStore(settings.blob_dir),
+                path,
+                dry_run=dry_run,
+                new_ids=new_ids,
+                identities=identities or None,
+                deletion_logs=deletions or (),
             )
         except ExportError as exc:
             print(f"restore failed: {exc}")
@@ -322,6 +361,15 @@ async def _restore(settings: Settings, path: str, *, dry_run: bool) -> int:
             f"({report.workspace_name}): {report.rows_total} rows, {report.blobs} blob(s), "
             "counts and hashes match"
         )
+        if report.source_workspace_id:
+            print(f"imported with new ids (source workspace {report.source_workspace_id})")
+        if report.deletions_applied or report.deletions_skipped:
+            print(
+                f"re-applied {report.deletions_applied} deletion(s), "
+                f"skipped {report.deletions_skipped}"
+            )
+        for kind, n in sorted(report.requeued.items()):
+            print(f"re-queued {n} {kind} job(s)")
         for note in report.notes:
             print(f"note: {note}")
         if dry_run:
@@ -335,6 +383,45 @@ async def _restore(settings: Settings, path: str, *, dry_run: bool) -> int:
             print("new API token for the restored owner (shown once, store it safely):")
             print(token)
         print("search index job queued; run the worker (or serve) to rebuild it")
+    finally:
+        await db.dispose()
+    return 0
+
+
+async def _oauth_link(
+    settings: Settings, subject: str | None, issuer: str | None, revoke: str | None
+) -> int:
+    """원격 MCP OAuth: (issuer, sub) → 이 공간의 소유자. 인자 없이 부르면 연결 목록."""
+    from uuid import UUID
+
+    from career_core.usecases.oauth_identities import (
+        OAuthLinkError,
+        link_oauth_identity,
+        list_oauth_identities,
+        revoke_oauth_identity,
+    )
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        try:
+            if revoke:
+                ok = await revoke_oauth_identity(db, actor, UUID(revoke))
+                print("revoked" if ok else "not found or already revoked")
+                return 0 if ok else 1
+            if subject:
+                iss = issuer or settings.oauth_issuer
+                if not iss:
+                    sys.exit("set --issuer or CAREER_OAUTH_ISSUER")
+                view = await link_oauth_identity(db, actor, issuer=iss, subject=subject)
+                print(f"linked {view.issuer} sub={view.subject} → workspace {actor.workspace_id}")
+                return 0
+            for v in await list_oauth_identities(db, actor):
+                state = "revoked" if v.revoked_at else "active"
+                print(f"{v.id}  {state:<8} {v.issuer}  sub={v.subject}")
+        except OAuthLinkError as exc:
+            print(f"oauth-link failed: {exc.code}")
+            return 1
     finally:
         await db.dispose()
     return 0
@@ -373,9 +460,25 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("mcp", help=f"MCP server over stdio for the {TOKEN_ENV} workspace")
     ex = sub.add_parser("export", help=f"export the {TOKEN_ENV} workspace to a .tar.gz archive")
     ex.add_argument("--out", required=True, help="archive path (e.g. career-export.tar.gz)")
+    ex.add_argument(
+        "--recipient", action="append", help="age public key (age1…); encrypts the archive"
+    )
+    ed = sub.add_parser("export-deletions", help="write the deletion log (small, export often)")
+    ed.add_argument("--out", required=True)
     rs = sub.add_parser("restore", help="restore an export archive into an empty install")
     rs.add_argument("file")
     rs.add_argument("--dry-run", action="store_true", help="check everything, write nothing")
+    rs.add_argument(
+        "--new-ids", action="store_true", help="import as a new workspace with fresh ids"
+    )
+    rs.add_argument("--identity", action="append", help="age identity file for encrypted archives")
+    rs.add_argument(
+        "--deletions", action="append", help="deletion log(s) written after the archive"
+    )
+    ol = sub.add_parser("oauth-link", help="link an external OAuth subject to the token's owner")
+    ol.add_argument("--subject", help="the 'sub' claim from your authorization server")
+    ol.add_argument("--issuer", help="defaults to CAREER_OAUTH_ISSUER")
+    ol.add_argument("--revoke", metavar="ID", help="revoke a link (id from the list)")
     args = parser.parse_args(argv)
     settings = Settings.from_env()
 
@@ -412,9 +515,24 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "mcp":
         asyncio.run(_mcp(settings))
     elif args.cmd == "export":
-        sys.exit(asyncio.run(_export(settings, args.out)))
+        sys.exit(asyncio.run(_export(settings, args.out, args.recipient)))
+    elif args.cmd == "export-deletions":
+        sys.exit(asyncio.run(_export_deletions(settings, args.out)))
     elif args.cmd == "restore":
-        sys.exit(asyncio.run(_restore(settings, args.file, dry_run=args.dry_run)))
+        sys.exit(
+            asyncio.run(
+                _restore(
+                    settings,
+                    args.file,
+                    dry_run=args.dry_run,
+                    new_ids=args.new_ids,
+                    identities=args.identity,
+                    deletions=args.deletions,
+                )
+            )
+        )
+    elif args.cmd == "oauth-link":
+        sys.exit(asyncio.run(_oauth_link(settings, args.subject, args.issuer, args.revoke)))
 
 
 if __name__ == "__main__":

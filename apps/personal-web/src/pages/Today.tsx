@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { ApprovalRequestsCard } from "../components/ApprovalRequestsCard";
 import { ErrorText, List, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
 import { UpcomingTests } from "../components/study/UpcomingTests";
@@ -112,6 +113,7 @@ export function TodayPage() {
       <ErrorText error={postings.error ?? experiences.error} className="mb-4" />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <ApprovalRequestsCard className="lg:col-span-2" />
         <Section title="마감 임박 · 안 쓴 문항" className="lg:col-span-2">
           {soon.length ? (
             <List>
