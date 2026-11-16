@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { ApprovalRequestsCard } from "../components/ApprovalRequestsCard";
 import { ErrorText, List, PageHeader } from "../components/common";
 import { DdayBadge } from "../components/DdayBadge";
+import { TokenExpiryNotice } from "../components/TokenExpiryNotice";
 import { UpcomingTests } from "../components/study/UpcomingTests";
 import { api } from "../lib/api";
 import { daysLeft, formatDateTime, formatDeadline, formatToday } from "../lib/dates";
@@ -75,7 +76,11 @@ export function TodayPage() {
   const drafts = list.filter((p) => p.status === "draft" && p.last_fetch_status === "done");
   const changed = saved.filter((p) => p.pending_changes.length > 0);
   const failed = list.filter(
-    (p) => p.status !== "archived" && (p.last_fetch_status === "failed" || p.last_fetch_status === "listing"),
+    (p) =>
+      p.status !== "archived" &&
+      (p.last_fetch_status === "failed" ||
+        p.last_fetch_status === "listing" ||
+        p.last_fetch_status === "needs_confirmation"),
   );
   const running = list.filter((p) => p.last_fetch_status === "pending");
   const reviewCount =
@@ -110,6 +115,7 @@ export function TodayPage() {
       <ErrorText error={postings.error ?? experiences.error} className="mb-4" />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        <TokenExpiryNotice className="lg:col-span-2" />
         <ApprovalRequestsCard className="lg:col-span-2" />
         <Section title="마감 임박 · 안 쓴 문항" className="lg:col-span-2">
           {soon.length ? (
@@ -212,11 +218,17 @@ export function TodayPage() {
                   meta={
                     p.last_fetch_status === "listing"
                       ? "목록 페이지: 저장할 공고를 고르세요"
-                      : `가져오기 실패: ${FETCH_ERROR[p.last_fetch_error ?? ""] ?? p.last_fetch_error ?? "알 수 없음"} (마감 아님)`
+                      : p.last_fetch_status === "needs_confirmation"
+                        ? "스캔 PDF: 이미지 읽기 예상 비용을 확인해 주세요"
+                        : `가져오기 실패: ${FETCH_ERROR[p.last_fetch_error ?? ""] ?? p.last_fetch_error ?? "알 수 없음"} (마감 아님)`
                   }
                   right={
-                    <Badge tone={p.last_fetch_status === "listing" ? "warn" : "danger"}>
-                      {p.last_fetch_status === "listing" ? "목록" : "실패"}
+                    <Badge tone={p.last_fetch_status === "failed" ? "danger" : "warn"}>
+                      {p.last_fetch_status === "listing"
+                        ? "목록"
+                        : p.last_fetch_status === "needs_confirmation"
+                          ? "비용 확인"
+                          : "실패"}
                     </Badge>
                   }
                 />

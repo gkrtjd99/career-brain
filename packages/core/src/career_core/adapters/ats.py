@@ -21,7 +21,12 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from career_core.adapters.html_extract import PageData, html_to_text
-from career_core.domain.postings import FieldName, classify_heading, is_heading_line
+from career_core.domain.postings import (
+    MAX_CHOICE_OPTIONS,
+    FieldName,
+    classify_heading,
+    is_heading_line,
+)
 
 MAX_LIST_ITEMS = 40
 
@@ -423,8 +428,11 @@ def _greeting_career(c: dict) -> str | None:
 
 
 # `questionnairesInfo[].type` (2026-11-17 실제 공개 페이지 3곳·39건에서 확인한 값):
-# 100 = 서술형(글자 수 `maxLength`), 200·400 = 선택형(`optionItems`, 유입 경로 등). 서술형만 문항으로 둔다.
+# 100 = 서술형(글자 수 `maxLength`), 200·400 = 선택형(`optionItems`, 유입 경로 등). 서술형은 자기소개서
+# 문항(QUESTIONS)으로, 선택형은 c0025부터 별도 항목(APPLICATION_QUESTIONS)으로 둔다.
+# 200과 400 중 어느 쪽이 하나만/여러 개 고르기인지는 확인하지 못했다: 원래 번호(`source_type`)만 남긴다.
 GREETING_FREE_TEXT = 100
+GREETING_CHOICE_TYPES = frozenset({200, 400})
 MAX_QUESTIONS = 20
 
 
@@ -443,6 +451,48 @@ def _greeting_questions(data: dict) -> tuple[list[dict], list[int]]:
         limit = q.get("maxLength")
         ok = isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 100_000
         out.append({"prompt": prompt, "char_limit": limit if ok else None})
+        index.append(i)
+        if len(out) >= MAX_QUESTIONS:
+            break
+    return out, index
+
+
+def _option_text(raw: Any) -> str | None:
+    """보기 하나: 문자열 또는 ``{"item": 글}`` (실제 페이지에서 본 모양). 그 밖의 모양은 버린다."""
+    value = raw if isinstance(raw, str) else _dict(raw).get("item")
+    if not isinstance(value, str):
+        return None
+    value = " ".join(value.split())[:200]
+    return value or None
+
+
+def _greeting_choices(data: dict) -> tuple[list[dict], list[int]]:
+    """선택형 문항 (type 200·400, 보기 있음). (문항 [{prompt, required, options, source_type}], 원래 순번).
+
+    보기가 하나도 없거나 질문이 비면 건너뛴다. 보기는 ``optionItems``(없으면 ``items``)의 글만, 50개 상한.
+    """
+    out: list[dict] = []
+    index: list[int] = []
+    for i, raw in enumerate(_list(data.get("questionnairesInfo"))):
+        q = _dict(raw)
+        kind, prompt = q.get("type"), q.get("question")
+        if kind not in GREETING_CHOICE_TYPES or isinstance(kind, bool):
+            continue
+        if not isinstance(prompt, str) or not " ".join(prompt.split()):
+            continue
+        raw_options = _list(q.get("optionItems")) or _list(q.get("items"))
+        options = [o for o in (_option_text(x) for x in raw_options) if o][:MAX_CHOICE_OPTIONS]
+        if not options:
+            continue
+        need = q.get("need")
+        out.append(
+            {
+                "prompt": " ".join(prompt.split())[:1000],
+                "required": need if isinstance(need, bool) else None,
+                "options": options,
+                "source_type": kind,
+            }
+        )
         index.append(i)
         if len(out) >= MAX_QUESTIONS:
             break
@@ -521,6 +571,15 @@ def from_greeting(page: PageData) -> tuple[dict, str | None]:
             FieldName.QUESTIONS,
             questions,
             ev_structured(f"{p}.questionnairesInfo[{at}].question·maxLength"),
+        )
+    choices, index = _greeting_choices(data)
+    if choices:
+        at = ",".join(str(i) for i in index)
+        put(
+            out,
+            FieldName.APPLICATION_QUESTIONS,
+            choices,
+            ev_structured(f"{p}.questionnairesInfo[{at}].question·need·optionItems"),
         )
     detail = info.get("detail")
     if not isinstance(detail, str):

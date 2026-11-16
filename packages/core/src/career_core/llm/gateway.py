@@ -95,6 +95,20 @@ def embedding_space(endpoint: EndpointConfig, model: str, dimensions: int | None
 
 
 @dataclass(frozen=True, slots=True)
+class CostEstimate:
+    """호출 전 예상 비용 (``ModelGateway.estimate_cost``). ``usd``가 None이면 단가를 모른다."""
+
+    endpoint: str
+    model: str
+    billing: str  # metered | subscription | free
+    usd: Decimal | None
+
+    @property
+    def metered(self) -> bool:
+        return self.billing == BILLING_METERED
+
+
+@dataclass(frozen=True, slots=True)
 class _Plan:
     route: Route
     endpoint: EndpointConfig
@@ -232,6 +246,29 @@ class ModelGateway:
             call_id=str(call_id),
             notes=cost.notes,
         )
+
+    def estimate_cost(
+        self, purpose: str, *, input_tokens: int, output_tokens: int
+    ) -> CostEstimate | None:
+        """그 목적 라우트로 보낼 때의 예상 비용 (호출·장부 기록 없음). 라우트가 없으면 None.
+
+        종량제는 단가표(``price_provider``), 구독·무료는 ``price_as``로 "API였다면" 값을 낸다. 단가를 모르면
+        ``usd = None``. 토큰 수 추정은 부르는 쪽이 한다 (예: 쪽 이미지 크기).
+        """
+        route = self._config.route_for(purpose)
+        if route is None:
+            return None
+        endpoint = self._config.endpoints[route.endpoint]
+        metered = endpoint.billing == BILLING_METERED
+        provider = endpoint.pricing_provider if metered else endpoint.price_as
+        price = self._prices.lookup(provider, route.model) if provider else None
+        usd = None
+        if price is not None:
+            rates = price.rates_for(input_tokens, self._clock().date())
+            usd = (Decimal(input_tokens) * rates.input + Decimal(output_tokens) * rates.output) / (
+                Decimal(1_000_000)
+            )
+        return CostEstimate(endpoint.name, route.model, endpoint.billing, usd)
 
     async def _precheck(
         self, actor: ActorContext, purpose: str, data_classes: frozenset[str], plan: _Plan

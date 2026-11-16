@@ -17,11 +17,19 @@ c0019 보강:
 
 - 불투명 토큰 introspection (RFC 7662, 선택): ``introspection_url``을 설정하면 JWT가 아닌 토큰(또는 JWKS를
   설정하지 않았으면 모든 토큰)을 인가 서버에 물어본다. ``active``·``iss``·``aud``·``exp``·``sub``를 JWT와
-  같은 규칙으로 본다. 결과는 짧게(기본 60초, 만료 전까지만) 캐시한다. 그래서 인가 서버에서 폐기한 토큰은
+  같은 규칙으로 본다. 결과는 짧게(기본 10초, 만료 전까지만) 캐시한다. 그래서 인가 서버에서 폐기한 토큰은
   캐시 시간 안에 막힌다. 이 설치의 API 토큰 접두어(``local_token_prefixes``)는 보내지 않는다.
 - 폐기 목록·토큰 기록: 받은 토큰마다 ``core.oauth_tokens``에 ``jti``(없으면 sha256)를 남긴다. 소유자가 폐기한
   토큰과 끊은 연결의 토큰은 거부한다. 같은 ``jti``가 다른 연결로 오면 거부한다.
 - ``require_jti``: 켜면 ``jti`` 없는 토큰을 거부한다 (토큰 하나만 골라 폐기할 수 있게).
+
+c0025 보강:
+
+- ``introspect_jwt``: 켜면 서명이 맞는 JWT도 introspection으로 한 번 더 묻는다 (``active``·``sub`` 일치).
+  인가 서버에서 폐기한 JWT가 만료까지 통하지 않고 캐시 시간 안에 막힌다. 같은 캐시를 지난다.
+- 캐시는 프로세스 메모리다. 공유 캐시(DB 표)를 두지 않고 캐시 시간을 짧게(기본 10초) 한다: 공유 캐시는
+  인가 서버 호출 수만 줄이고 폐기 반영 지연(최대 = 캐시 시간)은 줄이지 못한다. 프로세스가 몇 개든 지연의
+  상한은 캐시 시간 하나다 (``docs/architecture/mcp.md`` "introspection 캐시").
 
 하지 않는 것: 인가 서버, 동적 클라이언트 등록, 토큰 교환, 한 번만 쓰는 토큰(액세스 토큰은 만료까지 요청마다
 다시 보내므로 재사용 자체는 정상이다. 탈취한 토큰의 재전송을 막으려면 DPoP(RFC 9449) 같은 소유 증명이
@@ -95,7 +103,10 @@ class OAuthConfig:
     introspection_url: str | None = None
     introspection_client_id: str | None = None
     introspection_client_secret: str | None = field(default=None, repr=False)
-    introspection_cache_seconds: int = 60
+    # 활성 결과 캐시 시간(초, 0 = 캐시 없음). 인가 서버의 폐기는 최대 이 시간 뒤에 반영된다 (프로세스마다 따로).
+    introspection_cache_seconds: int = 10
+    # True면 서명이 맞는 JWT도 introspection으로 확인한다 (인가 서버의 폐기를 캐시 시간 안에 반영)
+    introspect_jwt: bool = False
     # True면 jti 없는 토큰을 거부한다 (토큰 하나씩 폐기할 수 있게)
     require_jti: bool = False
     # 이 설치의 다른 토큰 접두어(예: API 토큰 "cbp_"). 이런 토큰은 인가 서버로 보내지 않는다.
@@ -114,6 +125,8 @@ class OAuthConfig:
                 raise OAuthConfigError("introspection needs a client id and secret")
         if not 0 <= self.introspection_cache_seconds <= 600:
             raise OAuthConfigError("introspection_cache_seconds must be between 0 and 600")
+        if self.introspect_jwt and not (self.introspection_url and self.jwks_url):
+            raise OAuthConfigError("introspect_jwt needs both jwks_url and introspection_url")
         if "none" in {a.lower() for a in self.algorithms} or not self.algorithms:
             raise OAuthConfigError("algorithms must not be empty or include 'none'")
         for scope, granted in self.scope_map.items():
@@ -233,6 +246,7 @@ class IntrospectionVerifier:
 
     JWT 검증과 같은 규칙: ``active = true``, ``iss``가 있으면 설정한 issuer, ``aud``에 이 자원(필수),
     ``exp``·``nbf``(여유 포함), ``sub`` 필수. 결과는 토큰 sha256을 키로 짧게 캐시한다 (거부는 캐시하지 않음).
+    캐시 키는 해시뿐이고 원문 토큰은 메모리 캐시에도 두지 않는다.
     """
 
     MAX_CACHE = 1024
@@ -339,7 +353,15 @@ class OAuthIdentityResolver:
         if any(credential.startswith(p) for p in self.config.local_token_prefixes):
             return None, "local_token"
         if _is_jwt(credential) and self.verifier is not None:
-            return await self.verifier.verify(credential), "jwt"
+            claims = await self.verifier.verify(credential)
+            if claims is not None and self.config.introspect_jwt and self.introspector is not None:
+                # 서명이 맞아도 인가 서버가 폐기했을 수 있다: 같은 캐시를 지나 active를 묻는다
+                active = await self.introspector.verify(credential)
+                if active is None:
+                    return None, "jwt_inactive"
+                if active.get("sub") != claims.get("sub"):
+                    return None, "jwt_subject_mismatch"
+            return claims, "jwt"
         if self.introspector is not None:
             return await self.introspector.verify(credential), "introspection"
         return None, "unsupported"
@@ -354,7 +376,8 @@ class OAuthIdentityResolver:
         self.last_rejection = None
         claims, via = await self._claims(credential)
         if claims is None:
-            self.last_rejection = via if via in ("local_token", "unsupported") else "invalid"
+            keep = ("local_token", "unsupported", "jwt_inactive", "jwt_subject_mismatch")
+            self.last_rejection = via if via in keep else "invalid"
             return None
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:

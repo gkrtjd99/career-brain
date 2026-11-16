@@ -1182,6 +1182,12 @@ def _schema_c0021(arc: _Archive) -> None:
 no_data_change("c0024", "웹 복원 작업 표 restore_jobs (내보내지 않음)")
 
 
+@schema_step("c0025", "스캔 PDF 비전 비용 확인 표 job_fetch_confirmations 추가 (옛 묶음에는 빈 표)")
+def _c0025_fetch_confirmations(arc) -> None:
+    if not arc.has("core.job_fetch_confirmations"):
+        arc.add_table("core.job_fetch_confirmations")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2113,6 +2119,7 @@ CONTENT_ONLY_TABLES: dict[str, str] = {
     "core.interview_question_requests": "요청 기록 (c0016, 앱 계정은 추가·조회만)",
     # CHECK(ck_claim_evidence_kind)로 범위·답 중 하나만 있으므로 UNIQUE(주장, 범위)·(주장, 답) 중 하나가 늘 걸린다
     "core.claim_evidence": "UNIQUE(claim_id, source_span_id)·(claim_id, interview_answer_id) 중 하나",
+    "core.job_fetch_confirmations": "가져오기 실행 하나의 비용 확인 기록 (c0025, 같은 실행·같은 내용이면 겹친다)",
 }
 # 자식 행의 키로 부모를 찾는 경우: 원본은 버전의 sha256(같은 파일)으로 겹친다 (업로드 중복 방지와 같은 규칙)
 CHILD_MERGE_KEYS: dict[str, tuple[str, str, str]] = {

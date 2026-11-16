@@ -193,6 +193,11 @@ export function createClient({
       get<T.PostingVersion>(`/core/job-postings/${id(postingId)}/versions/${id(versionId)}`),
     refetchPosting: (postingId: string) =>
       post<T.StatusOut>(`/core/job-postings/${id(postingId)}/refetch`),
+    /** 스캔 PDF 비전 비용 확인 → 다시 가져오기 (202, 새 실행). 409 confirmation_not_pending */
+    confirmFetchCost: (postingId: string, runId: string) =>
+      post<T.StatusOut>(`/core/job-postings/${id(postingId)}/fetch-runs/${id(runId)}/confirm`),
+    declineFetchCost: (postingId: string, runId: string) =>
+      post<T.StatusOut>(`/core/job-postings/${id(postingId)}/fetch-runs/${id(runId)}/decline`),
     manualPostingText: (postingId: string, text: string) =>
       post<T.StatusOut>(`/core/job-postings/${id(postingId)}/manual-text`, { text }),
     confirmPosting: (postingId: string, body: T.ConfirmPostingIn) =>
@@ -514,7 +519,7 @@ export function createClient({
 
     ...systemEndpoints({ request, get, post }),
     ...liveEndpoints({ request, get, post }),
-    ...tokenEndpoints({ get, post }),
+    ...tokenEndpoints({ get, post, patch }),
     ...settingsEndpoints({ get, json }),
   };
 }

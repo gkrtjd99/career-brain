@@ -26,6 +26,8 @@ class FetchStatus(StrEnum):
     DONE = "done"  # 새 버전 또는 변경 없음
     LISTING = "listing"  # 공고 목록 페이지였다: 후보 링크만 남긴다
     FAILED = "failed"
+    # c0025: 비전 호출(스캔 PDF) 예상 비용이 상한을 넘어 사용자 확인을 기다린다 (job_fetch_confirmations)
+    NEEDS_CONFIRMATION = "needs_confirmation"
 
 
 class FetchError(StrEnum):
@@ -34,6 +36,9 @@ class FetchError(StrEnum):
     RATE_LIMITED = "rate_limited"
     # 봇 차단(Cloudflare 등의 자동 요청 확인 화면). 우회하지 않는다: 본문 붙여넣기·캡처 업로드로 안내
     BOT_BLOCKED = "bot_blocked"
+    # 알려진 서비스는 아니지만 확인 화면 흔적(캡차·JS 확인 스크립트·빈 본문+스크립트)이 있다 (c0025).
+    # 우회하지 않는다. "막혔을 수 있음"으로 안내하고 rate_limited로 보지 않는다.
+    MAYBE_BOT_BLOCKED = "maybe_bot_blocked"
     NEEDS_MANUAL_CHECK = "needs_manual_check"
     BLOCKED_ADDRESS = "blocked_address"  # 사설망·메타데이터 등 내부 주소
     TOO_LARGE = "too_large"
@@ -54,6 +59,9 @@ class FieldName(StrEnum):
     PREFERRED = "preferred"  # 목록
     QUESTIONS = "questions"  # 자기소개서 문항: [{"prompt": str, "char_limit": int|None}]
     PROCESS = "process"  # 전형 절차: 목록
+    # c0025: 지원서의 선택형 문항(보기 고르기). 자기소개서가 아니다. 구조화 데이터에서만 (LLM 추출 없음)
+    # [{"prompt": str, "required": bool|None, "options": [str], "source_type": int|None}]
+    APPLICATION_QUESTIONS = "application_questions"
 
 
 LIST_FIELDS = {
@@ -62,6 +70,9 @@ LIST_FIELDS = {
     FieldName.PREFERRED,
     FieldName.PROCESS,
 }
+# 채용 시스템 구조화 데이터에서만 채우는 항목: 비어 있어도 LLM을 부르지 않고, 모델 출력에서 받지 않는다.
+STRUCTURED_ONLY_FIELDS = frozenset({FieldName.APPLICATION_QUESTIONS})
+MAX_CHOICE_OPTIONS = 50
 # 비어 있으면 확인이 필요한 항목. 나머지는 원문에 없을 수 있다.
 REVIEW_FIELDS = (FieldName.TITLE, FieldName.COMPANY, FieldName.DEADLINE)
 

@@ -70,6 +70,10 @@ export function OAuthTab() {
                     <p className="text-muted">
                       확인 방법: {[o.config.jwks ? "JWT 서명(JWKS)" : null, o.config.introspection ? "introspection" : null].filter(Boolean).join(" · ")}
                       {o.config.require_jti ? " · jti 필수" : ""}
+                      {o.config.introspect_jwt ? " · JWT도 introspection" : ""}
+                      {o.config.introspection_cache_seconds !== null
+                        ? ` · 인가 서버 폐기 반영 최대 ${o.config.introspection_cache_seconds}초`
+                        : ""}
                     </p>
                   </>
                 ) : (

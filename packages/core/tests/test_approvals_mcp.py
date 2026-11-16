@@ -486,6 +486,8 @@ async def test_oauth_http_screen_is_owner_only(db, env, oauth):
             "jwks": True,
             "introspection": True,
             "require_jti": False,
+            "introspect_jwt": False,
+            "introspection_cache_seconds": 10,
         }
         assert [link["subject"] for link in body["links"]] == [oauth.sub]
         [tok] = body["tokens"]
@@ -775,3 +777,171 @@ async def test_real_listen_hints_drive_the_stream(db, env):
         r = await task
     assert "runs" in [n for n, _ in parse_sse(r.text)]
     assert hints.subscribers == 0 and not hints.listening
+
+
+# ---------------------------------------------------------------- 5. c0025: JWT introspection·캐시
+
+
+@pytest.fixture
+async def oauth_jwt_checked(db, env):
+    """서명이 맞는 JWT도 introspection으로 확인하는 설정."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    server = FakeAuthServer()
+    cfg = oauth_config(introspect_jwt=True)
+    resolver = OAuthIdentityResolver(
+        db,
+        cfg,
+        JwtVerifier(cfg, jwks_client=FakeJwks(key.public_key())),
+        IntrospectionVerifier(cfg, transport=httpx.MockTransport(server.handler)),
+    )
+    sub = f"user-{uuid4().hex[:12]}"
+    await link_oauth_identity(db, env.owner, issuer=ISSUER, subject=sub)
+    return SimpleNamespace(key=key, server=server, cfg=cfg, resolver=resolver, sub=sub)
+
+
+def jwt_is_active(o, token, **claims):
+    """인가 서버 흉내에 그 JWT를 활성으로 등록한다 (introspection 응답)."""
+    body = jwt.decode(token, options={"verify_signature": False})
+    o.server.tokens[token] = {"active": True, **body, **claims}
+
+
+async def test_introspect_jwt_config_needs_both_verifiers():
+    with pytest.raises(OAuthConfigError):
+        oauth_config(introspect_jwt=True, introspection_url=None)
+    with pytest.raises(OAuthConfigError):
+        oauth_config(introspect_jwt=True, jwks_url=None)
+    assert oauth_config().introspection_cache_seconds == 10  # 짧은 기본값 (반영 지연 상한)
+
+
+async def test_jwt_revoked_at_the_auth_server_is_rejected_after_the_cache(
+    db, env, oauth_jwt_checked
+):
+    o = oauth_jwt_checked
+    clock = [time.time()]
+    o.resolver.introspector._clock = lambda: clock[0]
+    token = make_jwt(o, jti="jti-" + uuid4().hex)
+    jwt_is_active(o, token)
+    assert await o.resolver.resolve(token) is not None
+    assert await o.resolver.resolve(token) is not None
+    assert o.resolver.introspector.calls == 1  # 같은 캐시를 지난다
+    # 인가 서버에서 폐기: 서명·exp는 그대로지만 introspection이 inactive
+    o.server.tokens[token] = {"active": False}
+    assert await o.resolver.resolve(token) is not None  # 캐시 시간 안
+    clock[0] += o.cfg.introspection_cache_seconds + 1
+    assert await o.resolver.resolve(token) is None
+    assert o.resolver.last_rejection == "jwt_inactive"
+    # 원문 토큰은 캐시 키가 아니다 (해시만)
+    assert token not in o.resolver.introspector._cache
+
+
+async def test_jwt_introspection_subject_must_match(db, env, oauth_jwt_checked):
+    o = oauth_jwt_checked
+    token = make_jwt(o)
+    jwt_is_active(o, token, sub="someone-else")
+    assert await o.resolver.resolve(token) is None
+    assert o.resolver.last_rejection == "jwt_subject_mismatch"
+
+
+async def test_jwt_signature_still_checked_first(db, env, oauth_jwt_checked):
+    o = oauth_jwt_checked
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    forged = jwt.encode(
+        {"iss": ISSUER, "aud": RESOURCE, "sub": o.sub, "exp": int(time.time()) + 300},
+        other,
+        algorithm="RS256",
+    )
+    o.server.tokens[forged] = {"active": True, "aud": RESOURCE, "sub": o.sub}
+    assert await o.resolver.resolve(forged) is None
+    assert o.server.seen == []  # 서명이 틀린 토큰은 인가 서버로 보내지 않는다
+
+
+async def test_jwt_without_introspect_option_does_not_call_the_auth_server(db, env, oauth):
+    token = make_jwt(oauth)
+    assert await oauth.resolver.resolve(token) is not None
+    assert oauth.server.seen == []
+
+
+async def test_zero_cache_asks_every_time(db, env, oauth_jwt_checked):
+    o = oauth_jwt_checked
+    cfg = oauth_config(introspect_jwt=True, introspection_cache_seconds=0)
+    intro = IntrospectionVerifier(cfg, transport=httpx.MockTransport(o.server.handler))
+    token = make_jwt(o)
+    jwt_is_active(o, token)
+    assert await intro.verify(token) is not None and await intro.verify(token) is not None
+    assert intro.calls == 2 and not intro._cache
+
+
+# ---------------------------------------------------------------- 6. c0025: SSE 공간별 묶어 읽기
+
+
+async def test_many_connections_in_one_workspace_share_one_query_per_hint(db, env, monkeypatch):
+    from career_core.interfaces.http import live
+
+    calls: list = []
+    real = live.workspace_fingerprints
+
+    async def counted(database, workspace_id):
+        calls.append(workspace_id)
+        return await real(database, workspace_id)
+
+    monkeypatch.setattr(live, "workspace_fingerprints", counted)
+    hints = FakeHints()
+    n = 6
+    tokens = {"a": env.owner, "b": env.other}
+    async with live_app(db, tokens, hints) as c:
+        auth = {"Authorization": "Bearer a"}
+        mine = [
+            asyncio.create_task(c.get("/api/core/live?max_seconds=3", headers=auth))
+            for _ in range(n)
+        ]
+        theirs = asyncio.create_task(
+            c.get("/api/core/live?max_seconds=3", headers={"Authorization": "Bearer b"})
+        )
+        await wait_for(lambda: hints.subscribers == n + 1)
+        await asyncio.sleep(0.05)
+        calls.clear()  # 연결할 때의 첫 읽기는 빼고 센다
+        await start_run(db, env.owner)
+        hints.publish("runs")
+        await asyncio.sleep(0.6)
+        first_hint = list(calls)
+        await start_run(db, env.owner)
+        hints.publish("runs")
+        await asyncio.sleep(0.6)
+        second_hint = calls[len(first_hint) :]
+        responses = [await t for t in mine]
+        other = await theirs
+    # 힌트 하나에 공간마다 쿼리 하나 (연결 수와 무관)
+    assert sorted(map(str, first_hint)) == sorted(
+        [str(env.owner.workspace_id), str(env.other.workspace_id)]
+    )
+    assert len(second_hint) == 2
+    for r in responses:
+        assert [x for x, _ in parse_sse(r.text)].count("runs") == 2
+    assert [x for x, _ in parse_sse(other.text)] == ["ready", "bye"]
+
+
+async def test_workspace_summaries_share_inflight_and_recent_results(db, env, monkeypatch):
+    from career_core.interfaces.http import live
+
+    gate = asyncio.Event()
+    calls = []
+
+    async def slow(database, workspace_id):
+        calls.append(workspace_id)
+        await gate.wait()
+        return {"runs": f"r{len(calls)}", "approvals": "a"}
+
+    monkeypatch.setattr(live, "workspace_fingerprints", slow)
+    now = [100.0]
+    shared = live.WorkspaceSummaries(db, clock=lambda: now[0])
+    ws = env.owner.workspace_id
+    waiting = [asyncio.create_task(shared.read(ws, 99.0)) for _ in range(5)]
+    await asyncio.sleep(0.01)
+    waiting[0].cancel()  # 한 연결이 끊겨도 나머지는 같은 쿼리를 받는다
+    gate.set()
+    got = await asyncio.gather(*waiting[1:])
+    assert len(calls) == 1 and all(g["runs"] == "r1" for g in got)
+    assert (await shared.read(ws, 100.0))["runs"] == "r1"  # 그 뒤 결과면 다시 읽지 않는다
+    now[0] = 101.0
+    assert (await shared.read(ws, 100.5))["runs"] == "r2"  # 힌트가 더 새로우면 새로 읽는다
+    assert len(calls) == 2

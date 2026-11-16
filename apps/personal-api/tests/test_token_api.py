@@ -168,3 +168,76 @@ async def test_cli_issue_with_expiry_and_list_columns(pg, db, monkeypatch, capsy
     out = capsys.readouterr().out
     assert "expires" in out and "last used" in out
     assert (utcnow() + timedelta(days=30)).strftime("%Y-%m-%d") in out
+
+
+# --- c0025: 이름 바꾸기·만료 연장·지금 토큰 ---------------------------------------------
+
+
+async def test_web_token_rename_and_extend(db, client):
+    ws, actor, token = await _space(db)
+    h = _auth(token)
+    short = await issue_token(db, workspace_id=ws, actor_id=actor, label="short", expires_days=3)
+    rows = {t["label"]: t for t in (await client.get("/api/core/tokens", headers=h)).json()}
+    sid, before = rows["short"]["id"], rows["short"]["expires_at"]
+
+    res = await client.patch(
+        f"/api/core/tokens/{sid}", headers=h, json={"label": "  노트북  MCP ", "expires_days": 90}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["label"] == "노트북 MCP" and body["expires_at"] > before
+    assert "cbp_" not in res.text and "token_hash" not in res.text
+    # 같은 원문이 계속 통한다 (해시를 바꾸지 않는다)
+    assert (await client.get("/api/core/me", headers=_auth(short))).status_code == 200
+    # 연장만: 앞당기기·만료 없는 토큰에 만료 달기는 409
+    res = await client.patch(f"/api/core/tokens/{sid}", headers=h, json={"expires_days": 1})
+    assert (res.status_code, res.json()["detail"]) == (409, "not_an_extension")
+    me = rows["first"]["id"]
+    res = await client.patch(f"/api/core/tokens/{me}", headers=h, json={"expires_days": 30})
+    assert (res.status_code, res.json()["detail"]) == (409, "not_an_extension")
+    # 지금 쓰는 토큰 이름은 바꿀 수 있다
+    res = await client.patch(f"/api/core/tokens/{me}", headers=h, json={"label": "브라우저"})
+    assert res.status_code == 200 and res.json()["current"] is True
+    # 빈 요청·빈 이름은 422
+    for bad in ({}, {"label": "   "}, {"expires_days": 0}, {"label": "x" * 101}):
+        assert (
+            await client.patch(f"/api/core/tokens/{sid}", headers=h, json=bad)
+        ).status_code == 422
+    # 폐기·만료된 토큰은 되살리지 않는다
+    assert (await client.post(f"/api/core/tokens/{sid}/revoke", headers=h)).status_code == 200
+    res = await client.patch(f"/api/core/tokens/{sid}", headers=h, json={"expires_days": 365})
+    assert (res.status_code, res.json()["detail"]) == (409, "token_revoked")
+    old = await issue_token(db, workspace_id=ws, actor_id=actor, label="old", expires_days=1)
+    past = utcnow() - timedelta(days=3)
+    await _set(db, ws, old, created_at=past, expires_at=past + timedelta(days=1))
+    oid = str((await _row(db, ws, old)).id)
+    res = await client.patch(f"/api/core/tokens/{oid}", headers=h, json={"expires_days": 30})
+    assert (res.status_code, res.json()["detail"]) == (409, "token_expired")
+    assert (await client.get("/api/core/me", headers=_auth(old))).status_code == 401
+
+
+async def test_web_token_patch_is_owner_only_and_workspace_scoped(db, client):
+    ws, owner, token = await _space(db)
+    other_ws, _, other_token = await _space(db, "B")
+    [other] = await list_tokens(db, workspace_id=other_ws)
+    res = await client.patch(
+        f"/api/core/tokens/{other.id}", headers=_auth(token), json={"label": "x"}
+    )
+    assert res.status_code == 404
+    [mine] = await list_tokens(db, workspace_id=ws)
+    async with db.workspace_session(ws) as s:
+        m = await s.scalar(select(Membership).where(Membership.actor_id == owner))
+        m.role = "editor"
+    res = await client.patch(
+        f"/api/core/tokens/{mine.id}", headers=_auth(token), json={"label": "y"}
+    )
+    assert res.status_code == 403
+    # 편집자도 지금 자기 토큰은 볼 수 있다 (오늘 화면의 만료 임박 안내)
+    res = await client.get("/api/core/tokens/current", headers=_auth(token))
+    assert res.status_code == 200
+    assert (res.json()["id"], res.json()["current"]) == (str(mine.id), True)
+    assert "cbp_" not in res.text
+    assert (await client.get("/api/core/tokens/current")).status_code == 401
+    assert (await client.get("/api/core/tokens/current", headers=_auth(other_token))).json()[
+        "id"
+    ] == str(other.id)

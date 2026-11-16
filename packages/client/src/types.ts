@@ -304,11 +304,14 @@ export interface SearchResult {
 // ---------------------------------------------------------------- job postings
 
 export type PostingStatus = "draft" | "saved" | "archived";
-export type FetchStatus = "pending" | "done" | "listing" | "failed";
+/** needs_confirmation: 스캔 PDF 비전 호출 예상 비용이 상한을 넘어 사람의 확인을 기다린다 (c0025) */
+export type FetchStatus = "pending" | "done" | "listing" | "failed" | "needs_confirmation";
 export type FetchError =
   | "source_unavailable"
   | "login_required"
   | "rate_limited"
+  | "bot_blocked"
+  | "maybe_bot_blocked"
   | "needs_manual_check"
   | "blocked_address"
   | "too_large"
@@ -342,7 +345,19 @@ export interface EssayQuestion {
   char_limit: number | null;
 }
 
-export type PostingValue = string | string[] | EssayQuestion[];
+/** 지원서 선택형 문항 (보기 고르기, 자기소개서 아님). 채용 시스템 구조화 데이터에서만 온다 (c0025) */
+export interface ChoiceQuestion {
+  prompt: string;
+  required: boolean | null;
+  options: string[];
+  /** 채용 시스템의 원래 문항 종류 번호 (그리팅 200·400). 하나/여러 개 고르기는 구분하지 않는다 */
+  source_type: number | null;
+}
+
+/** 확정 화면에서 고치지 않는(구조화 데이터에서만 오는) 항목 */
+export type StructuredOnlyField = "application_questions";
+
+export type PostingValue = string | string[] | EssayQuestion[] | ChoiceQuestion[];
 
 /** 항목 근거. structured: JSON-LD 경로, quote: 본문 위치, quotes: 목록 항목별 인용, user: 사용자 수정 */
 export type FieldEvidence =
@@ -379,6 +394,26 @@ export interface PostingSummary {
   saved_at: IsoDateTime | null;
 }
 
+/** 비전 호출 비용 확인 요청 (c0025). 금액은 USD 문자열, 토큰은 추정값 */
+export interface FetchConfirmation {
+  id: Uuid;
+  status: "pending" | "confirmed" | "declined" | "used" | "superseded";
+  /** 읽을 쪽 (1부터) */
+  pages: number[];
+  pages_total: number;
+  images: number;
+  input_tokens: number;
+  output_tokens: number;
+  estimated_usd: string | null;
+  /** 출력이 상한까지 나올 때. 상한 비교는 이 값으로 한다 */
+  max_usd: string | null;
+  threshold_usd: string;
+  endpoint: string;
+  model: string;
+  created_at: IsoDateTime;
+  decided_at: IsoDateTime | null;
+}
+
 export interface FetchRun {
   id: Uuid;
   status: FetchStatus;
@@ -389,6 +424,7 @@ export interface FetchRun {
   candidates: { url: string; title: string }[];
   notes: string[];
   created_at: IsoDateTime;
+  confirmation?: FetchConfirmation | null;
 }
 
 export interface PostingVersion {
@@ -397,7 +433,7 @@ export interface PostingVersion {
   method: string;
   adapter: string;
   final_url: string;
-  extracted: Partial<Record<PostingField, ExtractedField>>;
+  extracted: Partial<Record<PostingField | StructuredOnlyField, ExtractedField>>;
   missing: string[];
   changed_fields: string[];
   has_screenshot: boolean;
@@ -409,8 +445,8 @@ export interface Posting {
   id: Uuid;
   canonical_url: string;
   status: PostingStatus;
-  fields: Partial<Record<PostingField, PostingValue>>;
-  evidence: Partial<Record<PostingField, FieldEvidence>>;
+  fields: Partial<Record<PostingField | StructuredOnlyField, PostingValue>>;
+  evidence: Partial<Record<PostingField | StructuredOnlyField, FieldEvidence>>;
   pending_changes: string[];
   confirmed_version_id: Uuid | null;
   saved_at: IsoDateTime | null;

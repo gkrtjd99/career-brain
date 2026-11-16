@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 from career_core.db import Database, Membership
 from career_core.db.base import utcnow
 from career_core.domain.workspace import scopes_for_role
-from career_core.ports import ActorContext, ApiTokenRecord
+from career_core.ports import ActorContext, ApiTokenRecord, ApiTokenUpdateError
 from sqlalchemy import DateTime, MetaData, Text, func, or_, select, text, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -103,6 +103,43 @@ async def revoke_token(
             return False
         row.revoked_at = utcnow()
     return True
+
+
+async def update_token(
+    db: Database,
+    *,
+    workspace_id: UUID,
+    token_id: UUID,
+    label: str | None = None,
+    expires_days: int | None = None,
+) -> ApiToken | None:
+    """이름 바꾸기·만료 연장 (c0025). 없으면 None. 원문·해시는 바꾸지 않는다 (같은 토큰이 계속 통한다).
+
+    - ``expires_days``: 지금부터 그 날 수 뒤로 만료를 옮긴다. 지금 만료일보다 뒤일 때만 (연장만). 만료가 없던
+      토큰에 만료를 다는 것도, 앞당기는 것도 받지 않는다 (``not_an_extension``). 앞당기려면 새로 발급하고 폐기한다.
+    - 폐기한 토큰(``token_revoked``)과 이미 만료된 토큰(``token_expired``)은 되살리지 않는다.
+    """
+    if expires_days is not None and not 1 <= expires_days <= MAX_EXPIRES_DAYS:
+        raise ValueError(f"expires_days must be 1..{MAX_EXPIRES_DAYS}")
+    now = utcnow()
+    async with db.workspace_session(workspace_id) as s:
+        row = await s.scalar(select(ApiToken).where(ApiToken.id == token_id).with_for_update())
+        if row is None:
+            return None
+        if row.revoked_at is not None:
+            raise ApiTokenUpdateError("token_revoked")
+        if row.expires_at is not None and row.expires_at <= now:
+            raise ApiTokenUpdateError("token_expired")
+        if expires_days is not None:
+            new_expiry = now + timedelta(days=expires_days)
+            if row.expires_at is None or new_expiry <= row.expires_at:
+                raise ApiTokenUpdateError("not_an_extension")
+            row.expires_at = new_expiry
+        if label is not None:
+            row.label = label
+        await s.flush()
+        s.expunge(row)
+    return row
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +252,7 @@ class PersonalTokenResolver:
 
 
 class PersonalTokenAdmin:
-    """``career_core.ports.ApiTokenAdmin`` 구현: 웹 설정 화면의 토큰 목록·발급·폐기.
+    """``career_core.ports.ApiTokenAdmin`` 구현: 웹 설정 화면의 토큰 목록·발급·폐기·이름·만료 연장.
 
     새 토큰은 요청한 사람(소유자) 자신의 토큰이다. 권한 검사(``tokens.*``)는 HTTP 경로가 한다.
     """
@@ -237,6 +274,18 @@ class PersonalTokenAdmin:
 
     async def revoke(self, actor: ActorContext, token_id: UUID) -> bool:
         return await revoke_token(self.db, workspace_id=actor.workspace_id, token_id=token_id)
+
+    async def update(
+        self, actor: ActorContext, token_id: UUID, *, label: str | None, expires_days: int | None
+    ) -> ApiTokenRecord | None:
+        row = await update_token(
+            self.db,
+            workspace_id=actor.workspace_id,
+            token_id=token_id,
+            label=label,
+            expires_days=expires_days,
+        )
+        return _info(row, None).record() if row is not None else None
 
 
 MCP_PATH = "/api/core/mcp"
@@ -273,6 +322,8 @@ def mcp_oauth_from_settings(settings, db: Database):
         introspection_client_id=getattr(settings, "oauth_client_id", None),
         introspection_client_secret=getattr(settings, "oauth_client_secret", None),
         require_jti=bool(getattr(settings, "oauth_require_jti", False)),
+        introspect_jwt=bool(getattr(settings, "oauth_introspect_jwt", False)),
+        introspection_cache_seconds=int(getattr(settings, "oauth_introspection_cache_seconds", 10)),
         local_token_prefixes=(TOKEN_PREFIX,),
     )
     return McpOAuth(config=config, resolver=OAuthIdentityResolver(db, config))

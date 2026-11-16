@@ -8,11 +8,15 @@
 - 브라우저(Playwright)는 선택 설치. 모든 하위 요청도 같은 주소 검사를 거친다.
 - 봇 차단(Cloudflare 확인 화면 등)은 우회하지 않는다. ``rate_limited``(진짜 요청 한도)와 구분해
   ``bot_blocked``로 알리고 본문 직접 붙여넣기로 안내한다 (``detect_bot_block``).
+- 모르는 서비스의 확인 화면(캡차·JS 확인 스크립트·빈 본문 + 스크립트)은 ``maybe_bot_blocked``
+  ("막혔을 수 있음")로 알린다 (``challenge_signs``, c0025). 200 응답이어도 그런 화면이면 브라우저로 다시
+  열지 않는다: 브라우저가 확인 스크립트를 실행하면 그게 우회다.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import socket
 import zlib
 from collections.abc import Mapping
@@ -117,21 +121,119 @@ def detect_bot_block(status: int, headers: Mapping[str, str] | None, body: str) 
     return None
 
 
+# --- 모르는 서비스의 확인 화면 (c0025) ----------------------------------------------------
+# 이 흔적들은 특정 서비스를 가리키지 않는다. 그래서 "막혔을 수 있음"(maybe_bot_blocked)으로만 말한다.
+_CAPTCHA_WIDGETS = (
+    'class="g-recaptcha',
+    "class='g-recaptcha",
+    'class="h-captcha',
+    "class='h-captcha",
+    'class="cf-turnstile',
+    "class='cf-turnstile",
+    'id="captcha',
+    "id='captcha",
+)
+_CAPTCHA_SCRIPTS = (
+    "recaptcha/api.js",
+    "recaptcha/enterprise.js",
+    "hcaptcha.com/1/api.js",
+    "challenges.cloudflare.com/turnstile",
+    "captcha",
+)
+# 사람 확인을 요구하는 문구 (소문자). "javascript를 켜라"만으로는 SPA와 구분되지 않아 쿠키까지 요구한다.
+_CHALLENGE_PHRASES = (
+    "checking your browser",
+    "checking if the site connection is secure",
+    "verify you are human",
+    "verify that you are human",
+    "verifying you are human",
+    "are you a robot",
+    "i'm not a robot",
+    "unusual traffic",
+    "automated requests",
+    "automated access",
+    "bot detection",
+    "enable javascript and cookies",
+    "javascript and cookies are required",
+    "자동 입력 방지",
+    "보안 문자",
+    "로봇이 아닙니다",
+    "자동화된 요청",
+    "비정상적인 트래픽",
+    "비정상적인 접근",
+)
+_COOKIE_SET = re.compile(r"document\.cookie\s*=")
+_RELOAD = re.compile(
+    r"\blocation\.(?:reload|replace)\s*\(|(?<![\w.])(?:window\.|document\.)?location(?:\.href)?\s*=(?!=)"
+)
+_CHALLENGE_SCRIPT = re.compile(
+    r"<script[^>]*\bsrc=[\"'][^\"']*challenge[^\"']*[\"']|id=[\"']challenge-form[\"']"
+)
+_SCRIPT_BLOCK = re.compile(r"<(script|style|template)\b[^>]*>.*?</\1\s*>", re.DOTALL)
+_TAG = re.compile(r"<[^>]+>")
+TINY_BODY_CHARS = 200
+
+
+def _visible_chars(lowered: str) -> int:
+    text = _TAG.sub(" ", _SCRIPT_BLOCK.sub(" ", lowered))
+    return len(" ".join(text.split()))
+
+
+def challenge_signs(status: int, body: str) -> tuple[str, ...]:
+    """모르는 서비스의 봇 확인 화면 흔적. 없으면 빈 튜플. 판단만 하고 다시 요청하지 않는다.
+
+    - ``captcha``: 캡차 위젯·스크립트. ``phrase``: 사람 확인 문구. ``js_challenge``: 쿠키를 심고 다시
+      불러오는 스크립트, 또는 이름에 challenge가 든 스크립트·폼. ``tiny_body_script``: 보이는 글이 거의 없는데
+      스크립트만 있다.
+    - 403·429·503: 흔적 하나면 충분하다 (보통의 오류 화면에는 스크립트·캡차가 없다).
+    - 200: 보이는 글이 거의 없고(``TINY_BODY_CHARS`` 미만) 위젯·문구·JS 확인 중 하나가 있을 때만
+      (캡차 스크립트만 불러오는 보통 페이지·스크립트로 그리는 SPA와 구분하려고).
+    """
+    if status not in _CHALLENGE_STATUSES and status != 200:
+        return ()
+    lowered = body[:60000].lower()
+    has_script = "<script" in lowered
+    tiny = _visible_chars(lowered) < TINY_BODY_CHARS
+    widget = any(m in lowered for m in _CAPTCHA_WIDGETS)
+    signs: list[str] = []
+    if widget or (status != 200 and any(m in lowered for m in _CAPTCHA_SCRIPTS)):
+        signs.append("captcha")
+    if any(p in lowered for p in _CHALLENGE_PHRASES):
+        signs.append("phrase")
+    if (_COOKIE_SET.search(lowered) and _RELOAD.search(lowered)) or _CHALLENGE_SCRIPT.search(
+        lowered
+    ):
+        signs.append("js_challenge")
+    if status == 200:
+        return tuple(signs) if tiny and signs else ()
+    if tiny and has_script:
+        signs.append("tiny_body_script")
+    return tuple(signs)
+
+
 def _status_failure(
-    status: int, body: str, headers: Mapping[str, str] | None = None
+    status: int, body: str, headers: Mapping[str, str] | None = None, *, html: bool = False
 ) -> FetchFailure | None:
+    """상태 코드·확인 화면 → 실패. ``html``: 200 응답도 확인 화면인지 본다 (HTML일 때만).
+
+    순서: 알려진 봇 차단 → 로그인(401·407, 로그인 글이 있는 403) → 모르는 확인 화면(``maybe_bot_blocked``)
+    → 429 ``rate_limited`` → 그 밖의 4xx·5xx.
+    """
     bot = detect_bot_block(status, headers, body)
     if bot is not None:
         return FetchFailure(FetchError.BOT_BLOCKED, status, bot)
     if status in (401, 407):
         return FetchFailure(FetchError.LOGIN_REQUIRED, status)
-    if status == 429:
-        return FetchFailure(FetchError.RATE_LIMITED, status)
     if status == 403:
         lowered = body[:20000].lower()
         if "login" in lowered or "로그인" in lowered or "sign in" in lowered:
             return FetchFailure(FetchError.LOGIN_REQUIRED, status)
-        return FetchFailure(FetchError.SOURCE_UNAVAILABLE, status)
+    if status >= 400 or html:
+        signs = challenge_signs(status, body)
+        if signs:
+            return FetchFailure(FetchError.MAYBE_BOT_BLOCKED, status, ",".join(signs))
+    if status == 429:
+        return FetchFailure(FetchError.RATE_LIMITED, status)
     if status >= 400:
         return FetchFailure(FetchError.SOURCE_UNAVAILABLE, status)
     return None
@@ -279,10 +381,11 @@ class HttpFetcher:
         if isinstance(raw, FetchFailure):
             return raw
         text = raw.body.decode(raw.charset or "utf-8", errors="replace")
-        failure = _status_failure(raw.status, text, raw.headers)
+        ctype = raw.content_type.split(";")[0].strip().lower()
+        is_html = ctype in ("", "text/html", "application/xhtml+xml")
+        failure = _status_failure(raw.status, text, raw.headers, html=is_html)
         if failure:
             return failure
-        ctype = raw.content_type.split(";")[0].strip().lower()
         if ctype in BINARY_TYPES or ctype in OCTET_TYPES:
             # 선언한 형식과 실제 파일 머리가 맞아야 한다 (octet-stream이면 머리로 판단).
             sniffed = sniff_binary(raw.body)
@@ -414,7 +517,7 @@ class BrowserFetcher:
                 status = resp.status if resp else 200
                 html = await page.content()
                 kept = _kept_headers(await resp.all_headers()) if resp else {}
-                failure = _status_failure(status, html, kept)
+                failure = _status_failure(status, html, kept, html=True)
                 if failure:
                     return failure
                 shot = (

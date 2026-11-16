@@ -1,5 +1,9 @@
 """공고 저장 경로.
 
+c0025: 스캔 PDF 비전 비용 확인 — 예상 비용이 상한을 넘은 가져오기는 ``needs_confirmation``이고 실행 한 줄의
+``confirmation``에 예상(쪽·이미지·토큰·USD)이 붙는다. ``POST /job-postings/{id}/fetch-runs/{run}/confirm``
+(확인 → 다시 가져오기 202) 또는 ``.../decline``. 사람(웹·HTTP 토큰)만, ``jobs.write``.
+
 NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
 """
 
@@ -42,6 +46,23 @@ class SummaryOut(BaseModel):
     saved_at: datetime | None
 
 
+class ConfirmationOut(BaseModel):
+    id: UUID
+    status: str  # pending | confirmed | declined | used | superseded
+    pages: list[int]  # 읽을 쪽 (1부터)
+    pages_total: int
+    images: int
+    input_tokens: int  # 추정
+    output_tokens: int  # 예상 출력 (추정)
+    estimated_usd: str | None  # 예상 (단가를 모르면 null)
+    max_usd: str | None  # 출력이 상한까지 나올 때. 상한 비교는 이 값으로 한다
+    threshold_usd: str
+    endpoint: str
+    model: str
+    created_at: datetime
+    decided_at: datetime | None
+
+
 class RunOut(BaseModel):
     id: UUID
     status: str
@@ -52,6 +73,7 @@ class RunOut(BaseModel):
     candidates: list[dict]
     notes: list[str]
     created_at: datetime
+    confirmation: ConfirmationOut | None = None
 
 
 class VersionOut(BaseModel):
@@ -185,6 +207,29 @@ def add_posting_routes(router: APIRouter, deps, authorize) -> None:
         except PostingRuleError as exc:
             raise _rule(exc) from exc
         return StatusOut(id=posting_id, status=status)
+
+    async def _decide(actor: ActorContext, posting_id: UUID, run_id: UUID, accept: bool):
+        try:
+            return await uc.decide_fetch_confirmation(db, actor, posting_id, run_id, accept=accept)
+        except NotFound as exc:
+            raise HTTPException(404, "not found") from exc
+        except PostingRuleError as exc:
+            code = 403 if exc.code == "human_confirmation_required" else 409
+            raise HTTPException(code, exc.code) from exc
+
+    @router.post(
+        "/job-postings/{posting_id}/fetch-runs/{run_id}/confirm",
+        response_model=StatusOut,
+        status_code=202,
+    )
+    async def confirm_cost(actor: writer, posting_id: UUID, run_id: UUID) -> StatusOut:
+        new_run = await _decide(actor, posting_id, run_id, True)
+        return StatusOut(id=new_run, status="pending")
+
+    @router.post("/job-postings/{posting_id}/fetch-runs/{run_id}/decline", response_model=StatusOut)
+    async def decline_cost(actor: writer, posting_id: UUID, run_id: UUID) -> StatusOut:
+        await _decide(actor, posting_id, run_id, False)
+        return StatusOut(id=run_id, status="failed")
 
     @router.post("/job-postings/{posting_id}/archive", response_model=StatusOut)
     async def archive(actor: writer, posting_id: UUID) -> StatusOut:

@@ -128,7 +128,8 @@ MCP Authorization 규격의 **자원 서버** 부분만 구현한다 (`interface
 | 보호 자원 메타데이터 (RFC 9728) | `GET /.well-known/oauth-protected-resource/api/core/mcp` (와 경로 없는 형태): `resource`, `authorization_servers`, `scopes_supported`, `bearer_methods_supported: ["header"]` |
 | 401 안내 | `WWW-Authenticate: Bearer resource_metadata="…", scope="…"` (토큰이 틀렸으면 `error="invalid_token"`) |
 | 토큰 검증 | JWKS 서명(허용: RS256·PS256·ES256·EdDSA, `none`·HS* 거부), `iss` = 설정한 issuer, `aud` = 이 MCP 주소(RFC 8707, 또는 `CAREER_OAUTH_AUDIENCE`), `exp`·`nbf`(60초 여유), `sub` 필수 |
-| 불투명 토큰 (c0019, 선택) | RFC 7662 introspection: JWT가 아닌 토큰(JWKS를 안 정했으면 모든 토큰)을 `CAREER_OAUTH_INTROSPECTION_URL`에 묻는다 (client_secret_basic). `active = true`, `iss`(있으면) = issuer, `aud`에 이 MCP 주소(필수), `exp`·`nbf`, `sub` 필수. 활성 결과만 최대 60초(만료 전까지) 메모리 캐시. API 토큰(`cbp_`)은 보내지 않는다 |
+| 불투명 토큰 (c0019, 선택) | RFC 7662 introspection: JWT가 아닌 토큰(JWKS를 안 정했으면 모든 토큰)을 `CAREER_OAUTH_INTROSPECTION_URL`에 묻는다 (client_secret_basic). `active = true`, `iss`(있으면) = issuer, `aud`에 이 MCP 주소(필수), `exp`·`nbf`, `sub` 필수. 활성 결과만 최대 10초(c0025, `CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS`, 만료 전까지) 메모리 캐시. API 토큰(`cbp_`)은 보내지 않는다 |
+| JWT도 introspection (c0025, 선택) | `CAREER_OAUTH_INTROSPECT_JWT=1`: 서명·`iss`·`aud`·`exp` 검증을 **통과한** JWT만 introspection에 한 번 더 묻는다 (같은 캐시). `active = false`면 401 (`jwt_inactive`), introspection의 `sub`가 JWT와 다르면 401 (`jwt_subject_mismatch`). 서명이 틀린 JWT는 보내지 않는다. JWKS와 introspection 주소가 둘 다 있어야 켤 수 있다 (없으면 시작할 때 오류). 인가 서버에서 폐기한 JWT가 캐시 시간 안에 막힌다 |
 | 토큰 기록·폐기 (c0019) | 받은 토큰마다 `core.oauth_tokens`에 `jti`(없으면 토큰 sha256, 원문 없음)·처음/마지막 사용·횟수·만료를 남긴다. 소유자가 토큰 하나를 **폐기**하면 만료 전이라도 다음 요청부터 401. 연결을 끊으면 그 사용자의 모든 토큰이 401 (다시 연결해도 끊기 전 토큰은 계속 거부). 만료 하루 뒤 기록은 주기 유지보수가 지운다 |
 | `jti` | 같은 `jti`가 **다른 연결**(다른 subject)로 오면 거부 (`jti_conflict`). `CAREER_OAUTH_REQUIRE_JTI=1`이면 `jti` 없는 토큰 거부 |
 | 공간 | 토큰의 어떤 값도 공간 ID로 쓰지 않는다. `(issuer, sub)` → `core.oauth_identities` 연결 → (공간, actor). 연결은 공간 소유자(사람)만 만든다. 한 `(issuer, sub)`는 살아 있는 연결 하나 |
@@ -147,6 +148,8 @@ export CAREER_OAUTH_INTROSPECTION_URL=https://auth.example.com/realms/career/pro
 export CAREER_OAUTH_CLIENT_ID=career-brain
 export CAREER_OAUTH_CLIENT_SECRET=REPLACE_ME
 export CAREER_OAUTH_REQUIRE_JTI=1   # 선택: jti 없는 토큰 거부
+export CAREER_OAUTH_INTROSPECT_JWT=1   # 선택: 검증한 JWT도 introspection으로 폐기 확인 (JWKS + introspection 필요)
+export CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS=10   # 선택: 활성 결과 캐시 시간 (0 = 캐시 안 함)
 uv sync --extra oauth   # PyJWT (루트 개발 환경은 이미 포함)
 
 CAREER_API_TOKEN=cbp_… personal-api oauth-link --subject <인가 서버의 sub>   # 연결
@@ -160,10 +163,29 @@ CAREER_API_TOKEN=cbp_… personal-api oauth-link --revoke <연결 ID>           
 
 | 경로 | 내용 |
 |---|---|
-| `GET /core/oauth?limit=` | `{config: {enabled, issuer, resource, jwks, introspection, require_jti}, links[], tokens[]}` |
+| `GET /core/oauth?limit=` | `{config: {enabled, issuer, resource, jwks, introspection, require_jti, introspect_jwt, introspection_cache_seconds}, links[], tokens[]}` |
 | `POST /core/oauth/links` `{subject, issuer?, label?}` → 201 | 연결 (issuer 생략 = 설정한 issuer). 다른 공간에 이미 있으면 409 |
 | `POST /core/oauth/links/{id}/revoke` | 연결 끊기 `{revoked}` |
 | `POST /core/oauth/tokens/{id}/revoke` | 토큰 하나 폐기 `{revoked}` |
+
+### introspection 캐시: 프로세스마다, 짧게 (c0025)
+
+캐시는 프로세스 메모리에 토큰 sha256 → 결과로 둔다 (원문 토큰은 어디에도 저장하지 않는다). 활성 결과만, `min(캐시 시간, 토큰 exp)`까지. 비활성·오류는 캐시하지 않는다.
+
+여러 프로세스(API 여러 개 + worker)가 캐시를 나누도록 DB 표(해시 → 활성·만료)를 두는 안도 봤지만 **캐시 시간을 60초 → 10초로 줄이고 프로세스마다 두는** 쪽을 골랐다:
+
+- 안전에 중요한 값은 "인가 서버에서 폐기한 뒤 여기서 막힐 때까지의 시간"이다. 이 시간은 프로세스가 몇 개든 **캐시 시간 이하**다 (각 프로세스는 자기 캐시가 끝나면 다시 묻는다). 공유 캐시는 이 시간을 줄이지 못하고 인가 서버로 가는 요청 수만 줄인다.
+- 공유 표는 새 쓰기 경로(요청마다 upsert)·정리 작업·공간 밖 표(토큰은 공간을 정하기 전에 검사한다 → SECURITY DEFINER 함수)가 필요하고, 해시라도 "이 토큰이 활성"이라는 값이 DB·백업에 남는다.
+- 요청 수: 10초 캐시면 토큰 하나당 프로세스마다 최대 10초에 한 번. 개인 설치(프로세스 1–3개)에서 인가 서버에 부담이 되지 않는다. 더 줄이려면 `CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS`를 늘리고, 그만큼 폐기 반영이 늦어진다 (0이면 매 요청 묻는다).
+
+### DPoP (RFC 9449): 평가만, 보류 (c0025)
+
+DPoP는 액세스 토큰을 클라이언트의 키에 묶어(`cnf.jkt`) 탈취한 토큰을 다른 곳에서 못 쓰게 한다. 리소스 서버(여기)가 할 일은 크지 않다: `Authorization: DPoP <token>`과 `DPoP` 헤더의 proof JWT(`htm`·`htu`·`iat`·`jti`·`ath`)를 검증하고, proof 키 지문이 토큰의 `cnf.jkt`와 같은지, proof `jti`가 짧은 시간 안에 다시 오지 않는지(일회용 저장소) 본다. 하지만:
+
+- 인가 서버가 DPoP 바인딩 토큰을 발급해야 하고 (제품·설정마다 지원이 다르다),
+- MCP 클라이언트가 키를 만들고 요청마다 proof를 붙여야 한다. MCP 권한 사양은 bearer 토큰을 기본으로 하고, 널리 쓰는 클라이언트는 DPoP를 보내지 않는다.
+
+양쪽이 없으면 여기서 만든 검증은 쓰이지 않는 코드다. 그래서 **보류**한다 (plan §18). 그때까지는 짧은 토큰 수명, 폐기 목록, `CAREER_OAUTH_INTROSPECT_JWT`(인가 서버 폐기를 캐시 시간 안에 반영)로 피해 시간을 줄인다. 지원이 생기면: proof 검증 + `cnf.jkt` 비교 + proof `jti` 일회용 저장(몇 분, 표 하나)을 `McpOAuth`에 넣고 보호 자원 메타데이터에 `dpop_bound_access_tokens_required`를 알린다.
 
 ### `jti` 재사용 감지: 한 것과 안 한 것
 
@@ -173,11 +195,11 @@ CAREER_API_TOKEN=cbp_… personal-api oauth-link --revoke <연결 ID>           
 - 사용 횟수·처음/마지막 사용 시각을 화면에 보여 준다. 모르는 사용이 보이면 그 토큰을 폐기하거나 연결을 끊는다.
 - 폐기는 만료까지 유지된다 (폐기 기록은 만료 하루 뒤 지운다. 그 뒤 토큰은 서명 검증의 `exp`에서 막힌다).
 
-탈취한 토큰의 재전송 자체를 막으려면 토큰을 클라이언트 키에 묶는 소유 증명(DPoP, RFC 9449)이 필요하다. 인가 서버와 MCP 클라이언트 양쪽이 지원해야 해서 지금은 하지 않는다 (plan §18 후속). 대신 짧은 토큰 수명(인가 서버 설정)과 폐기 목록으로 피해 시간을 줄인다.
+탈취한 토큰의 재전송 자체를 막으려면 토큰을 클라이언트 키에 묶는 소유 증명(DPoP, RFC 9449)이 필요하다. 인가 서버와 MCP 클라이언트 양쪽이 지원해야 해서 보류했다 (위 "DPoP", plan §18). 대신 짧은 토큰 수명(인가 서버 설정)과 폐기 목록으로 피해 시간을 줄인다.
 
 하지 않은 것 (plan §18):
 
 - 인가 서버·로그인 화면·동의 화면·동적 클라이언트 등록(RFC 7591). 운영 중인 인가 서버의 기능을 쓴다.
-- 일회용 `jti`(위 이유), DPoP 소유 증명.
-- 인가 서버 쪽 폐기의 즉시 반영: JWT는 서명만 보므로 인가 서버에서 폐기해도 여기서는 이 서버의 폐기 목록에 넣거나 만료될 때까지 통한다. introspection은 캐시 시간(최대 60초) 안에 반영된다.
+- 일회용 `jti`(위 이유), DPoP 소유 증명(보류, 위 이유).
+- 인가 서버 쪽 폐기의 즉시 반영: JWT는 기본으로 서명만 보므로 인가 서버에서 폐기해도 여기서는 이 서버의 폐기 목록에 넣거나 만료될 때까지 통한다 (`CAREER_OAUTH_INTROSPECT_JWT=1`이면 캐시 시간 안에 반영). introspection은 캐시 시간(기본 10초) 안에 반영된다. 캐시를 끄면(0) 다음 요청부터 반영된다.
 - 토큰 교환·다른 서비스로의 토큰 전달(token passthrough 금지).

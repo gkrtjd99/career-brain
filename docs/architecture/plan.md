@@ -505,10 +505,11 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - ~~승인(후속): 무효화 trigger의 칸 목록은 `submission_target`과 손으로 맞춘다. 새 승인 행위가 생기면 행위별 trigger 또는 대상 버전 칸(`target_version` 계산을 DB 함수로) 검토.~~ → 해결 (c0019 `core.application_target_version`: 대상 버전 계산을 DB 함수 하나로, 앱 확인과 trigger가 같은 함수를 부른다. trigger는 칸 목록 없이 다시 계산해 비교. `BEGIN ATOMIC` 본문의 `pg_depend`로 "읽는 표마다 trigger"를 시험. 칸 목록 시험·저장 칸 방식보다 나은 이유는 `runs.md`).
 - ~~MCP(후속): OAuth 불투명 토큰 introspection(RFC 7662), 토큰 폐기 목록, `jti` 재사용 감지, 연결 관리 웹 화면 (지금은 `personal-api oauth-link`). 감사 기록 보존 기간·정리.~~ → 해결 (선택 introspection + 60초 캐시, API 토큰은 보내지 않음. c0019 `oauth_tokens`: 본 토큰 기록·`jti` 폐기, 연결 끊기, 다른 연결의 같은 `jti` 거부, `CAREER_OAUTH_REQUIRE_JTI`. 일회용 `jti`는 bearer 액세스 토큰에 맞지 않아 하지 않음(`mcp.md`). `/system` "원격 연결" 탭. 감사 보존 `CAREER_AUDIT_RETENTION_DAYS`(기본 180, 0 = 보관) + SECURITY DEFINER `core.purge_audit_events`(공간 문맥·최소 7일), 주기 유지보수 단계).
 - ~~실행(후속): 시스템 화면 실시간 갱신(SSE) — 지금은 활성 실행이 있을 때 몇 초마다 다시 읽는다.~~ → 해결 (`GET /core/live` SSE, c0019 `notify_state` trigger(표 이름만) → 프로세스당 LISTEN 하나 → 공간 문맥에서 다시 읽어 바뀐 경우만 이벤트. 같은 Bearer 규칙·주기적 재확인, LISTEN 없으면 5초 서버 확인, 웹은 끊기면 다시 읽기로).
-- MCP(후속): DPoP(RFC 9449) 소유 증명으로 탈취 토큰 재전송 막기 — 인가 서버·MCP 클라이언트 지원이 먼저 필요하다.
-- MCP(후속): JWT는 인가 서버에서 폐기해도 여기 폐기 목록에 넣거나 만료될 때까지 통한다. 필요하면 JWT도 introspection으로 확인하는 설정(요청마다 인가 서버 호출, 캐시) 추가.
-- MCP(후속): introspection 캐시는 프로세스 메모리라 worker·API 프로세스마다 따로다 (최대 60초 반영 지연). 여러 프로세스면 캐시 시간을 줄인다.
-- 실행(후속): SSE 연결마다 힌트가 올 때 요약 쿼리를 한 번씩 한다 (연결 수 × 변경 수). 화면을 여는 사람이 많아지는 서비스는 공간별로 묶어 한 번만 읽고 나눠 주기. 웹의 오늘 화면 "승인 요청" 카드도 같은 스트림을 쓰게 넓히기.
+- ~~MCP(후속): DPoP(RFC 9449) 소유 증명으로 탈취 토큰 재전송 막기~~ → 보류 (c0025 평가: 리소스 서버 쪽 검증은 작지만 인가 서버의 DPoP 바인딩 토큰 발급과 MCP 클라이언트의 proof 지원이 먼저 필요하다. 그때까지 짧은 수명·폐기 목록·`CAREER_OAUTH_INTROSPECT_JWT`. 할 일 목록은 `mcp.md` "DPoP").
+- ~~MCP(후속): JWT는 인가 서버에서 폐기해도 여기 폐기 목록에 넣거나 만료될 때까지 통한다. 필요하면 JWT도 introspection으로 확인하는 설정(요청마다 인가 서버 호출, 캐시) 추가.~~ → 해결 (c0025 `CAREER_OAUTH_INTROSPECT_JWT`: 서명 검증을 통과한 JWT만 같은 캐시를 거쳐 introspection, `active=false`·`sub` 불일치는 401. JWKS·introspection 둘 다 있어야 켜진다).
+- ~~MCP(후속): introspection 캐시는 프로세스 메모리라 worker·API 프로세스마다 따로다 (최대 60초 반영 지연). 여러 프로세스면 캐시 시간을 줄인다.~~ → 해결 (c0025: 캐시 시간 기본 60 → 10초, `CAREER_OAUTH_INTROSPECTION_CACHE_SECONDS`, 프로세스마다 유지. DB 공유 캐시는 폐기 반영 지연(프로세스 수와 무관하게 캐시 시간 이하)을 줄이지 못하고 요청 수만 줄여서 두지 않음. 원문 토큰은 저장하지 않음. 이유는 `mcp.md` "introspection 캐시").
+- ~~실행(후속): SSE 연결마다 힌트가 올 때 요약 쿼리를 한 번씩 한다 (연결 수 × 변경 수). 화면을 여는 사람이 많아지는 서비스는 공간별로 묶어 한 번만 읽고 나눠 주기.~~ → 해결 (c0025 `WorkspaceSummaries`: 프로세스 안 공간마다 힌트 하나에 조회 1번, 진행 중 조회 공유·`asyncio.shield`, 실행·승인 요약을 한 문장으로. 연결 N개 = 힌트당 1번 시험. `runs.md`).
+- 실행(후속): 웹의 오늘 화면 "승인 요청" 카드도 같은 SSE 스트림을 쓰게 넓히기 (지금은 다시 읽기).
 - 승인(후속): 새 승인 행위가 생기면 그 대상의 `<kind>_target_version` 함수와 `approvals_recheck` trigger, 같은 꼴의 `pg_depend` 시험을 더한다 (`runs.md`).
 - ~~운영: 미확정 공고 초안 정리(`purge_unconfirmed`)·`pg_dump`를 주기 실행하는 내장 스케줄 (지금은 버튼·cron)~~ → 해결 (`serve`·`worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`마다 모든 공간 정리, advisory lock. `pg_dump`는 앱 밖 cron/systemd timer: `backup.md`).
 - ~~운영: 알림이 없는 경우 — lease가 끝난 `running` 작업(죽은 worker), worker 시작 전에 예약된 미래 작업 — 는 fallback 확인(기본 30초) 때 집힌다. 더 빨라야 하면 시작 때 다음 예정 시각 조회 함수를 둔다.~~ → 해결 (c0020 `core.next_job_due`: 시각 하나만 돌려주는 SECURITY DEFINER. 유휴 worker가 그 시각까지만 자고 fallback 간격을 넘지 않는다).
@@ -516,10 +517,14 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - ~~운영: API 토큰 만료일·마지막 사용 시각, 웹에서 토큰 목록·폐기.~~ → 해결 (p0002 `expires_at`·`last_used_at`, `token issue --expires-days`, 마지막 사용은 5분에 한 번만 기록, 설정 화면 "토큰 관리"(소유자만, 원문은 발급 때 한 번, 지금 토큰은 폐기 불가), `/core/tokens` API는 원문·해시를 돌려주지 않음).
 - ~~실행: heartbeat는 worker 이벤트 루프의 작업이다. 단계가 동기 CPU 작업으로 루프를 lease(300초) 넘게 막으면 연장하지 못한다 — 그런 단계는 `asyncio.to_thread`로.~~ → 해결 (점검: 파싱·공고 HTML 해석·PDF 정리·렌더링·DOCX·해시를 스레드로, DB 세션은 넘기지 않음. CPU 무거운 파싱 중 lease 유지 시험. `runs.md`).
 - ~~운영(후속): 시스템 화면 유지보수 탭에 자동 유지보수(`auto`: 마지막·다음 실행, 이 공간 처리 수) 표시 — API만 있음.~~ → 해결 (백업·유지보수 탭 "초안 정리" 카드 아래 "자동 정리: 마지막·다음 실행, 이 공간 처리 수").
-- 운영(후속): 토큰 만료 임박 알림, 웹에서 토큰 이름 바꾸기·만료 연장. 토큰 범위(읽기 전용 등)는 역할 모델과 함께.
-- 공고(후속): 스캔 PDF는 앞 4쪽만 읽고 쪽마다 이미지 한 장(비전 비용)이다. 긴 스캔 공고의 쪽 고르기, 비전 호출 전 예상 비용 표시.
-- 공고(후속): 그리팅 선택형 문항(`type 200·400`, 보기)은 넣지 않는다. 지원서 화면에 필요하면 별도 항목으로.
-- 공고(후속): 봇 차단 판단 표시는 알려진 서비스(Cloudflare·Imperva·DataDome·PerimeterX·AWS WAF)만이다. 새 차단 화면은 `rate_limited`·`source_unavailable`로 보일 수 있다.
+- ~~운영(후속): 토큰 만료 임박 알림, 웹에서 토큰 이름 바꾸기·만료 연장.~~ → 해결 (c0025: `PATCH /core/tokens/{id}` 이름·만료 연장(연장만, 소유자만, 만료 없음·폐기·만료된 토큰은 409), `GET /core/tokens/current`, 14일 이하 "곧 만료" 표시와 지금 쓰는 토큰이면 오늘·설정 화면 알림. 스키마 변경 없음). 토큰 범위(읽기 전용 등)는 넣지 않음: 권한은 토큰 주인의 역할에서 오고, 범위를 두면 역할 모델 위에 두 번째 권한 축이 생긴다. 권한을 줄일 곳은 OAuth 범위 (`install.md` 6).
+- ~~공고(후속): 스캔 PDF는 앞 4쪽만 읽고 쪽마다 이미지 한 장(비전 비용)이다. 긴 스캔 공고의 쪽 고르기, 비전 호출 전 예상 비용 표시.~~ → 해결 (c0025: 미리보기 잉크 비율로 빈 쪽을 빼고 앞 3쪽 + 마지막 쪽, 이미지 토큰·게이트웨이 단가로 예상 비용, 종량제이고 최대 예상이 `CAREER_VISION_CONFIRM_USD`(기본 0.10)를 넘으면 `needs_confirmation` + `job_fetch_confirmations`, 사람만 확인·거절, 확인은 같은 파일·쪽·모델에 한 번. `postings.md` "쪽 고르기·비용 확인").
+- ~~공고(후속): 그리팅 선택형 문항(`type 200·400`, 보기)은 넣지 않는다. 지원서 화면에 필요하면 별도 항목으로.~~ → 해결 (c0025 `application_questions`: 구조화 데이터에서만, LLM에 묻지 않고 답해도 버림, 근거는 구조화 경로, 공고 화면에 읽기 전용).
+- ~~공고(후속): 봇 차단 판단 표시는 알려진 서비스(Cloudflare·Imperva·DataDome·PerimeterX·AWS WAF)만이다. 새 차단 화면은 `rate_limited`·`source_unavailable`로 보일 수 있다.~~ → 해결 (c0025 `maybe_bot_blocked`: 캡차 위젯·확인 문구·JS 확인 스크립트·빈 본문 + 스크립트 흔적, 200은 빈 본문 + 흔적일 때만, 브라우저로 다시 열지 않음. 우회 없음. `postings.md`).
+- 공고(후속): 그리팅 선택형 `200`·`400`의 하나/여러 개 고르기 구분 (공개 자료로 뜻을 확인하지 못해 `source_type`만 남긴다).
+- 공고(후속): 비용 확인은 이미지 읽기 호출만 추정한다. 뒤의 `job_extract` 호출까지 합친 추정. 기준은 종량제 엔드포인트에만 걸린다 (구독·로컬은 묻지 않음).
+- 운영(후속): CLI `personal-api token`에 이름 바꾸기·만료 연장 (지금은 웹·HTTP API만).
+- 운영(후속): c0025는 `down_revision = c0021`이다. 병렬로 만든 c0022–c0024와 합칠 때 순서를 다시 잇는다.
 
 ## 확인한 공식 근거
 

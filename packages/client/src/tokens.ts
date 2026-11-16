@@ -27,14 +27,26 @@ export interface IssuedApiToken {
 export interface TokenDeps {
   get: <R>(path: string) => Promise<R>;
   post: <R>(path: string, body?: unknown) => Promise<R>;
+  patch: <R>(path: string, body: unknown) => Promise<R>;
 }
 
-export function tokenEndpoints({ get, post }: TokenDeps) {
+/** 이름 바꾸기·만료 연장 (소유자만, c0025). expires_days 는 "지금부터 N일 뒤"이고 지금 만료일보다 뒤여야 한다. */
+export interface ApiTokenPatch {
+  label?: string;
+  expires_days?: number;
+}
+
+export function tokenEndpoints({ get, post, patch }: TokenDeps) {
   const id = encodeURIComponent;
   return {
     apiTokens: () => get<ApiToken[]>("/core/tokens"),
     issueApiToken: (body: { label: string; expires_days?: number | null }) =>
       post<IssuedApiToken>("/core/tokens", body),
     revokeApiToken: (tokenId: string) => post<ApiToken>(`/core/tokens/${id(tokenId)}/revoke`),
+    /** 409: token_revoked · token_expired · not_an_extension */
+    updateApiToken: (tokenId: string, body: ApiTokenPatch) =>
+      patch<ApiToken>(`/core/tokens/${id(tokenId)}`, body),
+    /** 지금 요청에 쓴 토큰 (역할과 무관). API 토큰이 아니면 404 no_api_token */
+    currentApiToken: () => get<ApiToken>("/core/tokens/current"),
   };
 }

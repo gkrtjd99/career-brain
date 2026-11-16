@@ -10,6 +10,10 @@ export interface OAuthConfigInfo {
   jwks: boolean;
   introspection: boolean;
   require_jti: boolean;
+  /** JWT도 introspection으로 확인 (인가 서버 폐기를 캐시 시간 안에 반영, c0025) */
+  introspect_jwt: boolean;
+  /** introspection 캐시 시간(초) = 인가 서버 폐기 반영 지연 상한. introspection이 꺼져 있으면 null */
+  introspection_cache_seconds: number | null;
 }
 
 export interface OAuthLink {
