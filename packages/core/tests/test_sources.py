@@ -1,5 +1,6 @@
 """O03 완료 기준: 같은 파일 중복 처리 방지, 부분 파싱 검출, 금지 자료 전송 차단."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -19,6 +20,7 @@ from sqlalchemy import func, select
 
 pytestmark = pytest.mark.anyio
 MAX = 1024 * 1024
+PAST = datetime(2000, 1, 1, tzinfo=UTC)
 
 
 class FakeOcr:
@@ -295,9 +297,11 @@ async def test_html_scripts_are_not_extracted(db, blobs, owner):
 async def test_failing_job_retries_then_gives_up(db, blobs, owner):
     res = await upload(db, blobs, owner, b"text")
     calls = {"run": 0, "give_up": 0}
+    targets = set()
 
     async def boom(ws, target):
         calls["run"] += 1
+        targets.add(target)
         raise RuntimeError("secret content must not be logged")
 
     async def give_up(ws, target):
@@ -308,7 +312,8 @@ async def test_failing_job_retries_then_gives_up(db, blobs, owner):
         await run_once(db, handlers)
         async with db.workspace_session(owner.workspace_id) as s:
             job = await s.scalar(select(Job).where(Job.target_id == res.parse_run_id))
-            job.available_at = job.created_at  # 백오프 기다리지 않기
+            # 백오프 기다리지 않기. 앱 시계(created_at)가 아니라 확실한 과거로 (claim_job은 DB 시계로 본다)
+            job.available_at = PAST
     async with db.workspace_session(owner.workspace_id) as s:
         job = await s.scalar(select(Job).where(Job.target_id == res.parse_run_id))
     assert (job.status, job.last_error, calls) == (
@@ -316,6 +321,7 @@ async def test_failing_job_retries_then_gives_up(db, blobs, owner):
         "RuntimeError",
         {"run": 5, "give_up": 1},
     )
+    assert targets == {res.parse_run_id}  # 다른 시험이 남긴 작업을 집지 않았다
 
 
 async def test_jobs_table_is_not_readable_without_context(db, blobs, owner):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID, uuid4
 
@@ -59,13 +60,47 @@ async def issue_token(db: Database, *, workspace_id: UUID, actor_id: UUID, label
     return token
 
 
-async def revoke_token(db: Database, *, workspace_id: UUID, token: str) -> bool:
+async def revoke_token(
+    db: Database,
+    *,
+    workspace_id: UUID,
+    token: str | None = None,
+    token_id: UUID | None = None,
+) -> bool:
+    """토큰 원문 또는 ID 하나로 폐기한다. 없거나 이미 폐기됐으면 False. 다른 공간 토큰은 RLS로 안 보인다."""
+    if (token is None) == (token_id is None):
+        raise ValueError("pass exactly one of token, token_id")
+    cond = ApiToken.id == token_id if token is None else ApiToken.token_hash == hash_token(token)
     async with db.workspace_session(workspace_id) as s:
-        row = await s.scalar(select(ApiToken).where(ApiToken.token_hash == hash_token(token)))
+        row = await s.scalar(select(ApiToken).where(cond).with_for_update())
         if row is None or row.revoked_at is not None:
             return False
         row.revoked_at = utcnow()
     return True
+
+
+@dataclass(frozen=True, slots=True)
+class TokenInfo:
+    """토큰 목록 한 줄. 원문·해시는 넣지 않는다."""
+
+    id: UUID
+    label: str
+    actor_id: UUID
+    created_at: datetime
+    revoked_at: datetime | None
+    current: bool  # 지금 요청에 쓴 토큰
+
+
+async def list_tokens(
+    db: Database, *, workspace_id: UUID, current_token: str | None = None
+) -> list[TokenInfo]:
+    current = hash_token(current_token) if current_token else None
+    async with db.workspace_session(workspace_id) as s:
+        rows = (await s.scalars(select(ApiToken).order_by(ApiToken.created_at))).all()
+    return [
+        TokenInfo(r.id, r.label, r.actor_id, r.created_at, r.revoked_at, r.token_hash == current)
+        for r in rows
+    ]
 
 
 class PersonalTokenResolver:

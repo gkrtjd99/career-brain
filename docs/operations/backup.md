@@ -102,11 +102,48 @@ docker run --rm -v career-brain_app-data:/data:ro -v "$PWD":/backup busybox \
 | 업데이트 전 | 두 가지 모두 | 다음 업데이트까지 |
 | 분기 1회 | 복원 훈련: 빈 DB에 `migrate` → `restore --dry-run` → `restore`, 유지보수 화면의 행 수 확인 | – |
 
+`pg_dump`는 앱(`serve`/`worker`)이 하지 않는다. DB 소유자 계정이 필요하고 결과를 서버 밖으로 보내야 하므로 서버의 cron이나 systemd timer가 맡는다. 미확정 초안 정리는 앱이 스스로 한다 (아래 5절).
+
 cron 예시 (서버, 매일 03:30):
 
 ```cron
 30 3 * * * cd /srv/career-brain/deploy/docker && docker compose exec -T db pg_dump -U career -d career_brain -Fc > /srv/backup/career-db-$(date +\%F).dump
 ```
+
+systemd timer 예시 (`/etc/systemd/system/career-backup.{service,timer}`, 7일 지난 덤프 삭제 포함):
+
+```ini
+# career-backup.service
+[Unit]
+Description=career-brain pg_dump + blobs
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/career-brain/deploy/docker
+ExecStart=/bin/sh -c 'docker compose exec -T db pg_dump -U career -d career_brain -Fc > /srv/backup/career-db-$(date +%%F).dump'
+ExecStart=/bin/sh -c 'docker run --rm -v career-brain_app-data:/data:ro -v /srv/backup:/backup busybox tar czf /backup/career-blobs-$(date +%%F).tar.gz -C /data blobs'
+ExecStartPost=/usr/bin/find /srv/backup -name 'career-*' -mtime +7 -delete
+
+# career-backup.timer
+[Unit]
+Description=daily career-brain backup
+
+[Timer]
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now career-backup.timer
+systemctl list-timers career-backup.timer      # 다음 실행 시각
+journalctl -u career-backup.service            # 마지막 결과
+```
+
+서버 밖 암호화 복사(예: `age` 후 `rclone copy`)는 같은 서비스에 `ExecStart` 줄로 더한다.
 
 ## 5. 유지보수 정보
 
@@ -115,3 +152,4 @@ cron 예시 (서버, 매일 03:30):
 - 표별 행 수(내보내기에 들어가는 표, 빠지는 표 따로), 참조된 원본 수, 원본 저장소의 파일 수·바이트
 - 마지막 내보내기·복원 시각·해시·크기 (`core.export_runs`)
 - 정리 대기 초안: 가져왔지만 확정하지 않고 7일이 지난 공고 수. `POST /api/core/maintenance/purge-drafts`로 지운다 (버전·가져오기 기록은 FK CASCADE)
+- 초안 정리는 `serve`·`worker`가 `CAREER_MAINTENANCE_INTERVAL_SECONDS`(기본 6시간, `0`이면 끔)마다 모든 공간에 자동으로 한다. 여러 worker여도 advisory lock으로 한 번에 하나만 하고, 다시 해도 결과가 같다. 수동: `personal-api maintenance` ([install.md](install.md#7-작은-서버-조정))

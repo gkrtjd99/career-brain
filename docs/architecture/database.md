@@ -32,6 +32,12 @@
    - `personal.api_tokens` ← `personal.lookup_api_token(hash)` (토큰 → 공간·actor)
    - `core.jobs` ← `core.claim_job(kinds, lease)` (worker가 다음 작업 하나를 잠금)
    앱 역할의 직접 조회는 여전히 RLS로 막힌다.
+6. 주기 유지보수용 `core.maintenance_workspace_ids()` (c0015, SECURITY DEFINER): 모든 공간의 **ID만**
+   돌려준다. `workspaces`는 FORCE라 소유자도 정책을 받으므로, 이 함수의 `SET career.maintenance_scan = on`
+   안에서만 참이 되는 **소유자 전용** SELECT 정책(`maintenance_scan`)을 하나 더 둔다. 앱 역할이 같은
+   설정을 켜도 그 정책 대상이 아니라 0행이다 (`test_jobs.py`).
+7. `core.jobs` trigger `jobs_notify_ready` (c0015): 대기 행이 생기면 `NOTIFY career_jobs, '<kind> <초>'`.
+   LISTEN은 권한 검사가 없으므로 내용에 공간·대상 ID를 넣지 않는다.
 
 회귀 시험: `workspace_isolation_problems()`가 새 테이블의 RLS 누락을 잡는다.
 
