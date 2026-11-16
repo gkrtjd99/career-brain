@@ -340,7 +340,7 @@ function Versions({ p, onOpen }: { p: Posting; onOpen: (id: string) => void }) {
           </div>
           <div className="mt-1 text-muted">
             {METHOD_LABEL[v.method] ?? v.method} · {ADAPTER_LABEL[v.adapter] ?? v.adapter}
-            {v.has_screenshot ? " · 스크린샷 있음" : ""}
+            {v.has_screenshot ? (v.adapter === "image" ? " · 원본 이미지 보관" : " · 스크린샷 있음") : ""}
           </div>
           {v.changed_fields.length ? (
             <div className="mt-1 text-warn">

@@ -5,6 +5,7 @@ OpenAI, xAI(Grok), Gemini의 OpenAI 호환 엔드포인트, CLIProxyAPI, OpenRou
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
@@ -115,10 +116,25 @@ class OpenAICompatibleClient:
 
     async def complete(self, model: str, request: ModelRequest) -> ModelCompletion:
         sdk = self._sdk
-        messages: list[dict[str, str]] = []
+        messages: list[dict[str, Any]] = []
         if request.system:
             messages.append({"role": "system", "content": request.system})
         messages.extend({"role": m.role, "content": m.content} for m in request.messages)
+        if request.images and request.messages:
+            last = messages[-1]
+            last["content"] = [
+                {"type": "text", "text": last["content"]},
+                *(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{img.media_type};base64,"
+                            + base64.b64encode(img.data).decode("ascii")
+                        },
+                    }
+                    for img in request.images
+                ),
+            ]
         try:
             resp = await self._client.chat.completions.create(
                 model=model,

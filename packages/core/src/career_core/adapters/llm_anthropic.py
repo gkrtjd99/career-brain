@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from career_core.llm.config import EndpointConfig
@@ -84,6 +85,22 @@ class AnthropicModelClient:
             "max_tokens": request.max_output_tokens,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
         }
+        if request.images and params["messages"]:
+            last = params["messages"][-1]
+            last["content"] = [
+                *(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": img.media_type,
+                            "data": base64.b64encode(img.data).decode("ascii"),
+                        },
+                    }
+                    for img in request.images
+                ),
+                {"type": "text", "text": last["content"]},
+            ]
         if request.system:
             params["system"] = request.system
         try:

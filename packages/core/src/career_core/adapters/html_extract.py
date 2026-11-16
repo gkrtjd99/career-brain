@@ -126,9 +126,12 @@ class _TreeBuilder(HTMLParser):
         self.title = ""
         self._in_title = False
         self.meta: dict[str, str] = {}
+        self.resources: list[str] = []  # script·iframe의 src (채용 시스템 임베드 판별용)
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
+        if tag in ("script", "iframe") and a.get("src") and len(self.resources) < 200:
+            self.resources.append(a["src"][:2000])
         if tag == "meta":
             key = a.get("property") or a.get("name")
             if key and "content" in a:
@@ -275,6 +278,10 @@ class PageData:
     meta: dict[str, str]
     main_links: list[tuple[str, str]]
     link_density: float
+    url: str = ""
+    # 인라인 스크립트의 `window.__이름 = {JSON}` 값 (예: Remix `__remixContext`)
+    window_state: dict[str, Any] = field(default_factory=dict)
+    resource_urls: tuple[str, ...] = ()
 
 
 def _iter_ld(value: Any):
@@ -286,6 +293,22 @@ def _iter_ld(value: Any):
             yield from _iter_ld(value["@graph"])
         else:
             yield value
+
+
+_WINDOW_ASSIGN = re.compile(r"^\s*window\.(__[A-Za-z_][A-Za-z0-9_]*)\s*=\s*")
+MAX_WINDOW_STATE = 4 * 1024 * 1024
+
+
+def _window_state(body: str) -> tuple[str, Any] | None:
+    """`window.__X = {...};` 꼴의 인라인 스크립트에서 JSON 값을 꺼낸다 (실행하지 않는다)."""
+    m = _WINDOW_ASSIGN.match(body)
+    if not m or len(body) > MAX_WINDOW_STATE:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(body, m.end())
+    except json.JSONDecodeError:
+        return None
+    return m.group(1), value
 
 
 def html_to_text(fragment: str) -> str:
@@ -301,18 +324,24 @@ def extract_page(html: str, url: str) -> PageData:
     b.close()
     json_ld: list[dict[str, Any]] = []
     next_data = None
+    window_state: dict[str, Any] = {}
     for attrs, parts in b.scripts:
         body = "".join(parts).strip()
-        if attrs.get("type", "").lower() == "application/ld+json":
-            try:
-                json_ld.extend(_iter_ld(json.loads(body)))
-            except json.JSONDecodeError:
-                continue
-        elif attrs.get("id") == "__NEXT_DATA__":
+        kind = attrs.get("type", "").lower()
+        if attrs.get("id") == "__NEXT_DATA__":
             try:
                 next_data = json.loads(body)
             except json.JSONDecodeError:
                 next_data = None
+        elif kind == "application/ld+json":
+            try:
+                json_ld.extend(_iter_ld(json.loads(body)))
+            except json.JSONDecodeError:
+                continue
+        elif kind in ("", "text/javascript", "application/javascript") and not attrs.get("src"):
+            found = _window_state(body)
+            if found and isinstance(found[1], dict):
+                window_state.setdefault(found[0], found[1])
 
     best, best_score = None, 0.0
     stack: list[_Node] = [b.root]
@@ -366,6 +395,9 @@ def extract_page(html: str, url: str) -> PageData:
         meta=b.meta,
         main_links=_links(target, url),
         link_density=(linked / total) if total else 0.0,
+        url=url,
+        window_state=window_state,
+        resource_urls=tuple(urljoin(url, r) for r in b.resources),
     )
 
 

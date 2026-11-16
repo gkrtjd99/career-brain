@@ -70,7 +70,7 @@ export const FETCH_ERROR: Record<string, string> = {
   needs_manual_check: "직접 확인 필요",
   blocked_address: "내부 주소라 차단함",
   too_large: "페이지가 너무 큼",
-  unsupported_content: "PDF·이미지 공고 (본문 붙여넣기로)",
+  unsupported_content: "지원하지 않는 형식 (본문 붙여넣기로)",
   invalid_url: "URL 형식 오류",
 };
 
@@ -98,13 +98,44 @@ export const METHOD_LABEL: Record<string, string> = {
 export const ADAPTER_LABEL: Record<string, string> = {
   json_ld: "구조화 데이터(schema.org)",
   ninehire: "채용 시스템(NineHire)",
+  greeting: "채용 시스템(그리팅)",
+  greenhouse: "채용 시스템(Greenhouse)",
+  lever: "채용 시스템(Lever)",
+  workday: "채용 시스템(Workday)",
+  pdf: "PDF 본문",
+  image: "이미지 (AI가 글자 읽음)",
   text: "본문",
+};
+
+const VISION_NOTE: Record<string, string> = {
+  vision_route_missing: "이미지 공고: 이미지 읽기 모델(job_extract_image 라우트)이 설정되지 않아 건너뜀",
+  image_too_large: "이미지 공고: 파일이 커서(5MB 초과) 읽지 않음",
+  image_no_text: "이미지 공고: 읽을 수 있는 글자가 없음",
+  ocr_by_model: "이미지의 글자를 AI가 읽어 본문으로 썼습니다. 원본 이미지와 대조해 확인하세요.",
+  pdf_no_text: "PDF에 글자가 없음 (스캔본으로 보임)",
 };
 
 /** 가져오기 메모 (`llm_dropped:3` 처럼 값이 붙는다) */
 export function noteLabel(note: string): string {
-  const [code, arg] = note.split(":", 2);
+  const [code, ...rest] = note.split(":");
+  const arg = rest[0];
+  if (VISION_NOTE[note]) return VISION_NOTE[note];
   switch (code) {
+    case "pdf_pages":
+      return `PDF에서 글자를 읽은 쪽: ${rest.join(":")}`;
+    case "pdf_unreadable":
+      return `PDF를 읽지 못함: ${arg}`;
+    case "vision_denied":
+      return `이미지 읽기 안 함: ${ERROR_TEXT[arg ?? ""] ?? arg}`;
+    case "vision_error":
+      return `이미지 읽기 오류: ${arg}`;
+    case "ats_api_failed":
+      return `채용 시스템 API(${arg}) 응답 없음: ${rest[1] ?? ""} · 페이지 데이터로 계속`;
+    case "ats_api_blocked":
+    case "ats_api_unrecognized":
+      return `채용 시스템 API(${arg})를 쓰지 못함 · 페이지 데이터로 계속`;
+    case "llm_deduped":
+      return `여러 목록에 겹친 줄 ${arg}개를 한 곳에만 남김`;
     case "llm_denied":
       return `AI 추출 안 함: ${ERROR_TEXT[arg ?? ""] ?? arg}`;
     case "llm_error":

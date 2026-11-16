@@ -28,6 +28,8 @@ TEXT_TYPES = (
     "application/json",
     "application/ld+json",
 )
+# 본문 대신 바이트로 넘기는 형식 (PDF 공고, 포스터 이미지). 같은 크기 상한을 쓴다.
+BINARY_TYPES = ("application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif")
 MAX_BYTES = 6 * 1024 * 1024
 MAX_REDIRECTS = 5
 TIMEOUT_SECONDS = 20.0
@@ -42,6 +44,7 @@ class FetchedPage:
     text: str
     method: str = "http"  # http | browser
     screenshot_png: bytes | None = None
+    body: bytes | None = None  # BINARY_TYPES일 때만 원본 바이트 (text는 빈 문자열)
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,8 +221,10 @@ class HttpFetcher:
                     return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail=type(exc).__name__)
         return FetchFailure(FetchError.SOURCE_UNAVAILABLE, detail="too_many_redirects")
 
-    async def fetch(self, url: str) -> FetchedPage | FetchFailure:
-        raw = await self.fetch_raw(url)
+    async def fetch(
+        self, url: str, *, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"
+    ) -> FetchedPage | FetchFailure:
+        raw = await self.fetch_raw(url, accept=accept)
         if isinstance(raw, FetchFailure):
             return raw
         text = raw.body.decode(raw.charset or "utf-8", errors="replace")
@@ -227,9 +232,33 @@ class HttpFetcher:
         if failure:
             return failure
         ctype = raw.content_type.split(";")[0].strip().lower()
+        if ctype in BINARY_TYPES or ctype in OCTET_TYPES:
+            # 선언한 형식과 실제 파일 머리가 맞아야 한다 (octet-stream이면 머리로 판단).
+            sniffed = sniff_binary(raw.body)
+            if sniffed is None or (ctype in BINARY_TYPES and sniffed != ctype):
+                return FetchFailure(FetchError.UNSUPPORTED_CONTENT, raw.status, ctype)
+            return FetchedPage(url, raw.final_url, raw.status, sniffed, "", body=raw.body)
         if ctype and not ctype.startswith(TEXT_TYPES):
             return FetchFailure(FetchError.UNSUPPORTED_CONTENT, raw.status, ctype)
         return FetchedPage(url, raw.final_url, raw.status, ctype or "text/html", text)
+
+
+OCTET_TYPES = ("application/octet-stream", "binary/octet-stream")
+
+
+def sniff_binary(data: bytes) -> str | None:
+    """파일 머리로 형식을 본다 (BINARY_TYPES 중 하나, 아니면 None)."""
+    if b"%PDF-" in data[:1024]:  # PDF 머리는 첫 1KB 안 어디든 올 수 있다
+        return "application/pdf"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return None
 
 
 @dataclass(frozen=True, slots=True)

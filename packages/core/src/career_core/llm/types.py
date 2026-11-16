@@ -13,12 +13,22 @@ class ChatMessage:
 
 
 @dataclass(frozen=True, slots=True)
+class ImageInput:
+    """이미지 입력 (공고 포스터 등). 마지막 user 메시지에 붙는다."""
+
+    media_type: str  # image/png | image/jpeg | image/webp | image/gif
+    data: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class ModelRequest:
     messages: tuple[ChatMessage, ...]
     system: str | None = None
     max_output_tokens: int = 4096
     # 요청에 담긴 자료의 등급. 게이트웨이가 egress 판단에 쓴다. 비어 있으면 거부한다.
     data_classes: frozenset[str] = frozenset()
+    # 이미지 입력. 비전 모델 라우트에만 보낸다 (라우트 선택은 호출하는 쪽 책임).
+    images: tuple[ImageInput, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
