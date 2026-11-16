@@ -2,7 +2,8 @@
 
 personal-api migrate     # core → personal 순서로 migration (소유자 계정)
 personal-api bootstrap   # 공간 + owner + API 토큰 생성 (앱 계정), 토큰은 한 번만 출력
-personal-api worker      # 백그라운드 작업 처리
+personal-api serve       # API + 내장 worker + 웹 정적 파일 (한 프로세스, 작은 서버용)
+personal-api worker      # 백그라운드 작업 처리 (serve --no-worker 와 함께 따로 띄울 때)
 personal-api models      # 엔드포인트·라우트·단가·키 설정 상태 (키 값은 출력하지 않음)
 personal-api pricing     # 단가표 점검 (오래된 항목, 단가 없는 라우트)
 personal-api usage       # 모델 사용량·비용 (CAREER_API_TOKEN 의 공간)
@@ -23,13 +24,12 @@ from career_core.adapters.blobstore import LocalBlobStore
 from career_core.adapters.parsers import default_local_parsers
 from career_core.adapters.web_fetch import BrowserFetcher, HttpFetcher
 from career_core.db import Database
-from career_core.db.migrate import upgrade
 from career_core.jobs.worker import (
+    JobHandler,
     extraction_handlers,
     index_handlers,
     parsing_handlers,
     posting_handlers,
-    run_once,
     run_until_idle,
 )
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
@@ -45,15 +45,15 @@ from career_core.usecases.usage import usage_summary
 from career_core.usecases.workspaces import create_workspace
 
 from personal_api.identity import PersonalTokenResolver, issue_token
-from personal_api.migrations import PERSONAL_CHAIN
 from personal_api.models import build_gateway, load_config, load_prices
+from personal_api.runner import run_worker, worker_poll_seconds
 from personal_api.settings import Settings
 
 TOKEN_ENV = "CAREER_API_TOKEN"
 
 
-async def _worker(settings: Settings, *, once: bool) -> None:
-    db = Database(settings.database_url)
+def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
+    """worker가 처리하는 작업 종류. `worker` 명령과 `serve`(내장 worker)가 같이 쓴다."""
     deps = ParsingDeps(
         db=db,
         blobs=LocalBlobStore(settings.blob_dir),
@@ -61,7 +61,7 @@ async def _worker(settings: Settings, *, once: bool) -> None:
         local_parsers=default_local_parsers(),
     )
     gateway = build_gateway(settings, db)
-    handlers = {
+    return {
         **parsing_handlers(deps),
         **extraction_handlers(ExtractionDeps(db, gateway)),
         **index_handlers(IndexDeps(db, gateway)),
@@ -76,13 +76,16 @@ async def _worker(settings: Settings, *, once: bool) -> None:
             )
         ),
     }
+
+
+async def _worker(settings: Settings, *, once: bool) -> None:
+    db = Database(settings.database_url)
+    handlers = build_handlers(settings, db)
     try:
         if once:
             print(f"processed {await run_until_idle(db, handlers)} job(s)")
             return
-        while True:
-            if not await run_once(db, handlers):
-                await asyncio.sleep(1)
+        await run_worker(db, handlers, poll_seconds=worker_poll_seconds())
     finally:
         await db.dispose()
 
@@ -256,6 +259,14 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("bootstrap", help="create a workspace, owner and API token (run once)")
     b.add_argument("--workspace-name", default="내 커리어")
     b.add_argument("--display-name", default="me")
+    sv = sub.add_parser("serve", help="run the API (+ in-process worker and web UI)")
+    sv.add_argument("--host", default=None, help="bind address (CAREER_HOST, default 127.0.0.1)")
+    sv.add_argument("--port", type=int, default=None, help="port (CAREER_PORT, default 8000)")
+    sv.add_argument(
+        "--no-worker",
+        action="store_true",
+        help="do not run the job worker in this process (CAREER_EMBEDDED_WORKER=0)",
+    )
     w = sub.add_parser("worker", help="process background jobs")
     w.add_argument("--once", action="store_true", help="process pending jobs and exit")
     sub.add_parser("models", help="show model endpoints, routes and price status")
@@ -275,12 +286,21 @@ def main(argv: list[str] | None = None) -> None:
     settings = Settings.from_env()
 
     if args.cmd == "migrate":
+        # alembic은 migrate 때만 올린다 (serve·worker 상주 메모리를 줄인다)
+        from career_core.db.migrate import upgrade
+
+        from personal_api.migrations import PERSONAL_CHAIN
+
         upgrade(settings.migration_database_url, [PERSONAL_CHAIN])
         print("migrations applied: core, personal")
     elif args.cmd == "bootstrap":
         token = asyncio.run(_bootstrap(settings, args.workspace_name, args.display_name))
         print("API token (shown once, store it safely):")
         print(token)
+    elif args.cmd == "serve":
+        from personal_api.serve import serve
+
+        serve(settings, host=args.host, port=args.port, worker=False if args.no_worker else None)
     elif args.cmd == "worker":
         asyncio.run(_worker(settings, once=args.once))
     elif args.cmd == "models":

@@ -1,0 +1,29 @@
+# 허용 목록 방식: 이미지 빌드에 필요한 파일만 build context에 들어간다.
+# .env·models.toml·data/·DB 덤프·.git 은 context에 들어가지 않는다.
+*
+!LICENSE
+!NOTICE
+!pyproject.toml
+!uv.lock
+!.python-version
+!packages/core/pyproject.toml
+!packages/core/src
+!apps/personal-api/pyproject.toml
+!apps/personal-api/src
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages/ui
+!packages/client
+!apps/personal-web
+
+# 허용한 폴더 안에서도 다시 뺀다
+**/node_modules
+**/dist
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+**/models.toml
+**/*.tsbuildinfo
+**/*.env
