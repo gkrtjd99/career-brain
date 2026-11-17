@@ -199,7 +199,7 @@ function Editor({ v }: { v: ResumeVersion }) {
         {wide || tab === "preview" ? (
           <div className="min-w-0 lg:sticky lg:top-4 lg:self-start">
             <p className="mb-2 text-[13px] text-muted tabular-nums">
-              A4 {pages ?? check.data?.estimated_pages ?? "–"}쪽 · 한도 {v.summary.max_pages}쪽
+              A4 {pages ?? check.data?.estimated_pages ?? "–"}쪽{pages == null && check.data?.estimated_pages ? " (예상)" : ""} · 한도 {v.summary.max_pages}쪽
               {v.summary.blind ? " · 블라인드" : ""}
             </p>
             <ResumePreview html={preview.data} printNonce={printNonce} onPages={onPages} />

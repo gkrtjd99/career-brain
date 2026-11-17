@@ -358,11 +358,11 @@ export interface Experience extends ExperienceStructure {
 }
 
 /** POST /core/experiences/{target}/merge — source 경험들을 target에 합친다 (target 칸이 이긴다) */
-export interface MergeIn {
+export interface ExperienceMergeIn {
   source_ids: Uuid[];
 }
 
-export interface MergeOut {
+export interface ExperienceMergeOut {
   target_id: Uuid;
   merged: Uuid[];
   claims_moved: number;

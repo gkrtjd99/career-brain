@@ -3,7 +3,8 @@ import { Button, cn, Label, MarkdownView, Select, SelectItem, Sheet, Textarea, t
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Pencil, Plus } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ConfirmAllButton, DuplicateHint, ExperienceMoreMenu } from "../components/brain/ExperienceActions";
 import { ClaimItem } from "../components/ClaimItem";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
 import {
@@ -31,6 +32,12 @@ export function ExperiencePage() {
     queryKey: ["experience", experienceId],
     queryFn: () => api.experience(experienceId),
   });
+  // 합쳐진 경험을 열면 합친 쪽으로 옮긴다
+  const mergedInto = q.data?.merged_into_id;
+  useEffect(() => {
+    if (mergedInto)
+      void navigate({ to: "/brain/$experienceId", params: { experienceId: mergedInto }, replace: true });
+  }, [mergedInto, navigate]);
   const setTab = (t: ExperienceTab) =>
     navigate({
       to: "/brain/$experienceId",
@@ -55,7 +62,9 @@ export function ExperiencePage() {
                     .join(" · ")}
                 </span>
               }
+              actions={<ExperienceMoreMenu exp={exp} />}
             />
+            <DuplicateHint exp={exp} />
             <ExperienceInfo exp={exp} />
             <Tabs
               value={tab}
@@ -292,6 +301,13 @@ function ClaimsTab({ exp }: { exp: Experience }) {
               {g.title} <span className="font-normal text-muted tabular-nums">{g.claims.length}</span>
             </h2>
             {g.hint ? <p className="mt-0.5 text-[13px] text-muted">{g.hint}</p> : null}
+            {g.title === "확인 대기" && g.claims.length > 1 ? (
+              <ConfirmAllButton
+                experienceId={exp.id}
+                count={g.claims.length}
+                knownContribution={g.claims.filter((c) => c.contribution !== "unknown").length}
+              />
+            ) : null}
             <ClaimList claims={g.claims} experienceId={exp.id} onOpenSpan={setSpanId} />
           </section>
         ) : null,

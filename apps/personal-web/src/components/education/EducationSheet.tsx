@@ -6,6 +6,7 @@ import {
   type Education,
   type EducationIn,
   type EducationStatus,
+  type EducationSuggestion,
   type ExtraMajorKind,
 } from "@career-brain/client";
 import { Button, Checkbox, ConfirmDialog, Input, Label, MonthField, Select, SelectItem, Sheet, Textarea } from "@career-brain/ui";
@@ -19,15 +20,25 @@ import { errorText } from "../common";
 export function EducationSheet({
   open,
   education,
+  suggestion,
   onClose,
 }: {
   open: boolean;
   education: Education | null;
+  /** 자료에서 찾은 학력 줄로 새 학력 칸을 채운다 (저장은 사람이) */
+  suggestion?: EducationSuggestion | null;
   onClose: () => void;
 }) {
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title={education ? "학력 수정" : "학력 추가"}>
-      {open ? <EducationForm key={education?.id ?? "new"} education={education} onDone={onClose} /> : null}
+      {open ? (
+        <EducationForm
+          key={education?.id ?? `new-${suggestion?.school ?? ""}`}
+          education={education}
+          suggestion={suggestion ?? null}
+          onDone={onClose}
+        />
+      ) : null}
     </Sheet>
   );
 }
@@ -72,6 +83,20 @@ function draftOf(e: Education | null): Draft {
   };
 }
 
+function draftOfSuggestion(sg: EducationSuggestion): Draft {
+  const base = draftOf(null);
+  const degree = (DEGREES as readonly string[]).includes(sg.degree ?? "") ? (sg.degree as Degree) : base.degree;
+  return {
+    ...base,
+    school: sg.school,
+    major: sg.major ?? "",
+    degree,
+    entered_on: month(sg.entered_on),
+    graduated_on: month(sg.graduated_on),
+    note: sg.period_text && !sg.entered_on && !sg.graduated_on ? `원문 기간: ${sg.period_text}` : "",
+  };
+}
+
 const orNull = (v: string) => (v.trim() ? v.trim() : null);
 
 function bodyOf(d: Draft): EducationIn & { school: string } {
@@ -109,9 +134,17 @@ function problem(d: Draft): string | null {
   return null;
 }
 
-function EducationForm({ education: e, onDone }: { education: Education | null; onDone: () => void }) {
+function EducationForm({
+  education: e,
+  suggestion,
+  onDone,
+}: {
+  education: Education | null;
+  suggestion: EducationSuggestion | null;
+  onDone: () => void;
+}) {
   const qc = useQueryClient();
-  const [d, setD] = useState<Draft>(() => draftOf(e));
+  const [d, setD] = useState<Draft>(() => (e || !suggestion ? draftOf(e) : draftOfSuggestion(suggestion)));
   const [removing, setRemoving] = useState(false);
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
   const proofs = useQuery({ queryKey: ["sources", "proofs"], queryFn: () => api.proofs() });
