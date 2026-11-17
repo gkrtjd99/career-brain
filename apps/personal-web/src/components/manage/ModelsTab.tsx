@@ -28,7 +28,7 @@ import {
 import { ErrorText } from "../common";
 import { modelsErrorText, Quiet, Rows, useConnectionTest } from "./parts";
 
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$/;
+const NAME_RE = /^[a-z][a-z0-9_-]{0,39}$/;
 
 function testErrorText(code: string | null | undefined) {
   if (!code) return "시험 실패";
@@ -358,7 +358,7 @@ function needsKey(d: Draft) {
 
 function validate(d: Draft, editing: ModelConnection | null, taken: Set<string>): string | null {
   if (!editing) {
-    if (!NAME_RE.test(d.name)) return "이름은 영문·숫자로 시작하고 영문·숫자·-·_·. 만 씁니다 (40자까지).";
+    if (!NAME_RE.test(d.name)) return "이름은 영문 소문자로 시작하고 소문자·숫자·-·_ 만 씁니다 (40자까지).";
     if (taken.has(d.name)) return "같은 이름의 연결이 이미 있습니다.";
     if (needsKey(d) && !d.apiKey.trim()) return "API 키를 넣어 주세요.";
   }
