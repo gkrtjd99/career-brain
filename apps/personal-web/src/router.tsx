@@ -64,6 +64,8 @@ export interface BrainSearch {
   tag?: string[];
   year?: number;
   review?: boolean;
+  /** "같은 경험일 수 있음" 표시가 있는 경험만 */
+  dup?: boolean;
   sort?: "updated" | "title";
 }
 const BRAIN_KINDS: ExperienceKind[] = ["work", "project", "education", "activity", "other"];
@@ -84,6 +86,7 @@ const brainRoute = createRoute({
     const year = Number(s.year);
     if (Number.isInteger(year) && year >= 1900 && year <= 2200) out.year = year;
     if (s.review === true || s.review === "true" || s.review === "1") out.review = true;
+    if (s.dup === true || s.dup === "true" || s.dup === "1") out.dup = true;
     if (s.sort === "updated" || s.sort === "title") out.sort = s.sort;
     return out;
   },

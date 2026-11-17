@@ -104,6 +104,11 @@ export function ClaimItem({
                       {ev.source_title ?? "원문"}
                       {ev.page ? ` · ${ev.page}쪽` : ""} · 원문 보기
                     </span>
+                    {ev.weak_quote ? (
+                      <span className="block text-xs font-medium text-warn">
+                        인용이 약함 — 이 문장의 숫자·핵심 낱말이 인용에 없습니다
+                      </span>
+                    ) : null}
                   </span>
                 </button>
               </li>

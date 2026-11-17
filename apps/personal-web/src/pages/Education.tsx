@@ -1,4 +1,4 @@
-import type { Education } from "@career-brain/client";
+import type { Education, EducationSuggestion } from "@career-brain/client";
 import { Button, cn } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -15,7 +15,8 @@ const COLS = "sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1.2fr)_4.5rem_9.5rem_5.5rem
 /** 브레인 › 나 › 학력: 최근 학교부터 표 하나. 좁은 화면은 한 줄 요약. */
 export function EducationPage() {
   const q = useQuery({ queryKey: ["education"], queryFn: api.education });
-  const [sheet, setSheet] = useState<{ education: Education | null } | null>(null);
+  const [sheet, setSheet] = useState<{ education: Education | null; suggestion?: EducationSuggestion } | null>(null);
+  const suggestions = useQuery({ queryKey: ["extraction-suggestions"], queryFn: api.extractionSuggestions });
   return (
     <div>
       <PageHeader
@@ -55,10 +56,40 @@ export function EducationPage() {
           )
         }
       </Loaded>
+      {suggestions.data?.education.length ? (
+        <section className="mt-8">
+          <h2 className="text-[15px] font-semibold">
+            자료에서 찾은 학력{" "}
+            <span className="font-normal text-muted tabular-nums">{suggestions.data.education.length}</span>
+          </h2>
+          <p className="mt-0.5 text-[13px] text-muted">이력서에 적힌 학력 줄입니다. 맞으면 칸을 확인하고 저장하세요.</p>
+          <ul className="mt-2 divide-y divide-line border-y border-line">
+            {suggestions.data.education.map((sg, i) => (
+              <li key={`${sg.extraction_run_id}-${i}`} className="flex items-center gap-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">
+                    {[sg.school, sg.major].filter(Boolean).join(" · ")}
+                  </div>
+                  <div className="truncate text-[13px] text-muted tabular-nums">
+                    {[sg.period_text, `원본 ${sg.source_title}`].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                <Button size="sm" className="shrink-0 max-sm:h-9" onClick={() => setSheet({ education: null, suggestion: sg })}>
+                  <Plus size={14} /> 추가
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <EducationSheet
         open={sheet !== null}
         education={sheet?.education ?? null}
-        onClose={() => setSheet(null)}
+        suggestion={sheet?.suggestion ?? null}
+        onClose={() => {
+          setSheet(null);
+          void suggestions.refetch();
+        }}
       />
     </div>
   );

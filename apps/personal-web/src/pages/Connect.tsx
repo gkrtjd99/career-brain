@@ -64,7 +64,7 @@ export function ConnectPage() {
 
       <div className="mt-10 space-y-3 border-t border-line pt-4 text-[13px] leading-6 text-muted">
         <p>
-          토큰이 없다면 서버에서 <code className="text-fg">uv run personal-api bootstrap</code>을 실행하세요. Docker는{" "}
+          토큰이 없다면 서버에서 <code className="text-fg">uv run --no-sync personal-api bootstrap</code>을 실행하세요. Docker는{" "}
           <code className="text-fg">docker compose run --rm app bootstrap</code>입니다.
         </p>
         <p>

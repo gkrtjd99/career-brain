@@ -121,7 +121,7 @@ function clean(s: BrainSearch): BrainSearch {
 }
 
 function filtersActive(s: BrainSearch) {
-  return !!(s.q || s.kind || s.tag?.length || s.year || s.review);
+  return !!(s.q || s.kind || s.tag?.length || s.year || s.review || s.dup);
 }
 
 /** 브레인 안 찾기: 경험의 제목·조직·역할·태그. 확인한 사실·원문 문단은 근거 검색으로. */
@@ -230,6 +230,11 @@ function Filters({
   if (overview.year_min !== null && overview.year_max !== null)
     for (let y = overview.year_max; y >= overview.year_min; y--) years.push(y);
   const kinds = EXPERIENCE_KINDS.filter((k) => overview.kinds[k] || search.kind === k);
+  const dups = useQuery({
+    queryKey: ["experiences", "duplicates"],
+    queryFn: () => api.experiences({ duplicates: true, limit: 200 }),
+  });
+  const dupCount = dups.data?.length ?? 0;
 
   return (
     <div className="mb-6 space-y-2">
@@ -280,10 +285,17 @@ function Filters({
         >
           확인 필요만
         </Chip>
+        {dupCount || search.dup ? (
+          <Chip pressed={!!search.dup} onClick={() => setSearch({ dup: search.dup ? undefined : true })} count={dupCount || null}>
+            같은 경험일 수 있음
+          </Chip>
+        ) : null}
         {filtersActive(search) ? (
           <button
             type="button"
-            onClick={() => setSearch({ q: undefined, kind: undefined, tag: undefined, year: undefined, review: undefined })}
+            onClick={() =>
+              setSearch({ q: undefined, kind: undefined, tag: undefined, year: undefined, review: undefined, dup: undefined })
+            }
             className="inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-7"
           >
             필터 초기화
@@ -318,6 +330,7 @@ function ExperienceResults({
     tags: search.tag,
     year: search.year,
     status: search.review ? ("needs_review" as const) : undefined,
+    duplicates: search.dup || undefined,
     // 타임라인은 시작 달 순서, 표는 고른 정렬
     sort: table ? (search.sort ?? "start") : ("start" as const),
     limit: LIST_LIMIT,
@@ -568,6 +581,7 @@ function ClaimState({ e, inline = false }: { e: ExperienceSummary; inline?: bool
       {e.needs_review ? <div className="font-semibold">확인 필요 {e.needs_review}</div> : null}
       {confirmed ? <div className="text-muted">확인됨 {confirmed}</div> : null}
       {!e.needs_review && !confirmed ? <div className="text-muted">사실 없음</div> : null}
+      {e.possible_duplicate_of ? <div className="font-medium text-warn">같은 경험일 수 있음</div> : null}
     </div>
   );
 }

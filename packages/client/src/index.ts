@@ -225,8 +225,8 @@ export function createClient({
     updateExperience: (experienceId: string, body: T.ExperiencePatch) =>
       patch<T.Experience>(`/core/experiences/${id(experienceId)}`, body),
     /** source 경험들을 이 경험에 합친다 (approve 필요). 400 merge_self·experience_not_active 등 */
-    mergeExperiences: (targetId: string, body: T.MergeIn) =>
-      post<T.MergeOut>(`/core/experiences/${id(targetId)}/merge`, body),
+    mergeExperiences: (targetId: string, body: T.ExperienceMergeIn) =>
+      post<T.ExperienceMergeOut>(`/core/experiences/${id(targetId)}/merge`, body),
     /** 지우기. 쓰는 곳이 있으면 409 experience_in_use (+references). 확인한 사실이 있으면 includeConfirmed */
     deleteExperience: (experienceId: string, includeConfirmed = false) =>
       json<T.DeleteExperienceOut>("DELETE", `/core/experiences/${id(experienceId)}`, {
