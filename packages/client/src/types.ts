@@ -107,7 +107,23 @@ export type ClaimKind =
 
 export type Contribution = "personal" | "team" | "unknown";
 
-export interface ExperienceSummary {
+/** 경험 종류 (c0030, O19) */
+export type ExperienceKind = "work" | "project" | "education" | "activity" | "other";
+/** 월: "YYYY-MM" (그 달 1일로 저장된다) */
+export type YearMonth = string;
+
+/** 경험 구조 칸 (c0030). 날짜는 원문 기간이 분명할 때만 채워지고, 원문은 period_text 그대로다. */
+export interface ExperienceStructure {
+  kind: ExperienceKind;
+  parent_id: Uuid | null;
+  parent_title: string | null;
+  started_on: YearMonth | null;
+  ended_on: YearMonth | null;
+  ongoing: boolean;
+  tags: string[];
+}
+
+export interface ExperienceSummary extends ExperienceStructure {
   id: Uuid;
   title: string;
   organization: string | null;
@@ -116,6 +132,57 @@ export interface ExperienceSummary {
   origin: string;
   claim_counts: Partial<Record<ClaimStatus, number>>;
   needs_review: number;
+  children_count: number;
+  updated_at: IsoDateTime | null;
+}
+
+export type ExperienceReviewFilter = "needs_review" | "confirmed" | "no_claims";
+export type ExperienceSort = "start" | "updated" | "title";
+
+/** GET /core/experiences 거름 (모두 선택). 전체 수는 X-Total-Count. */
+export interface ExperienceQuery {
+  kind?: ExperienceKind[];
+  parentId?: Uuid;
+  topLevel?: boolean;
+  /** 하나라도 있으면 (대소문자 무시) */
+  tags?: string[];
+  /** 그해와 기간이 겹친다 */
+  year?: number;
+  org?: string;
+  status?: ExperienceReviewFilter;
+  q?: string;
+  sort?: ExperienceSort;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ExperiencePage {
+  items: ExperienceSummary[];
+  total: number;
+}
+
+export interface ChildExperience {
+  id: Uuid;
+  title: string;
+  kind: ExperienceKind;
+  role: string | null;
+  started_on: YearMonth | null;
+  ended_on: YearMonth | null;
+  ongoing: boolean;
+}
+
+export interface BrainOverview {
+  experiences: number;
+  kinds: Record<ExperienceKind, number>;
+  /** 확인할 주장이 있는 경험 수 */
+  needs_review: number;
+  pending_claims: number;
+  /** 시작 달이 없는 경험 수 */
+  undated: number;
+  year_min: number | null;
+  year_max: number | null;
+  recent: { id: Uuid; title: string; kind: ExperienceKind; organization: string | null; updated_at: IsoDateTime }[];
+  tags: { tag: string; count: number }[];
 }
 
 export interface Evidence {
@@ -141,7 +208,7 @@ export interface Claim {
   evidence: Evidence[];
 }
 
-export interface Experience {
+export interface Experience extends ExperienceStructure {
   id: Uuid;
   title: string;
   organization: string | null;
@@ -150,6 +217,8 @@ export interface Experience {
   origin: string;
   status: string;
   claims: Claim[];
+  children: ChildExperience[];
+  updated_at: IsoDateTime | null;
 }
 
 export interface ClaimBrief {
@@ -167,7 +236,16 @@ export interface ExperienceIn {
   organization?: string | null;
   role?: string | null;
   period_text?: string | null;
+  kind?: ExperienceKind;
+  parent_id?: Uuid | null;
+  started_on?: YearMonth | null;
+  ended_on?: YearMonth | null;
+  ongoing?: boolean;
+  tags?: string[];
 }
+
+/** PATCH /core/experiences/{id}: 준 칸만 고친다 (null은 비우기, 제목·종류·진행 중은 null 불가) */
+export type ExperiencePatch = Partial<ExperienceIn>;
 
 export interface ClaimIn {
   statement: string;

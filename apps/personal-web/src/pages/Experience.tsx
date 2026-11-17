@@ -1,14 +1,23 @@
 import type { Claim, ClaimKind, Contribution, Experience } from "@career-brain/client";
-import { Button, cn, Label, MarkdownView, Select, Textarea } from "@career-brain/ui";
+import { Button, cn, Label, MarkdownView, Select, Sheet, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { Copy, Download, Plus } from "lucide-react";
-import { useState } from "react";
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
+import { Copy, Download, Pencil, Plus } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { ClaimItem } from "../components/ClaimItem";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
+import {
+  CreateExperienceForm,
+  EMPTY_EXPERIENCE,
+  ExperienceForm,
+  formValues,
+  toBody,
+  type ExperienceFormValues,
+} from "../components/ExperienceForm";
 import { InterviewPanel } from "../components/InterviewPanel";
 import { SpanSheet } from "../components/SpanSheet";
 import { api } from "../lib/api";
+import { EXPERIENCE_KIND_LABEL, PARENT_KINDS, periodLabel } from "../lib/experience";
 import { KIND_LABEL, ORIGIN_LABEL } from "../lib/labels";
 import type { ExperienceTab } from "../router";
 
@@ -39,10 +48,15 @@ export function ExperiencePage() {
             <PageHeader
               back={{ to: "/brain", label: "브레인" }}
               title={exp.title}
-              subtitle={[exp.organization, exp.role, exp.period_text, ORIGIN_LABEL[exp.origin]]
-                .filter(Boolean)
-                .join(" · ")}
+              subtitle={
+                <span className="tabular-nums">
+                  {[EXPERIENCE_KIND_LABEL[exp.kind], exp.organization, exp.role, ORIGIN_LABEL[exp.origin]]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              }
             />
+            <ExperienceInfo exp={exp} />
             <Tabs
               value={tab}
               onChange={setTab}
@@ -72,6 +86,128 @@ export function ExperiencePage() {
         );
       }}
     </Loaded>
+  );
+}
+
+/** 구조(종류·상위·기간·태그)와 안의 경험. 고치기는 옆 패널에서. */
+function ExperienceInfo({ exp }: { exp: Experience }) {
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const period = periodLabel({ ...exp, period_text: null });
+  const canHaveChildren = !exp.parent_id && PARENT_KINDS.includes(exp.kind);
+  return (
+    <section className="mb-8">
+      <dl className="divide-y divide-line border-y border-line text-sm">
+        <InfoRow label="상위 경험">
+          {exp.parent_id ? (
+            <Link
+              to="/brain/$experienceId"
+              params={{ experienceId: exp.parent_id }}
+              className="underline underline-offset-2"
+            >
+              {exp.parent_title}
+            </Link>
+          ) : (
+            <span className="text-muted">없음 (맨 위)</span>
+          )}
+        </InfoRow>
+        <InfoRow label="기간">
+          <span className="tabular-nums">{period ?? <span className="text-muted">모름</span>}</span>
+          {exp.period_text ? (
+            <span className="text-[13px] text-muted"> · 원문 기간: {exp.period_text}</span>
+          ) : null}
+        </InfoRow>
+        <InfoRow label="태그">
+          {exp.tags.length ? exp.tags.join(" · ") : <span className="text-muted">없음</span>}
+        </InfoRow>
+      </dl>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" className="max-sm:h-9" onClick={() => setEditing(true)}>
+          <Pencil size={14} /> 고치기
+        </Button>
+        {canHaveChildren ? (
+          <Button size="sm" className="max-sm:h-9" onClick={() => setAdding(true)}>
+            <Plus size={14} /> 안에 프로젝트 추가
+          </Button>
+        ) : null}
+      </div>
+
+      {exp.children.length ? (
+        <div className="mt-6">
+          <h2 className="text-[15px] font-semibold">
+            안의 경험 <span className="font-normal text-muted tabular-nums">{exp.children.length}</span>
+          </h2>
+          <ul className="mt-2 divide-y divide-line border-t border-line">
+            {exp.children.map((c) => (
+              <li key={c.id}>
+                <Link
+                  to="/brain/$experienceId"
+                  params={{ experienceId: c.id }}
+                  className="-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{c.title}</span>
+                  <span className="shrink-0 text-[13px] text-muted tabular-nums">
+                    {[EXPERIENCE_KIND_LABEL[c.kind], periodLabel(c)].filter(Boolean).join(" · ")}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <Sheet open={editing} onOpenChange={(o) => !o && setEditing(false)} title="경험 고치기">
+        {editing ? <EditExperienceForm exp={exp} onDone={() => setEditing(false)} /> : null}
+      </Sheet>
+      <Sheet open={adding} onOpenChange={(o) => !o && setAdding(false)} title="안에 프로젝트 추가">
+        {adding ? (
+          <CreateExperienceForm
+            initial={{
+              ...EMPTY_EXPERIENCE,
+              kind: "project",
+              parent_id: exp.id,
+              organization: exp.organization ?? "",
+            }}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
+      </Sheet>
+    </section>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-4 py-2.5">
+      <dt className="w-20 shrink-0 text-[13px] text-muted">{label}</dt>
+      <dd className="min-w-0 flex-1 break-words">{children}</dd>
+    </div>
+  );
+}
+
+function EditExperienceForm({ exp, onDone }: { exp: Experience; onDone: () => void }) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (v: ExperienceFormValues) => api.updateExperience(exp.id, toBody(v)),
+    onSuccess: (updated) => {
+      qc.setQueryData(["experience", exp.id], updated);
+      qc.invalidateQueries({ queryKey: ["experiences"] });
+      // 상위가 바뀌면 옛·새 상위의 "안의 경험"도 바뀐다
+      qc.invalidateQueries({ queryKey: ["experience"] });
+      onDone();
+    },
+  });
+  return (
+    <ExperienceForm
+      initial={formValues(exp)}
+      selfId={exp.id}
+      hasChildren={exp.children.length > 0}
+      submitLabel="저장"
+      pending={save.isPending}
+      error={save.error}
+      onSubmit={(v) => save.mutate(v)}
+      onCancel={onDone}
+    />
   );
 }
 

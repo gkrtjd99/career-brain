@@ -1,4 +1,4 @@
-import type { SearchKind } from "@career-brain/client";
+import type { ExperienceKind, SearchKind } from "@career-brain/client";
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
@@ -44,12 +44,37 @@ const todayRoute = createRoute({
   component: TodayPage,
 });
 
+/** 브레인 색인의 거름·보기 (링크로 같은 보기를 다시 연다). review = 확인 필요만 */
+export interface BrainSearch {
+  q?: string;
+  view?: "table";
+  kind?: ExperienceKind;
+  tag?: string[];
+  year?: number;
+  review?: boolean;
+  sort?: "updated" | "title";
+}
+const BRAIN_KINDS: ExperienceKind[] = ["work", "project", "education", "activity", "other"];
+
 const brainRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/brain",
   beforeLoad: requireToken,
-  validateSearch: (s: Record<string, unknown>): { review?: boolean } =>
-    s.review === true || s.review === "true" || s.review === "1" ? { review: true } : {},
+  validateSearch: (s: Record<string, unknown>): BrainSearch => {
+    const out: BrainSearch = {};
+    if (typeof s.q === "string" && s.q.trim()) out.q = s.q.slice(0, 200);
+    if (s.view === "table") out.view = "table";
+    if (BRAIN_KINDS.includes(s.kind as ExperienceKind)) out.kind = s.kind as ExperienceKind;
+    const tags = (Array.isArray(s.tag) ? s.tag : typeof s.tag === "string" ? [s.tag] : []).filter(
+      (t): t is string => typeof t === "string" && t.trim() !== "",
+    );
+    if (tags.length) out.tag = tags.slice(0, 30);
+    const year = Number(s.year);
+    if (Number.isInteger(year) && year >= 1900 && year <= 2200) out.year = year;
+    if (s.review === true || s.review === "true" || s.review === "1") out.review = true;
+    if (s.sort === "updated" || s.sort === "title") out.sort = s.sort;
+    return out;
+  },
   component: BrainPage,
 });
 

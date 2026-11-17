@@ -82,6 +82,9 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0024 | `no_data_change` | `restore_jobs`(내보내지 않음) |
 | c0025 | `schema_step` | 새 표 `job_fetch_confirmations` (빈 표) |
 | c0027 | `no_data_change` | `restore_jobs.started_by`·`near_choices` (내보내지 않음) |
+| c0029 | `schema_step` | `parse_runs.hidden_text = 'keep'` |
+| c0030 | `schema_step` | 옛 묶음에는 빈 `model_connections`·`model_route_overrides`·`model_settings` (키 암호문 표는 내보내지 않음) |
+| c0031 | `schema_step` | `experiences`에 `kind = 'other'`·`parent_id = null`·`ongoing`·`tags = []`, `started_on`/`ended_on`은 migration과 같이 원문 기간이 분명할 때만 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -220,7 +223,7 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `application_documents` | same_except | 제목·문항·제한·세는 규칙·현재 revision·`updated_at` | UNIQUE(지원, 문항 번호)는 문항 없는 문서(NULL)에 안 걸린다 |
   | `application_stages` | same_except | 순서·이름·일정·결과·결정 시각·메모·`updated_at` | 단계 기록을 고친다. 지원·제출본·종류·만든 시각이 정체 |
   | `extraction_runs`·`job_fetch_runs` | same_except | 상태·결과 수·오류·메모·`updated_at` | 실행하며 채워지는 칸 |
-  | `experiences` | same_except | 상태·`updated_at` | 확인만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행) |
+  | `experiences` | same_except | 상태·`updated_at`·종류·상위·시작/끝 달·진행 중·태그(c0031) | 확인과 정리(종류·상하·날짜·태그)만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행) |
   | `claims` | same_except | 상태·확인한 사람·확인 시각·`updated_at` | 문장·종류·기여가 정체 |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |

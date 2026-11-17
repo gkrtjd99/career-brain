@@ -83,7 +83,7 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 | 테이블 | 내용 | 앱 role |
 |---|---|---|
 | `source_spans` | 원문 블록의 `[start_char, end_char)` 범위와 그 인용. `length(quote) = end - start` CHECK | `SELECT, INSERT` |
-| `experiences` | 경험 묶음(제목·조직·역할·기간 원문). `origin`: `ai_extraction`/`interview`/`user` | 전체 |
+| `experiences` | 경험 묶음(제목·조직·역할·기간 원문). `origin`: `ai_extraction`/`interview`/`user`. c0031: 종류·상위(한 단계)·달 단위 기간·태그 | 전체 |
 | `extraction_runs` | 파싱 결과 1건에 대한 AI 추출 1회. 보낸 블록 수, 만든/버린 주장 수, `model_call_id` | 전체 |
 | `claims` | 주장 한 문장. `status`, `kind`, `contribution`(`personal`/`team`/`unknown`) | 전체 |
 | `claim_evidence` | 주장 ↔ 근거. `source_span` 또는 `interview_answer` 중 정확히 하나 | 전체 |
@@ -416,3 +416,23 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내기: `parse_runs`는 내보내는 표라 `@schema_step("c0029")`가 옛 묶음 행에 `hidden_text = 'keep'`을 넣는다 (`test_schema_steps_cover_every_migration`).
 - downgrade: CHECK와 칸을 지운다.
 - 규칙: `applications.md` "DOCX 원본" — 숨김 run 빼기.
+
+## 경험 구조 (c0031, O19)
+
+`c0031` (`down_revision = c0030`). 브레인 색인·연표·표·거름의 바탕 (plan §20).
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `experiences.kind` | text NOT NULL DEFAULT `'other'`, CHECK `ck_experiences_kind` (`work`·`project`·`education`·`activity`·`other`) | 기존 권한 그대로 |
+| `experiences.parent_id` | uuid NULL. FK `fk_experiences_parent` (`workspace_id, parent_id`) → `experiences (workspace_id, id)`: 같은 공간의 경험만. `ON DELETE SET NULL (parent_id)`(부모를 지우면 자식은 맨 위로), 같은 표를 가리키므로 `DEFERRABLE INITIALLY IMMEDIATE`(c0012처럼 복원 때만 트랜잭션 끝에서 검사). CHECK `ck_experiences_parent_self`. 색인 `ix_experiences_parent`(부분) | 그대로 |
+| trigger `experience_one_level` | `BEFORE INSERT OR UPDATE OF parent_id`, plpgsql(`search_path = pg_catalog`, SECURITY INVOKER — 공간 RLS 아래에서 돈다). 한 단계만: 부모가 자식이면 `experience_parent_is_child`, 자식이 있는 경험을 자식으로 두면 `experience_has_children` (check_violation). usecase가 먼저 같은 규칙으로 막고(409), trigger는 동시 수정의 안전장치 | – |
+| `experiences.started_on`·`ended_on` | date NULL, 그 달 1일 (`ck_experiences_months`). `ck_experiences_period`: 끝 ≥ 시작, 끝이 있으면 시작도, 진행 중이면 끝 없음 | 그대로 |
+| `experiences.ongoing` | bool NOT NULL DEFAULT false | 그대로 |
+| `experiences.tags` | text[] NOT NULL DEFAULT `'{}'`, `ck_experiences_tags` (30개 이하, NULL 원소 없음). 정규화(앞뒤·겹친 공백, 대소문자 무시 중복 빼기, 40자)는 usecase | 그대로 |
+
+- 채우기: 기존 행의 `period_text`에서 시작·끝 달이 분명할 때만 날짜를 채운다 (`domain.experiences.parse_period`: `2023.03 – 2024.08`, `2023-03 ~ 2024-08`, `2023년 3월 - 2024년 8월`, `2024.10 – 현재`(진행 중)). 연도만·두 자리 연도·달 하나·거꾸로·일까지·다른 글이 섞인 기간은 비운다. `period_text`는 그대로. 공간 문맥 없이 모든 행을 고치려고 채우는 동안만 NO FORCE (c0021과 같은 방식), 끝나면 FORCE.
+- 추출: 모델이 경험마다 `kind`·`tags`를 후보로 낸다. 날짜는 모델 값이 아니라, 모델이 옮긴 `period` 글이 보낸 블록에 그대로 있을 때 같은 `parse_period`로만 읽는다. 태그는 블록에 (대소문자 무시) 나오는 낱말만 10개까지. 모르는 종류는 `other`.
+- 내보내기: `@schema_step("c0031")`가 옛 묶음의 경험 행에 `kind = 'other'`, `parent_id = null`, `tags = []`, 날짜는 migration과 같은 규칙으로 채운다. 합치기 내용 키(`same_except`)는 새 칸을 "정리하며 바뀌는 칸"으로 뺀다 (정체 칸은 제목·조직·역할·기간 원문 그대로).
+- downgrade: trigger·함수·색인·FK·CHECK·칸을 지운다.
+- 시험: `packages/core/tests/test_experience_structure.py` (기간 읽기 표, 채우기·downgrade, 한 단계, 다른 공간 부모, 거름·정렬, 300건 쪽, 색인 수, 추출 후보, HTTP 코드).
+

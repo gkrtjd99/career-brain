@@ -27,7 +27,7 @@ async def test_mcp_uses_personal_tokens_and_revocation(pg, db):
         assert (await c.post("/api/core/mcp", json=msg)).status_code == 401
         auth = {"Authorization": f"Bearer {token}"}
         res = await c.post("/api/core/mcp", json=msg, headers=auth)
-        assert res.json()["result"]["structuredContent"] == {"experiences": []}
+        assert res.json()["result"]["structuredContent"] == {"experiences": [], "total": 0}
         assert await revoke_token(db, workspace_id=ws, token=token)
         assert (await c.post("/api/core/mcp", json=msg, headers=auth)).status_code == 401
     assert RUN_JOB in build_handlers(settings, db)

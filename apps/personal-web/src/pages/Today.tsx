@@ -29,7 +29,7 @@ export function TodayPage() {
   const postings = useQuery({ queryKey: ["postings"], queryFn: api.postings });
   const experiences = useQuery({
     queryKey: ["experiences"],
-    queryFn: api.experiences,
+    queryFn: () => api.experiences(),
   });
   const apps = useQuery({
     queryKey: ["applications"],
