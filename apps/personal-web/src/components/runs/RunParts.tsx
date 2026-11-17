@@ -1,5 +1,5 @@
 import type { Run, RunEstimate } from "@career-brain/client";
-import { Badge } from "@career-brain/ui";
+import { cn } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ExternalLink } from "lucide-react";
@@ -66,7 +66,9 @@ export function CostEstimate({
   const q = useQuery({
     queryKey: ["run-estimate", workflow, units, sent],
     queryFn: () =>
-      sent ? api.runEstimateFor(workflow, JSON.parse(sent) as Record<string, unknown>) : api.runEstimate(workflow, units),
+      sent
+        ? api.runEstimateFor(workflow, JSON.parse(sent) as Record<string, unknown>)
+        : api.runEstimate(workflow, units),
     enabled: units > 0,
     staleTime: 60_000,
     placeholderData: (prev) => prev,
@@ -74,8 +76,8 @@ export function CostEstimate({
   if (units <= 0) return null;
   const e: RunEstimate | undefined = q.data;
   return (
-    <div className="rounded-md border border-line bg-subtle/60 px-3 py-2 text-[13px]" aria-live="polite">
-      <p>
+    <div className="space-y-1 text-[13px]" aria-live="polite">
+      <p className="tabular-nums">
         모델 호출 약 <b>{int(units)}회</b> ({noun} {int(units)}개, 하나에 한 번)
         {e?.chars != null ? <span className="text-muted"> · 보낼 글 약 {int(e.chars)}자</span> : null}
       </p>
@@ -84,8 +86,8 @@ export function CostEstimate({
           예상 비용 약 <b className="text-fg">{usd(e.estimate_usd)}</b> —{" "}
           {e.basis === "input_chars" ? (
             <>
-              글 길이 기준: 지난 실행 {int(e.based_on_runs)}번(호출 {int(e.based_on_calls)}회, {int(e.based_on_chars)}자)에서
-              잰 호출당 {usd(e.fixed_per_call_usd)} + 1천 자당 {usd(e.per_1k_chars_usd)}
+              글 길이 기준: 지난 실행 {int(e.based_on_runs)}번(호출 {int(e.based_on_calls)}회, {int(e.based_on_chars)}
+              자)에서 잰 호출당 {usd(e.fixed_per_call_usd)} + 1천 자당 {usd(e.per_1k_chars_usd)}
             </>
           ) : (
             <>
@@ -94,10 +96,13 @@ export function CostEstimate({
               {e.chars != null ? " (글 길이로 잴 지난 실행이 아직 모자람)" : ""}
             </>
           )}
-          {e.cost_unknown ? ", 단가 미상 호출이 있어 실제는 더 들 수 있음" : ""}. 참고값이며 월 예산은 실행 때 다시 확인합니다.
+          {e.cost_unknown ? ", 단가 미상 호출이 있어 실제는 더 들 수 있음" : ""}. 참고값이며 월 예산은 실행 때 다시
+          확인합니다.
         </p>
       ) : e ? (
-        <p className="text-muted">아직 이 작업을 돌린 적이 없어 예상 비용이 없습니다. 끝나면 시스템 화면에서 실제 비용을 봅니다.</p>
+        <p className="text-muted">
+          아직 이 작업을 돌린 적이 없어 예상 비용이 없습니다. 끝나면 시스템 화면에서 실제 비용을 봅니다.
+        </p>
       ) : null}
       <ErrorText error={q.error} />
     </div>
@@ -151,9 +156,9 @@ function RunProgressCard({ runId, listKey, noun, onFinished }: ProgressProps) {
   const pct = p && p.total ? Math.round((p.done / p.total) * 100) : run.status === "done" ? 100 : 0;
   const st = RUN_STATUS[run.status];
   return (
-    <div className="space-y-2 rounded-md border border-line px-3 py-2.5 text-[13px]" aria-live="polite">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={st.tone}>{st.label}</Badge>
+    <div className="space-y-2 text-[13px]" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-x-2">
+        <span className={cn("font-medium", st.tone === "danger" && "text-danger")}>{st.label}</span>
         {p ? (
           <span className="tabular-nums">
             {noun} {int(p.done)}/{int(p.total)}
@@ -176,9 +181,15 @@ function RunProgressCard({ runId, listKey, noun, onFinished }: ProgressProps) {
       >
         <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${pct}%` }} />
       </div>
-      {run.wait_reason ? <p className="text-muted">기다리는 중: {RUN_CODE[run.wait_reason] ?? run.wait_reason}</p> : null}
+      {run.wait_reason ? (
+        <p className="text-muted">기다리는 중: {RUN_CODE[run.wait_reason] ?? run.wait_reason}</p>
+      ) : null}
       {run.error_code ? <p className="text-danger">실패: {RUN_CODE[run.error_code] ?? run.error_code}</p> : null}
-      <Link to="/system" search={{ run: run.id }} className="inline-flex items-center gap-1 text-accent hover:underline">
+      <Link
+        to="/system"
+        search={{ run: run.id }}
+        className="inline-flex min-h-9 items-center gap-1 text-muted underline underline-offset-2 hover:text-fg"
+      >
         <ExternalLink size={13} /> 시스템 화면에서 실행 보기 (멈춤·취소·사건)
       </Link>
     </div>

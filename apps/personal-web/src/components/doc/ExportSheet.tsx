@@ -1,5 +1,5 @@
 import type { ExportCheck, ExportFile, ExportFormat, FileCheck, Finding } from "@career-brain/client";
-import { Badge, Button, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, cn, Label, Select, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, FileSearch } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -48,13 +48,13 @@ function FindingItem({ f }: { f: Finding }) {
   const samples = (f.detail?.samples as { page?: number; part?: string; text?: string | null }[] | undefined) ?? [];
   const count = typeof f.detail?.count === "number" ? (f.detail.count as number) : null;
   return (
-    <li className="rounded-md border border-line bg-surface px-2.5 py-2 text-[13px]">
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={tone}>{info?.label ?? f.code}</Badge>
-        {count !== null ? <span className="text-xs text-muted">{count}곳</span> : null}
-        {f.detail?.in_hidden_text ? <Badge tone="danger">숨긴 글 안</Badge> : null}
-      </span>
-      <p className="mt-1 leading-5">{f.message}</p>
+    <li className="py-2.5 text-[13px]">
+      <p className="flex flex-wrap items-baseline gap-x-1.5">
+        <span className={cn("font-medium", tone === "danger" && "text-danger")}>{info?.label ?? f.code}</span>
+        {count !== null ? <span className="text-xs text-muted tabular-nums">{count}곳</span> : null}
+        {f.detail?.in_hidden_text ? <span className="text-xs text-danger">숨긴 글 안</span> : null}
+      </p>
+      <p className="mt-0.5 leading-5">{f.message}</p>
       {f.sentence ? <p className="mt-1 text-xs break-words text-muted">“{f.sentence}”</p> : null}
       {samples.length ? (
         <ul className="mt-1 space-y-0.5 text-xs text-muted">
@@ -72,7 +72,7 @@ function FindingItem({ f }: { f: Finding }) {
 
 export function FindingList({ findings }: { findings: Finding[] }) {
   return (
-    <ul className="space-y-1.5">
+    <ul className="divide-y divide-line border-t border-line">
       {findings.map((f, i) => (
         <FindingItem key={`${f.code}-${i}`} f={f} />
       ))}
@@ -84,13 +84,13 @@ export function ExportFindings({ check, label }: { check: ExportCheck; label?: s
   const head = label ?? `r${check.revision}`;
   if (!check.findings.length)
     return (
-      <p className="rounded-md border border-line bg-surface px-3 py-2 text-[13px]">
+      <p className="text-[13px] text-muted tabular-nums">
         {head} · {check.filename} · {int(check.bytes)} byte · 경고 없음
       </p>
     );
   return (
-    <div className="space-y-1.5">
-      <p className="text-[13px]">
+    <div className="space-y-2">
+      <p className="text-[13px] font-medium tabular-nums">
         {head} · {check.filename} · 경고 {check.findings.length}개
       </p>
       <FindingList findings={check.findings} />
@@ -155,14 +155,21 @@ export function ExportSheet({
             ))}
           </Select>
           {format === "html" ? (
-            <p className="mt-1 text-xs text-muted">인쇄 화면을 새 창에 엽니다. 인쇄 대화상자에서 "PDF로 저장"을 고르세요.</p>
+            <p className="mt-1 text-xs text-muted">
+              인쇄 화면을 새 창에 엽니다. 인쇄 대화상자에서 "PDF로 저장"을 고르세요.
+            </p>
           ) : null}
         </div>
         {note}
         <Loaded query={q}>{(c) => <ExportFindings check={c} label={label} />}</Loaded>
         {warnings ? (
           <label className="flex items-start gap-2 text-[13px]">
-            <input type="checkbox" className="mt-1" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+            />
             <span>경고 {warnings}개를 확인했고 이대로 내보냅니다.</span>
           </label>
         ) : null}
@@ -186,15 +193,20 @@ export function HiddenTextCheck() {
   const [file, setFile] = useState<File | null>(null);
   const run = useMutation({ mutationFn: (f: File) => api.checkHiddenText(f) });
   const res: FileCheck | undefined = run.data;
+  const head = res
+    ? `${res.filename ?? "파일"} · ${res.format.toUpperCase()}${res.pages ? ` · ${res.pages}쪽` : ""}`
+    : "";
   return (
-    <div className="space-y-2 rounded-lg border border-line bg-surface p-3">
-      <p className="flex items-center gap-1.5 text-[13px] font-medium">
-        <FileSearch size={14} /> 제출할 파일 숨김 글 검사
-      </p>
-      <p className="text-xs text-muted">
-        다른 도구로 만든 DOCX·PDF에 숨김 서식·흰 글씨·아주 작은 글자·쪽 밖 글·심사 프로그램에 지시하는 문장이 있는지 봅니다.
-        파일은 저장하지 않고, 고치지 않습니다.
-      </p>
+    <section className="space-y-3">
+      <div>
+        <h2 className="flex items-center gap-1.5 text-[15px] font-semibold">
+          <FileSearch size={15} className="text-muted" /> 제출할 파일 숨김 글 검사
+        </h2>
+        <p className="mt-1 text-[13px] text-muted">
+          다른 도구로 만든 DOCX·PDF에 숨김 서식·흰 글씨·아주 작은 글자·쪽 밖 글·심사 프로그램에 지시하는 문장이 있는지
+          봅니다. 파일은 저장하지 않고, 고치지 않습니다.
+        </p>
+      </div>
       <form
         className="flex flex-wrap items-center gap-2"
         onSubmit={(e) => {
@@ -206,33 +218,29 @@ export function HiddenTextCheck() {
           type="file"
           aria-label="검사할 DOCX·PDF 파일"
           accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          className="max-w-full text-[13px]"
+          className="max-w-full min-w-0 text-[13px] file:mr-2 file:h-9 file:rounded-md file:border file:border-line file:bg-surface file:px-3 file:text-[13px] file:text-fg hover:file:bg-subtle"
           onChange={(e) => {
             setFile(e.target.files?.[0] ?? null);
             run.reset();
           }}
         />
-        <Button type="submit" size="sm" disabled={!file || run.isPending}>
+        <Button type="submit" size="sm" className="h-9" disabled={!file || run.isPending}>
           {run.isPending ? "검사하는 중" : "검사"}
         </Button>
       </form>
       <ErrorText error={run.error} />
       {res ? (
         res.findings.length ? (
-          <div className="space-y-1.5">
-            <p className="text-[13px]">
-              {res.filename ?? "파일"} · {res.format.toUpperCase()}
-              {res.pages ? ` · ${res.pages}쪽` : ""} · 경고 {res.findings.length}개
+          <div className="space-y-2">
+            <p className="text-[13px] font-medium tabular-nums">
+              {head} · 경고 {res.findings.length}개
             </p>
             <FindingList findings={res.findings} />
           </div>
         ) : (
-          <p className="rounded-md border border-line px-3 py-2 text-[13px]">
-            {res.filename ?? "파일"} · {res.format.toUpperCase()}
-            {res.pages ? ` · ${res.pages}쪽` : ""} · 숨김 글 경고 없음
-          </p>
+          <p className="text-[13px] text-muted tabular-nums">{head} · 숨김 글 경고 없음</p>
         )
       ) : null}
-    </div>
+    </section>
   );
 }

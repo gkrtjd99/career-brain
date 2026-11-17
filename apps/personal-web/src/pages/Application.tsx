@@ -12,8 +12,8 @@ import type {
   TextCounts,
 } from "@career-brain/client";
 import {
-  Badge,
   Button,
+  cn,
   ConfirmDialog,
   EmptyState,
   Input,
@@ -23,16 +23,16 @@ import {
   Sheet,
   StatusBadge,
   Textarea,
+  type BadgeTone,
 } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
-import { ChevronRight, Copy, Download, FileText, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { Copy, Download, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
-import { DdayBadge } from "../components/DdayBadge";
 import { ExportSheet } from "../components/doc/ExportSheet";
 import { api, ApiError } from "../lib/api";
-import { formatDateTime, formatDeadline, fromLocalInput, toLocalInput } from "../lib/dates";
+import { daysLeft, ddayLabel, formatDateTime, formatDeadline, fromLocalInput, toLocalInput } from "../lib/dates";
 import { int } from "../lib/format";
 import {
   APP_STATUS,
@@ -57,6 +57,13 @@ export function countLine(c: TextCounts | null | undefined) {
   return parts.join(" · ");
 }
 
+/** 배지 대신 글자로 상태를 보인다: 위험은 빨강, 확인할 것은 진하게, 나머지는 흐리게. */
+export function toneText(tone: BadgeTone) {
+  if (tone === "danger") return "text-danger";
+  if (tone === "warn" || tone === "accent") return "font-medium text-fg";
+  return "text-muted";
+}
+
 export function ApplicationPage() {
   const { applicationId } = route.useParams();
   const q = useQuery({ queryKey: ["application", applicationId], queryFn: () => api.application(applicationId) });
@@ -77,6 +84,9 @@ function ApplicationView({ app }: { app: Application }) {
   const company = app.posting.company as string | undefined;
   const jobTitle = app.posting.title as string | undefined;
   const deadline = app.posting.deadline as string | undefined;
+  const dday = ddayLabel(deadline);
+  const left = daysLeft(deadline);
+  const soon = left !== null && left >= 0 && left <= 3;
 
   return (
     <div>
@@ -84,11 +94,16 @@ function ApplicationView({ app }: { app: Application }) {
         back={{ to: "/applications", label: "지원 현황" }}
         title={app.title}
         subtitle={
-          <span className="flex flex-wrap items-center gap-1.5">
-            <Badge tone={st.tone}>{st.label}</Badge>
-            {draft ? <DdayBadge deadline={deadline} /> : null}
-            {deadline ? <span>마감 {formatDeadline(deadline)}</span> : null}
-            <Link to="/postings/$postingId" params={{ postingId: app.posting_id }} className="hover:text-fg">
+          <span className="flex flex-wrap items-center gap-x-1.5 tabular-nums">
+            <span className="font-medium text-fg">{st.label}</span>
+            {draft && dday ? <span className={cn(soon && "font-semibold text-fg")}>· {dday}</span> : null}
+            {deadline ? <span>· 마감 {formatDeadline(deadline)}</span> : null}
+            <span aria-hidden>·</span>
+            <Link
+              to="/postings/$postingId"
+              params={{ postingId: app.posting_id }}
+              className="underline underline-offset-2 hover:text-fg"
+            >
               공고 보기
             </Link>
           </span>
@@ -108,19 +123,23 @@ function ApplicationView({ app }: { app: Application }) {
           </>
         }
       />
-      {app.result_note ? <p className="mb-3 text-[13px] text-muted">메모: {app.result_note}</p> : null}
+      {app.result_note ? <p className="mb-4 text-[13px] text-muted">메모: {app.result_note}</p> : null}
       {app.posting_pending_changes.length ? (
-        <div className="mb-4 rounded-lg border border-line bg-warn-soft px-3 py-2.5 text-[13px] text-warn">
-          공고에 확인하지 않은 변경이 있습니다:{" "}
+        <p role="status" className="mb-6 rounded-md border border-line px-3 py-2.5 text-[13px]">
+          <span className="font-medium">공고에 확인하지 않은 변경이 있습니다:</span>{" "}
           {app.posting_pending_changes.map((f) => FIELD_LABEL[f as keyof typeof FIELD_LABEL] ?? f).join(", ")}.{" "}
-          <Link to="/postings/$postingId" params={{ postingId: app.posting_id }} className="underline">
+          <Link
+            to="/postings/$postingId"
+            params={{ postingId: app.posting_id }}
+            className="underline underline-offset-2"
+          >
             공고에서 확인
           </Link>
-        </div>
+        </p>
       ) : null}
 
       {draft ? (
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)]">
+        <div className="grid grid-cols-1 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:gap-x-14">
           <Section
             title="문서"
             action={
@@ -155,8 +174,9 @@ function ApplicationView({ app }: { app: Application }) {
   );
 }
 
-function summaryBadges(summary: Record<string, number> | undefined) {
-  if (!summary) return null;
+/** 검사 요약(분량·위험·근거…)을 글자로. 참고(info)는 뺀다. */
+function summaryFlags(summary: Record<string, number> | undefined) {
+  if (!summary) return [];
   const groups: Record<string, number> = {};
   for (const [code, n] of Object.entries(summary)) {
     const g = FINDING[code]?.group ?? "info";
@@ -165,17 +185,25 @@ function summaryBadges(summary: Record<string, number> | undefined) {
   }
   return Object.entries(groups).map(([g, n]) => {
     const info = FINDING_GROUP[g as keyof typeof FINDING_GROUP];
-    return (
-      <Badge key={g} tone={info.tone}>
-        {info.label} {n}
-      </Badge>
-    );
+    return { key: g, label: `${info.label} ${n}`, tone: info.tone };
   });
 }
 
+function Flags({ items }: { items: { key: string; label: string; tone: BadgeTone }[] }) {
+  if (!items.length) return null;
+  return (
+    <span className="flex flex-wrap justify-end gap-x-2 text-[13px] tabular-nums">
+      {items.map((f) => (
+        <span key={f.key} className={toneText(f.tone)}>
+          {f.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function DocumentList({ app, checks }: { app: Application; checks?: ApplicationChecks }) {
-  if (!app.documents.length)
-    return <EmptyState>문서가 없습니다. 이력서·자기소개서를 추가하세요.</EmptyState>;
+  if (!app.documents.length) return <EmptyState>문서가 없습니다. 이력서·자기소개서를 추가하세요.</EmptyState>;
   const byDoc = new Map(checks?.documents.map((d) => [d.document_id, d]) ?? []);
   return (
     <List>
@@ -189,39 +217,39 @@ function DocumentList({ app, checks }: { app: Application; checks?: ApplicationC
 function DocumentRow({ appId, d, summary }: { appId: string; d: DocumentSummary; summary?: Record<string, number> }) {
   const unwritten = d.current_revision === 0 || !d.counts?.chars_with_spaces;
   const over = d.counts?.over_char_limit || d.counts?.over_byte_limit;
+  const flags = [
+    ...(unwritten ? [{ key: "unwritten", label: "안 씀", tone: "warn" as const }] : []),
+    ...(over ? [{ key: "over", label: "분량 초과", tone: "danger" as const }] : []),
+    ...summaryFlags(summary),
+  ];
+  const meta = [
+    DOC_KIND[d.kind] ?? d.kind,
+    countLine(d.counts),
+    d.current_revision ? `r${d.current_revision}` : null,
+    d.source ? `공용 문서 r${d.source.revision_no ?? "?"}에서 복사` : null,
+  ].filter(Boolean);
   return (
     <li>
       <Link
         to="/applications/$applicationId/documents/$documentId"
         params={{ applicationId: appId, documentId: d.id }}
-        className="flex items-start gap-3 px-3 py-3 hover:bg-subtle/60"
+        className="-mx-2 flex items-start gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
       >
-        <FileText size={16} className="mt-0.5 shrink-0 text-muted" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium">
             {d.question_index !== null ? `${d.question_index + 1}. ` : ""}
             {d.title}
           </div>
           {d.question_prompt && d.question_prompt !== d.title ? (
-            <div className="line-clamp-2 text-xs text-muted">{d.question_prompt}</div>
+            <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{d.question_prompt}</div>
           ) : null}
-          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted">
-            <span>{DOC_KIND[d.kind] ?? d.kind}</span>
-            <span>· {countLine(d.counts)}</span>
-            {d.current_revision ? <span>· r{d.current_revision}</span> : null}
-            {d.source ? (
-              <span className="inline-flex items-center gap-0.5">
-                · <Copy size={11} /> 공용 문서 r{d.source.revision_no ?? "?"}에서 복사
-              </span>
-            ) : null}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {unwritten ? <Badge tone="warn">안 씀</Badge> : null}
-            {over ? <Badge tone="danger">분량 초과</Badge> : null}
-            {summaryBadges(summary)}
-          </div>
+          <div className="mt-0.5 text-[13px] text-muted tabular-nums">{meta.join(" · ")}</div>
         </div>
-        <ChevronRight size={16} className="mt-0.5 shrink-0 text-muted" />
+        {flags.length ? (
+          <div className="max-w-[40%] shrink-0 pt-0.5 text-right">
+            <Flags items={flags} />
+          </div>
+        ) : null}
       </Link>
     </li>
   );
@@ -231,28 +259,36 @@ function DocumentRow({ appId, d, summary }: { appId: string; d: DocumentSummary;
 export function VisibilityTable({ rows, compact }: { rows: RequirementVisibility[]; compact?: boolean }) {
   if (!rows.length) return <EmptyState>공고에 자격·우대 요건이 없습니다.</EmptyState>;
   return (
-    <div className="space-y-2">
-      <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+    <div>
+      <ul className="divide-y divide-line border-t border-line">
         {rows.map((r, i) => {
           const v = VISIBILITY[r.verdict] ?? { label: r.verdict, tone: "neutral" as const };
           return (
-            <li key={i} className="px-3 py-2.5">
-              <div className="flex items-start gap-2">
+            <li key={i} className="py-2.5">
+              <div className="flex items-start gap-3">
                 <p className="min-w-0 flex-1 text-[13px] leading-5">{r.requirement}</p>
-                <Badge tone={v.tone}>{v.label}</Badge>
+                <span className={cn("shrink-0 text-[13px]", toneText(v.tone))}>{v.label}</span>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted">
                 <span>{REQ_FIELD[r.kind] ?? r.kind}</span>
-                {r.brain_claim_ids.length ? <span>브레인 근거 {r.brain_claim_ids.length}</span> : <span>브레인 근거 없음</span>}
+                {r.brain_claim_ids.length ? (
+                  <span>브레인 근거 {r.brain_claim_ids.length}</span>
+                ) : (
+                  <span>브레인 근거 없음</span>
+                )}
                 {r.document_terms.length ? <span>문서: {r.document_terms.join(", ")}</span> : null}
-                {r.verdict === "met_visible" ? <span>{r.linked ? "문단에 근거 연결됨" : "문단에 근거 연결 안 됨"}</span> : null}
+                {r.verdict === "met_visible" ? (
+                  <span>{r.linked ? "문단에 근거 연결됨" : "문단에 근거 연결 안 됨"}</span>
+                ) : null}
               </div>
               {!compact || r.verdict !== "met_visible" ? <p className="mt-0.5 text-xs">{r.suggestion}</p> : null}
             </li>
           );
         })}
       </ul>
-      <p className="text-xs text-muted">단어 일치로 본 판정입니다. 합격 가능성이 아니라 근거가 문서에 보이는지를 봅니다.</p>
+      <p className="mt-2 text-xs text-muted">
+        단어 일치로 본 판정입니다. 합격 가능성이 아니라 근거가 문서에 보이는지를 봅니다.
+      </p>
     </div>
   );
 }
@@ -294,7 +330,7 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
   });
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="문서 추가">
-      <div className="mb-3 inline-flex rounded-lg border border-line bg-surface p-0.5" role="radiogroup">
+      <div className="mb-4 inline-flex rounded-md border border-line p-0.5" role="radiogroup" aria-label="추가 방법">
         {(
           [
             ["new", "새로 쓰기"],
@@ -308,8 +344,8 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
             onClick={() => setMode(v)}
             className={
               mode === v
-                ? "rounded-md bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-fg"
-                : "rounded-md px-3 py-1.5 text-[13px] text-muted hover:text-fg"
+                ? "h-9 rounded bg-accent px-3 text-[13px] font-medium text-accent-fg"
+                : "h-9 rounded px-3 text-[13px] text-muted hover:text-fg"
             }
           >
             {label}
@@ -317,22 +353,22 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
         ))}
       </div>
       {mode === "copy" ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs text-muted">
-            공용 문서의 최신 revision 을 이 지원의 새 문서로 복사합니다. 근거 연결도 같이 옮기고, 출처(문서·revision)를 남깁니다.
-            복사한 뒤 원본을 고쳐도 이 문서는 바뀌지 않습니다.
+            공용 문서의 최신 revision 을 이 지원의 새 문서로 복사합니다. 근거 연결도 같이 옮기고, 출처(문서·revision)를
+            남깁니다. 복사한 뒤 원본을 고쳐도 이 문서는 바뀌지 않습니다.
           </p>
           <Loaded query={shared}>
             {(docs) =>
               docs.filter((d) => d.current_revision > 0).length ? (
-                <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                <ul className="divide-y divide-line border-y border-line">
                   {docs
                     .filter((d) => d.current_revision > 0)
                     .map((d) => (
-                      <li key={d.id} className="flex items-center gap-2 px-3 py-2">
+                      <li key={d.id} className="flex items-center gap-3 py-2.5">
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px] font-medium">{d.title}</span>
-                          <span className="text-xs text-muted">
+                          <span className="text-xs text-muted tabular-nums">
                             {DOC_KIND[d.kind]} · r{d.current_revision} · {countLine(d.counts)}
                           </span>
                         </span>
@@ -345,7 +381,7 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
               ) : (
                 <EmptyState>
                   저장한 공용 문서가 없습니다.{" "}
-                  <Link to="/documents" className="text-accent hover:underline">
+                  <Link to="/documents" className="text-fg underline underline-offset-2">
                     공용 문서 만들기
                   </Link>
                 </EmptyState>
@@ -355,60 +391,66 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
           <ErrorText error={copy.error} />
         </div>
       ) : (
-      <form
-        className="space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add.mutate();
-        }}
-      >
-        <div>
-          <Label htmlFor="doc-kind">종류</Label>
-          <Select id="doc-kind" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as DocumentKind })}>
-            {KINDS.map((k) => (
-              <option key={k} value={k}>
-                {DOC_KIND[k]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="doc-title">제목</Label>
-          <Input
-            id="doc-title"
-            value={form.title}
-            maxLength={300}
-            placeholder={DOC_KIND[form.kind]}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-          />
-        </div>
-        <div>
-          <Label htmlFor="doc-prompt">문항·안내 (선택)</Label>
-          <Textarea
-            id="doc-prompt"
-            value={form.prompt}
-            maxLength={2000}
-            placeholder="예: 협업 경험을 작성해 주세요. (공백 제외 700자)"
-            onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-          />
-          <p className="mt-1 text-xs text-muted">"공백 제외", "1000byte", "한글 2byte" 같은 문구에서 세는 기준을 읽습니다.</p>
-        </div>
-        <div>
-          <Label htmlFor="doc-limit">글자 제한 (선택)</Label>
-          <Input
-            id="doc-limit"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            value={form.limit}
-            onChange={(e) => setForm({ ...form, limit: e.target.value })}
-          />
-        </div>
-        <ErrorText error={add.error} />
-        <Button type="submit" variant="primary" disabled={add.isPending}>
-          추가
-        </Button>
-      </form>
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add.mutate();
+          }}
+        >
+          <div>
+            <Label htmlFor="doc-kind">종류</Label>
+            <Select
+              id="doc-kind"
+              value={form.kind}
+              onChange={(e) => setForm({ ...form, kind: e.target.value as DocumentKind })}
+            >
+              {KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {DOC_KIND[k]}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="doc-title">제목</Label>
+            <Input
+              id="doc-title"
+              value={form.title}
+              maxLength={300}
+              placeholder={DOC_KIND[form.kind]}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+          </div>
+          <div>
+            <Label htmlFor="doc-prompt">문항·안내 (선택)</Label>
+            <Textarea
+              id="doc-prompt"
+              value={form.prompt}
+              maxLength={2000}
+              placeholder="예: 협업 경험을 작성해 주세요. (공백 제외 700자)"
+              onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-muted">
+              "공백 제외", "1000byte", "한글 2byte" 같은 문구에서 세는 기준을 읽습니다.
+            </p>
+          </div>
+          <div>
+            <Label htmlFor="doc-limit">글자 제한 (선택)</Label>
+            <Input
+              id="doc-limit"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={form.limit}
+              onChange={(e) => setForm({ ...form, limit: e.target.value })}
+            />
+          </div>
+          <ErrorText error={add.error} />
+          <Button type="submit" variant="primary" disabled={add.isPending}>
+            추가
+          </Button>
+        </form>
       )}
     </Sheet>
   );
@@ -452,7 +494,10 @@ function SubmitDialog({
     },
     onError: (err) => {
       // 확인한 뒤 글이 바뀌어 경고가 달라졌으면 새 경고를 다시 보여 준다
-      if (err instanceof ApiError && (err.detail as SensitiveUnacknowledgedDetail | null)?.code === "sensitive_unacknowledged")
+      if (
+        err instanceof ApiError &&
+        (err.detail as SensitiveUnacknowledgedDetail | null)?.code === "sensitive_unacknowledged"
+      )
         void sensitive.refetch();
     },
   });
@@ -484,45 +529,54 @@ function SubmitDialog({
       confirmDisabled={!filled.length || sensitive.isPending || sensitive.isError || (needsAck && !ack)}
       onConfirm={() => submit.mutate()}
     >
-      <ul className="space-y-2">
+      <ul className="divide-y divide-line border-y border-line">
         {filled.map((d) => (
-          <li key={d.id} className="rounded-md border border-line px-2.5 py-2">
-            <div className="flex items-start gap-2">
-              <span className="min-w-0 flex-1 text-[13px] font-medium">{d.title}</span>
-              <Badge tone="neutral">r{d.current_revision}</Badge>
+          <li key={d.id} className="flex items-start gap-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium">{d.title}</div>
+              <div className="text-xs text-muted tabular-nums">
+                r{d.current_revision} · {countLine(d.counts)}
+              </div>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted">
-              <span>{countLine(d.counts)}</span>
-              {d.counts?.over_char_limit || d.counts?.over_byte_limit ? <Badge tone="danger">분량 초과</Badge> : null}
-              {summaryBadges(byDoc.get(d.id)?.summary)}
+            <div className="max-w-[45%] shrink-0 text-right">
+              <Flags
+                items={[
+                  ...(d.counts?.over_char_limit || d.counts?.over_byte_limit
+                    ? [{ key: "over", label: "분량 초과", tone: "danger" as const }]
+                    : []),
+                  ...summaryFlags(byDoc.get(d.id)?.summary),
+                ]}
+              />
             </div>
           </li>
         ))}
       </ul>
       {empty.length ? (
-        <p className="mt-2 text-xs text-warn">
+        <p className="mt-2 text-xs font-medium">
           글이 없는 문서 {empty.length}개({empty.map((d) => d.title).join(", ")})는 제출본에 넣지 않습니다.
         </p>
       ) : null}
       {!filled.length ? <p className="mt-2 text-xs text-danger">저장한 글이 없어 고정할 수 없습니다.</p> : null}
       <ErrorText error={sensitive.error} className="mt-2" />
       {needsAck && sensitive.data ? (
-        <div className="mt-3 rounded-lg border border-danger/40 bg-danger-soft px-3 py-2.5 text-[13px]">
+        <div className="mt-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2.5 text-[13px]">
           <p className="flex items-center gap-1.5 font-semibold text-danger">
             <ShieldAlert size={15} /> 민감 정보 경고 {sensitive.data.findings.length}개
           </p>
           <ul className="mt-1.5 space-y-1">
             {sensitive.data.findings.map((f, i) => (
               <li key={`${f.document_id}-${f.code}-${i}`} className="text-fg">
-                <Badge tone="danger">{FINDING[f.code]?.label ?? f.code}</Badge> <span className="text-xs text-muted">{f.title}</span>
+                <span className="font-medium text-danger">{FINDING[f.code]?.label ?? f.code}</span>{" "}
+                <span className="text-xs text-muted">{f.title}</span>
                 <span className="block text-xs">{f.message}</span>
               </li>
             ))}
           </ul>
           <p className="mt-1.5 text-xs text-muted">
-            아무것도 자동으로 지우지 않습니다. 고치려면 창을 닫고 문서를 고친 뒤 저장하세요. 본인 연락처는 설정에 적어 두면 경고하지 않습니다.
+            아무것도 자동으로 지우지 않습니다. 고치려면 창을 닫고 문서를 고친 뒤 저장하세요. 본인 연락처는 설정에 적어
+            두면 경고하지 않습니다.
           </p>
-          <label className="mt-2 flex items-start gap-2">
+          <label className="mt-2 flex min-h-9 items-start gap-2 py-1">
             <input type="checkbox" className="mt-1" checked={ack} onChange={(e) => setAck(e.target.checked)} />
             <span>위 내용을 확인했고 이대로 제출본에 넣습니다.</span>
           </label>
@@ -530,7 +584,13 @@ function SubmitDialog({
       ) : null}
       <div className="mt-3">
         <Label htmlFor="submit-note">메모 (선택)</Label>
-        <Input id="submit-note" value={note} maxLength={2000} onChange={(e) => setNote(e.target.value)} placeholder="예: 채용 사이트에 붙여넣어 제출함" />
+        <Input
+          id="submit-note"
+          value={note}
+          maxLength={2000}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="예: 채용 사이트에 붙여넣어 제출함"
+        />
       </div>
       {stale ? (
         <p role="alert" className="mt-2 text-[13px] text-danger">
@@ -546,7 +606,11 @@ function SubmitDialog({
 function StatusSheet({ app, open, onClose }: { app: Application; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const options: ("passed" | "rejected" | "withdrawn")[] =
-    app.status === "draft" ? ["withdrawn"] : app.status === "submitted" ? ["passed", "rejected", "withdrawn"] : ["rejected", "withdrawn"];
+    app.status === "draft"
+      ? ["withdrawn"]
+      : app.status === "submitted"
+        ? ["passed", "rejected", "withdrawn"]
+        : ["rejected", "withdrawn"];
   const [value, setValue] = useState(options[0]!);
   const [note, setNote] = useState(app.result_note ?? "");
   const save = useMutation({
@@ -594,19 +658,20 @@ function FrozenView({ app }: { app: Application }) {
     staleTime: Infinity,
   });
   const [exporting, setExporting] = useState(false);
-  if (!app.submission_id)
-    return <EmptyState>제출본 없이 끝난 지원입니다 (제출 전 철회).</EmptyState>;
+  if (!app.submission_id) return <EmptyState>제출본 없이 끝난 지원입니다 (제출 전 철회).</EmptyState>;
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <StagesSection app={app} />
-      <div className="space-y-3">
-        <div className="flex justify-end">
-          <Button size="sm" onClick={() => setExporting(true)}>
-            <Download size={14} /> 제출본 내보내기
+      <Section
+        title="제출본"
+        action={
+          <Button size="sm" variant="ghost" onClick={() => setExporting(true)}>
+            <Download size={14} /> 내보내기
           </Button>
-        </div>
+        }
+      >
         <Loaded query={q}>{(sub) => <SubmissionBody sub={sub} />}</Loaded>
-      </div>
+      </Section>
       <ExportSheet
         open={exporting}
         onClose={() => setExporting(false)}
@@ -625,7 +690,6 @@ function FrozenView({ app }: { app: Application }) {
 
 const STAGE_KINDS: StageKind[] = ["document", "test", "assignment", "interview", "final", "other"];
 const STAGE_OUTCOMES: StageOutcome[] = ["pending", "passed", "failed", "withdrawn", "cancelled"];
-
 
 /**
  * 제출 뒤 전형 단계와 결과를 기록한다. 결과만 적고, 왜 떨어졌는지 같은 원인은 시스템이 판단하지 않는다.
@@ -647,25 +711,24 @@ function StagesSection({ app }: { app: Application }) {
       <Loaded query={q}>
         {(stages) =>
           stages.length ? (
-            <ol className="relative ml-2 space-y-3 border-l border-line pl-4">
+            <ol className="divide-y divide-line border-t border-line">
               {stages.map((st) => {
                 const o = STAGE_OUTCOME[st.outcome];
+                const meta = [st.scheduled_at ? formatDateTime(st.scheduled_at) : null, st.note].filter(Boolean);
                 return (
-                  <li key={st.id} className="relative">
-                    <span
-                      className={
-                        st.outcome === "pending"
-                          ? "absolute top-1.5 -left-[21px] h-2.5 w-2.5 rounded-full border-2 border-accent bg-surface"
-                          : "absolute top-1.5 -left-[21px] h-2.5 w-2.5 rounded-full bg-muted"
-                      }
-                    />
-                    <button className="w-full text-left" onClick={() => setEditing(st)}>
-                      <span className="flex flex-wrap items-center gap-1.5 text-[13px]">
-                        <span className="font-medium">{st.name}</span>
-                        <Badge tone={o.tone}>{o.label}</Badge>
-                        {st.scheduled_at ? <span className="text-xs text-muted">{formatDateTime(st.scheduled_at)}</span> : null}
+                  <li key={st.id}>
+                    <button
+                      type="button"
+                      className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-4 rounded-md px-2 py-3 text-left transition-colors duration-150 hover:bg-subtle/60"
+                      onClick={() => setEditing(st)}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium">{st.name}</span>
+                        {meta.length ? (
+                          <span className="block text-[13px] text-muted tabular-nums">{meta.join(" · ")}</span>
+                        ) : null}
                       </span>
-                      {st.note ? <span className="block text-xs text-muted">{st.note}</span> : null}
+                      <span className={cn("shrink-0 text-[13px]", toneText(o.tone))}>{o.label}</span>
                     </button>
                   </li>
                 );
@@ -676,7 +739,9 @@ function StagesSection({ app }: { app: Application }) {
           )
         }
       </Loaded>
-      <p className="mt-2 text-xs text-muted">결과만 기록합니다. 원인은 판단하지 않고, 지원 상태도 자동으로 바꾸지 않습니다.</p>
+      <p className="mt-3 text-xs text-muted">
+        결과만 기록합니다. 원인은 판단하지 않고, 지원 상태도 자동으로 바꾸지 않습니다.
+      </p>
       <StageSheet
         appId={app.id}
         stage={editing}
@@ -753,7 +818,11 @@ function StageSheet({
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Label htmlFor="stg-kind">종류</Label>
-            <Select id="stg-kind" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as StageKind })}>
+            <Select
+              id="stg-kind"
+              value={form.kind}
+              onChange={(e) => setForm({ ...form, kind: e.target.value as StageKind })}
+            >
               {STAGE_KINDS.map((k) => (
                 <option key={k} value={k}>
                   {STAGE_KIND[k]}
@@ -763,7 +832,11 @@ function StageSheet({
           </div>
           <div>
             <Label htmlFor="stg-outcome">결과</Label>
-            <Select id="stg-outcome" value={form.outcome} onChange={(e) => setForm({ ...form, outcome: e.target.value as StageOutcome })}>
+            <Select
+              id="stg-outcome"
+              value={form.outcome}
+              onChange={(e) => setForm({ ...form, outcome: e.target.value as StageOutcome })}
+            >
               {STAGE_OUTCOMES.map((o) => (
                 <option key={o} value={o}>
                   {STAGE_OUTCOME[o].label}
@@ -784,11 +857,21 @@ function StageSheet({
         </div>
         <div>
           <Label htmlFor="stg-at">일정 (선택)</Label>
-          <Input id="stg-at" type="datetime-local" value={form.scheduled} onChange={(e) => setForm({ ...form, scheduled: e.target.value })} />
+          <Input
+            id="stg-at"
+            type="datetime-local"
+            value={form.scheduled}
+            onChange={(e) => setForm({ ...form, scheduled: e.target.value })}
+          />
         </div>
         <div>
           <Label htmlFor="stg-note">메모 (선택)</Label>
-          <Textarea id="stg-note" value={form.note} maxLength={2000} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          <Textarea
+            id="stg-note"
+            value={form.note}
+            maxLength={2000}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+          />
         </div>
         <ErrorText error={save.error ?? remove.error} />
         <div className="flex flex-wrap gap-2">
@@ -808,35 +891,38 @@ function StageSheet({
 
 function SubmissionBody({ sub }: { sub: Submission }) {
   return (
-    <div className="space-y-6">
-      <div className="rounded-lg border border-line bg-subtle/60 px-3 py-2.5 text-[13px]">
-        <p className="flex flex-wrap items-center gap-1.5 font-medium">
-          <Lock size={14} /> 제출본 · {formatDateTime(sub.submitted_at)} 고정
+    <div className="space-y-10">
+      <div className="space-y-1 text-[13px] text-muted">
+        <p className="flex flex-wrap items-center gap-1.5 font-medium text-fg tabular-nums">
+          <Lock size={14} /> {formatDateTime(sub.submitted_at)} 고정
         </p>
-        <p className="mt-1 text-xs break-all text-muted">내용 해시 {sub.content_hash}</p>
-        {sub.note ? <p className="mt-1 text-xs">메모: {sub.note}</p> : null}
+        <p className="text-xs break-all">내용 해시 {sub.content_hash}</p>
+        {sub.note ? <p className="text-fg">메모: {sub.note}</p> : null}
         {sub.posting.pending_changes?.length ? (
-          <p className="mt-1 text-xs text-warn">고정 당시 확인하지 않은 공고 변경: {sub.posting.pending_changes.join(", ")}</p>
+          <p className="font-medium text-fg">
+            고정 당시 확인하지 않은 공고 변경: {sub.posting.pending_changes.join(", ")}
+          </p>
         ) : null}
-        <p className="mt-1 text-xs text-muted">이후 경력·공고를 고쳐도 이 내용은 바뀌지 않습니다.</p>
+        <p>이후 경력·공고를 고쳐도 이 내용은 바뀌지 않습니다.</p>
       </div>
       {sub.documents.map((d) => (
-        <section key={d.document_id} className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-[15px] font-semibold">{d.title}</h2>
-            <Badge tone="neutral">r{d.revision_no}</Badge>
-            <span className="text-xs text-muted">{countLine(d.counts)}</span>
+        <section key={d.document_id} className="space-y-3 border-t border-line pt-4">
+          <div>
+            <h3 className="text-sm font-semibold">{d.title}</h3>
+            <p className="text-[13px] text-muted tabular-nums">
+              r{d.revision_no} · {countLine(d.counts)}
+            </p>
+            {d.question_prompt ? <p className="mt-1 text-[13px] text-muted">{d.question_prompt}</p> : null}
           </div>
-          {d.question_prompt ? <p className="text-xs text-muted">{d.question_prompt}</p> : null}
-          <article className="rounded-lg border border-line bg-surface p-4 text-base leading-8 whitespace-pre-wrap">
-            {d.text}
-          </article>
+          <article className="text-base leading-8 whitespace-pre-wrap">{d.text}</article>
           {d.evidence.length ? (
             <details className="text-[13px]">
-              <summary className="cursor-pointer text-muted">제출 당시 근거 {d.evidence.length}개</summary>
-              <ul className="mt-2 space-y-1.5">
+              <summary className="cursor-pointer py-1 text-muted hover:text-fg">
+                제출 당시 근거 {d.evidence.length}개
+              </summary>
+              <ul className="mt-2 divide-y divide-line border-t border-line">
                 {d.evidence.map((e) => (
-                  <li key={e.claim_id} className="flex items-start gap-2 rounded-md border border-line px-2.5 py-1.5">
+                  <li key={e.claim_id} className="flex items-start gap-3 py-2">
                     <span className="min-w-0 flex-1">
                       {e.statement}
                       <span className="block text-xs text-muted">{e.experience.title}</span>
