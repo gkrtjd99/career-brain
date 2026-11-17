@@ -51,7 +51,7 @@ packages/core         career_core
   jobs/                 worker, lease, 깨우기, 주기 유지보수
   workflows/            여러 단계 실행(일괄 수정안·인터뷰 질문), 재시작 후 이어감
   llm/                  모델 게이트웨이, 단가표, 제공자 설정
-  adapters/             파서(텍스트·HTML·PDF·DOCX), 웹 가져오기, 채용 시스템, 임베딩, 암호화
+  adapters/             파서(텍스트·HTML·PDF·DOCX·PPTX·XLSX·HWPX), 웹 가져오기, 채용 시스템, 임베딩, 암호화
   db/ · migrations/     SQLAlchemy 모델, Alembic (core c00NN, personal p00NN)
   evals/                합성 평가 세트 (검색·임베딩·판정·한국어)
 packages/client       TS API 클라이언트

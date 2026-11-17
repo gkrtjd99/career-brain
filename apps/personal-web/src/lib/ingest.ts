@@ -65,9 +65,11 @@ export const KIND_LABEL: Record<IngestKind, string> = {
 };
 
 export const ACCEPT =
-  ".pdf,.docx,.png,.jpg,.jpeg,.txt,.md,.html,application/pdf," +
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/png,image/jpeg," +
-  "text/plain,text/markdown,text/html";
+  ".pdf,.docx,.pptx,.xlsx,.hwpx,.hwp,.png,.jpg,.jpeg,.txt,.md,.html,application/pdf," +
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document," +
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation," +
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet," +
+  "application/hwp+zip,application/x-hwp,image/png,image/jpeg,text/plain,text/markdown,text/html";
 const TEXT_LIKE = /\.(txt|md|markdown|html?)$/i;
 const IMAGE = /^image\/(png|jpe?g)$/i;
 const HEAD_CHARS = 2000;
@@ -349,7 +351,7 @@ async function afterParse(id: string, sourceId: string, versionId?: string) {
   if (parse?.read_by === "device" || parse?.read_by === "model") patch(id, { readBy: parse.read_by });
   else if (parse?.read_by) patch(id, { readBy: it.readBy ?? "server" });
 
-  // PDF·DOCX는 서버가 읽은 글로 한 번 더 고른다 (이름으로 확신하지 못했을 때만)
+  // PDF·DOCX·PPTX·XLSX·HWPX는 서버가 읽은 글로 한 번 더 고른다 (이름으로 확신하지 못했을 때만)
   if (src.purpose_pending && !it.picked && parse && parse.status !== "failed") {
     const blocks = await api.blocks(parse.run_id).catch(() => []);
     const head = maskResidentNumbers(blocks.map((b) => b.text).join("\n").slice(0, HEAD_CHARS));
@@ -531,7 +533,7 @@ function failNote(err: unknown): string {
   if (err instanceof ApiError) {
     const code = err.code ?? "";
     const known: Record<string, string> = {
-      unsupported_type: "PDF·DOCX·PNG·JPEG·텍스트·Markdown·HTML만 넣을 수 있습니다",
+      unsupported_type: "PDF·DOCX·PPTX·XLSX·한글·사진·텍스트만 넣을 수 있습니다",
       mime_mismatch: "파일 내용과 확장자가 맞지 않습니다",
       empty: "빈 파일입니다",
       too_large: "파일이 너무 큽니다",
@@ -559,6 +561,10 @@ export function parseFailNote(code: string | null | undefined, mime?: string): s
     encrypted: "암호가 걸린 파일입니다",
     malformed: "파일이 깨져 읽지 못했습니다",
     too_many_pages: "쪽이 너무 많습니다 (300쪽까지)",
+    too_many_blocks: "글이 너무 많아 읽지 못했습니다",
+    file_too_large: "파일 안의 내용이 너무 커서 읽지 못했습니다",
+    file_too_complex: "파일 구성이 너무 복잡해 읽지 못했습니다",
+    hwp_unsupported: "한글 97 형식(.hwp)은 아직 읽지 못합니다. 한글에서 HWPX나 PDF로 저장해 넣어 주세요.",
     unsupported_type: "이 형식은 읽지 못합니다",
   };
   if (code?.startsWith("model_ocr_denied")) return "연결된 모델이 이 자료를 받지 않습니다";

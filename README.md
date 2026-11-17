@@ -17,7 +17,7 @@
 
 | 영역 | 하는 일 |
 |---|---|
-| 브레인 | 이력서·문서(텍스트·HTML·PDF·DOCX)를 올리면 파싱해 원문 위치까지 남긴다. 경험·주장(claim)은 원문 인용 근거와 함께 저장되고, 사람이 확인해야 사실이 된다. 인터뷰형 질문으로 경험을 정리한다. |
+| 브레인 | 이력서·문서(텍스트·HTML·PDF·DOCX·PPTX·XLSX·HWPX)를 올리면 파싱해 원문 위치까지 남긴다. 경험·주장(claim)은 원문 인용 근거와 함께 저장되고, 사람이 확인해야 사실이 된다. 인터뷰형 질문으로 경험을 정리한다. |
 | 검색 | 키워드(pg_trgm) + 선택 의미 검색(OpenAI 또는 로컬 임베딩)을 RRF로 합친다. 기술명 별칭(쿠버네티스 ↔ Kubernetes)도 찾는다. 공간 밖 결과 0건. |
 | 공고 | 붙여넣은 URL만 가져온다 (내부 주소 차단, 쿠키 없음). 구조화 데이터 → 채용 시스템 어댑터 → 인용 검증 LLM 순으로 추출. 무변경 재수집은 버전을 만들지 않는다. |
 | 지원·문서 | 문항별 문서, 근거 연결, 코드가 센 글자·바이트 수, 범용 문장·다른 회사 문장·근거 없는 서술·요건 가시성·숨김 글 검사, 사실을 바꾸지 못하는 AI 수정안, 불변 제출본. |
@@ -100,7 +100,7 @@ npm run dev                                    # 웹 (http://localhost:5173, /ap
 
 ## English
 
-A self-hosted career "second brain" for one person. Upload your resume and documents (text, HTML, PDF, DOCX); career-brain parses them, keeps the exact source location of every quote, and lets you build **experiences and claims backed by evidence** — nothing an AI extracts counts as fact until you confirm it.
+A self-hosted career "second brain" for one person. Upload your resume and documents (text, HTML, PDF, DOCX, PPTX, XLSX, HWPX); career-brain parses them, keeps the exact source location of every quote, and lets you build **experiences and claims backed by evidence** — nothing an AI extracts counts as fact until you confirm it.
 
 On top of that: hybrid keyword + semantic search, job postings saved from URLs you paste (structured data → ATS adapters → citation-checked LLM extraction), per-question application documents with deterministic checks (character/byte counts, generic or copied-from-another-company sentences, unsupported statements, requirement visibility, hidden text), AI suggestions that cannot change facts, study tracking for posting requirements, resumable runs with human-only approvals, and an MCP server so AI clients (Claude Code, Claude Desktop, …) can work with the same permissions as the web UI.
 

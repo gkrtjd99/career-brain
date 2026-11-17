@@ -1,4 +1,5 @@
 """로컬 추출기. 외부 전송 없이 텍스트·HTML·텍스트 PDF·DOCX를 블록으로 나눈다.
+PPTX·XLSX·HWPX와 옛 한글(.hwp) 안내는 ``adapters.office_parsers`` (2026-11-17).
 
 스캔 PDF·이미지처럼 텍스트가 없는 쪽은 추출하지 않고 ``pages_with_text``에서 빠진다
 (부분 파싱으로 표시되고, 허용된 경우에만 외부 OCR로 넘어간다).
@@ -16,9 +17,15 @@ from html.parser import HTMLParser
 from typing import ClassVar
 from xml.etree import ElementTree as ET
 
+from career_core.adapters.office_parsers import (
+    HwpUnsupportedParser,
+    HwpxTextParser,
+    PptxTextParser,
+    XlsxTextParser,
+)
 from career_core.domain import docx_zip
 from career_core.ports import LocalParser, LocalParseResult, ParsedBlock, ParseError
-from career_core.uploads import DOCX_MIME
+from career_core.uploads import DOCX_MIME, HWP_MIME, HWPX_MIME, PPTX_MIME, XLSX_MIME
 
 MAX_PDF_PAGES = 300
 _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
@@ -281,6 +288,10 @@ def default_local_parsers() -> Mapping[str, LocalParser]:
         "text/html": HtmlTextParser(),
         "application/pdf": PdfTextParser(),
         DOCX_MIME: DocxTextParser(),
+        PPTX_MIME: PptxTextParser(),
+        XLSX_MIME: XlsxTextParser(),
+        HWPX_MIME: HwpxTextParser(),
+        HWP_MIME: HwpUnsupportedParser(),
         "image/png": image,
         "image/jpeg": image,
     }
