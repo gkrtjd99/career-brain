@@ -70,6 +70,8 @@ embed = "openai/text-embedding-3-large"
 # 판정 모델 (참고 의견만: 자동 연결·충족 판정 없음). 없으면 기준선(검색 점수·단어 일치)만. default로 넘어가지 않는다.
 # judge_claim = "claude/claude-haiku-5-5"        # 학습 연결 후보: "이 주장이 요건을 보여 주는가" + 이유
 # judge_visibility = "claude/claude-haiku-5-5"   # 지원 문서 요건 가시성 + 문서 속 인용
+# 지원 준비 문서: 검색 후보 안에서 문항마다 쓸 경험을 고르고 이유를 쓴다(글은 쓰지 않음). 없으면 default.
+# application_prep = "claude/claude-sonnet-5-5"
 
 [embedding]
 dimensions = 1024  # OpenAI text-embedding-3만. 3-large는 1024와 3072의 정확도가 같고, pgvector HNSW 색인은 2000차원까지.

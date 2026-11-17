@@ -13,6 +13,10 @@ export interface DraftBlock {
   claim_ids: string[];
   /** 문장 단위 근거. 위치 대신 가리키는 글(quote)을 들고 있다가 저장할 때 위치를 다시 찾는다. */
   spans?: DraftSpan[];
+  /** 지원 준비에서 고른 경험으로 만든 빈 문단이면 그 경험 ID. 글이 없으면 저장하지 않는다 (화면에만). */
+  scaffoldOf?: string;
+  /** 빈 문단 안내 (예: 어떤 경험으로 쓸지) */
+  hint?: string;
 }
 
 export interface DraftSpan {
@@ -293,7 +297,8 @@ export function BlockEditor({
               readOnly={readOnly}
               label={`문단 ${i + 1}`}
               placeholder={
-                i === 0 && blocks.length === 1 ? "직접 쓴 문장으로 시작합니다. AI는 먼저 쓰지 않습니다." : undefined
+                b.hint ??
+                (i === 0 && blocks.length === 1 ? "직접 쓴 문장으로 시작합니다. AI는 먼저 쓰지 않습니다." : undefined)
               }
               onChange={(v) => update(i, { text: v })}
               onKeyDown={onKeyDown(i)}
@@ -314,15 +319,18 @@ export function BlockEditor({
                 return (
                   <span
                     key={cid}
-                    className="inline-flex max-w-full items-center gap-1 rounded border border-line px-1.5 py-0.5 text-xs"
+                    className="group/chip inline-flex max-w-full items-start gap-1 rounded border border-line py-0.5 pr-0.5 pl-1.5 text-xs"
                     title={c?.statement}
                   >
                     {c ? <StatusBadge status={c.status} /> : <Badge tone="none">근거</Badge>}
-                    <span className="max-w-[14rem] truncate">{c?.statement ?? "불러오는 중"}</span>
+                    {/* 두 줄까지 보이고, 가리키거나 포커스가 오면 문장 전체를 보인다. 읽기 프로그램은 늘 전체를 읽는다. */}
+                    <span className="line-clamp-2 min-w-0 py-0.5 leading-4 break-words group-focus-within/chip:line-clamp-none group-hover/chip:line-clamp-none">
+                      {c?.statement ?? "불러오는 중"}
+                    </span>
                     {!readOnly ? (
                       <button
-                        aria-label="근거 연결 해제"
-                        className="rounded p-0.5 text-muted hover:text-danger"
+                        aria-label={`근거 연결 해제: ${c?.statement ?? cid}`}
+                        className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
                         onClick={() => update(i, { claim_ids: b.claim_ids.filter((x) => x !== cid) })}
                       >
                         <X size={12} />
@@ -334,16 +342,18 @@ export function BlockEditor({
               {(b.spans ?? []).map((sp, si) => (
                 <span
                   key={`sp-${si}`}
-                  className="inline-flex max-w-full items-center gap-1 rounded border border-line px-1.5 py-0.5 text-xs"
+                  className="group/chip inline-flex max-w-full items-start gap-1 rounded border border-line py-0.5 pr-0.5 pl-1.5 text-xs"
                   title={sp.claim_ids.map((c) => claims.get(c)?.statement ?? c).join("\n")}
                 >
-                  <Quote size={11} className="shrink-0 text-muted" />
-                  <span className="max-w-[12rem] truncate">“{sp.quote}”</span>
-                  <span className="text-muted">근거 {sp.claim_ids.length}</span>
+                  <Quote size={11} className="mt-1 shrink-0 text-muted" />
+                  <span className="line-clamp-2 min-w-0 py-0.5 leading-4 break-words group-focus-within/chip:line-clamp-none group-hover/chip:line-clamp-none">
+                    “{sp.quote}”
+                  </span>
+                  <span className="shrink-0 py-0.5 text-muted">근거 {sp.claim_ids.length}</span>
                   {!readOnly ? (
                     <button
-                      aria-label="문장 근거 해제"
-                      className="rounded p-0.5 text-muted hover:text-danger"
+                      aria-label={`문장 근거 해제: ${sp.quote.slice(0, 40)}`}
+                      className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
                       onClick={() => unlinkSpan(i, b, si)}
                     >
                       <X size={12} />

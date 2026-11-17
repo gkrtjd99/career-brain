@@ -4,11 +4,11 @@
 import type { JudgeVerdict, VisibilityJudge } from "@career-brain/client";
 import { Button, cn, type BadgeTone } from "@career-brain/ui";
 import { useMutation } from "@tanstack/react-query";
-import { Sparkles } from "lucide-react";
+import { ChevronRight, Sparkles } from "lucide-react";
 import { ErrorText } from "../common";
 import { api } from "../../lib/api";
 import { usd } from "../../lib/format";
-import { VISIBILITY } from "../../lib/labels";
+import { visLabel } from "./visibility";
 import { toneText } from "../../pages/Application";
 
 const VERDICT: Record<JudgeVerdict["verdict"], { label: string; tone: BadgeTone }> = {
@@ -26,8 +26,8 @@ const STATUS: Record<string, string> = {
 };
 
 const NOTE: Record<string, string> = {
-  no_route: "models.toml에 judge_visibility 라우트가 없습니다",
-  egress_scope_required: "외부 모델로 보낼 권한(egress)이 없습니다",
+  no_route: "판정 모델을 연결하지 않았습니다 (연결·관리에서 judge_visibility)",
+  egress_scope_required: "이 연결에는 외부 모델로 보낼 권한이 없습니다",
   quote_not_found: "모델이 준 인용을 문서에서 찾지 못해 '판단 어려움'으로 내렸습니다",
 };
 
@@ -77,18 +77,22 @@ export function VisibilityJudgePanel({
   const run = useMutation({ mutationFn: () => api.visibilityJudge(appId, docId) });
   const res: VisibilityJudge | undefined = run.data;
   return (
-    <section className="mt-10 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-[13px] font-semibold">판정 모델 의견 (참고)</h3>
-        <Button size="sm" variant="ghost" className="-mr-2.5" disabled={run.isPending} onClick={() => run.mutate()}>
-          <Sparkles size={13} /> {run.isPending ? "확인하는 중" : res ? "다시 확인" : "판정 모델로 확인"}
-        </Button>
-      </div>
-      <p className="text-xs text-muted">
-        저장한 글을 외부 모델에 보내 “이 문서만 읽고 요건 근거가 보이는가”를 묻습니다. 참고 의견일 뿐 검사 결과·충족을
-        바꾸지 않습니다. 제한 등급 근거가 연결된 문단은 보내지 않습니다.
-        {dirty ? " 저장하지 않은 편집은 보내지 않습니다." : ""}
-      </p>
+    <section className="mt-8 space-y-2">
+      <h3 className="sr-only">판정 모델 의견 (참고)</h3>
+      <Button size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
+        <Sparkles size={13} /> {run.isPending ? "확인하는 중" : res ? "판정 모델로 다시 확인" : "판정 모델로 확인"}
+      </Button>
+      <details className="group text-xs text-muted">
+        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
+          <ChevronRight size={13} className="transition-transform group-open:rotate-90" />
+          무엇을 보내나요
+        </summary>
+        <p className="mt-1 leading-5">
+          저장한 글을 외부 모델에 보내 “이 문서만 읽고 요건 근거가 보이는가”를 묻습니다. 참고 의견일 뿐 검사 결과를
+          바꾸지 않습니다. 이 기기 밖으로 보내지 않는 근거가 연결된 문단은 보내지 않습니다.
+          {dirty ? " 저장하지 않은 편집은 보내지 않습니다." : ""}
+        </p>
+      </details>
       <ErrorText error={run.error} />
       {res ? (
         <>
@@ -107,7 +111,7 @@ export function VisibilityJudgePanel({
               const v = r.judge;
               const at = v?.quote ? locate(blocks, v.quote) : null;
               const no = at ? blockNo(at.id) : null;
-              const base = VISIBILITY[r.baseline_verdict as keyof typeof VISIBILITY];
+              const base = visLabel(r.baseline_verdict);
               return (
                 <li key={`${r.requirement}-${i}`} className="py-2.5 text-[13px]">
                   <p className="font-medium">{r.requirement}</p>
@@ -118,9 +122,9 @@ export function VisibilityJudgePanel({
                       </span>
                     ) : null}
                     <span>
-                      {v ? "· " : ""}기준선: {base?.label ?? r.baseline_verdict}
+                      {v ? "· " : ""}기본 검사: {base.label}
                     </span>
-                    {r.agrees === false ? <span className="font-medium text-fg">· 기준선과 다름</span> : null}
+                    {r.agrees === false ? <span className="font-medium text-fg">· 기본 검사와 다름</span> : null}
                   </p>
                   {v?.quote ? (
                     <p className="mt-1.5 text-xs leading-5">
