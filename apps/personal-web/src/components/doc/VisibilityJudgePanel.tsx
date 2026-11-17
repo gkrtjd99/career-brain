@@ -2,13 +2,14 @@
 // 단어 일치 기준선 옆에 "이 문서만 읽었을 때 요건 근거가 보이는가"와 문서 속 인용을 보인다.
 // 판정은 저장·검사 결과를 바꾸지 않는다. 같은 요건·같은 글이면 서버 캐시(c0022)에서 꺼내 다시 돈을 쓰지 않는다.
 import type { JudgeVerdict, VisibilityJudge } from "@career-brain/client";
-import { Badge, Button, type BadgeTone } from "@career-brain/ui";
+import { Button, cn, type BadgeTone } from "@career-brain/ui";
 import { useMutation } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 import { ErrorText } from "../common";
 import { api } from "../../lib/api";
 import { usd } from "../../lib/format";
 import { VISIBILITY } from "../../lib/labels";
+import { toneText } from "../../pages/Application";
 
 const VERDICT: Record<JudgeVerdict["verdict"], { label: string; tone: BadgeTone }> = {
   yes: { label: "근거 보임", tone: "ok" },
@@ -76,11 +77,11 @@ export function VisibilityJudgePanel({
   const run = useMutation({ mutationFn: () => api.visibilityJudge(appId, docId) });
   const res: VisibilityJudge | undefined = run.data;
   return (
-    <section className="mt-4 space-y-2 rounded-lg border border-dashed border-line px-3 py-2.5">
+    <section className="mt-10 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold">판정 모델 의견 (참고)</h3>
-        <Button size="sm" variant="ghost" disabled={run.isPending} onClick={() => run.mutate()}>
-          <Sparkles size={13} /> {res ? "다시 확인" : "판정 모델로 확인"}
+        <Button size="sm" variant="ghost" className="-mr-2.5" disabled={run.isPending} onClick={() => run.mutate()}>
+          <Sparkles size={13} /> {run.isPending ? "확인하는 중" : res ? "다시 확인" : "판정 모델로 확인"}
         </Button>
       </div>
       <p className="text-xs text-muted">
@@ -91,7 +92,7 @@ export function VisibilityJudgePanel({
       <ErrorText error={run.error} />
       {res ? (
         <>
-          <p className="text-xs text-muted">
+          <p className="text-xs text-muted tabular-nums">
             {STATUS[res.judge.status] ?? res.judge.status}
             {res.judge.note ? ` — ${NOTE[res.judge.note] ?? res.judge.note}` : ""}
             {res.judge.model ? ` · ${res.judge.model}` : ""}
@@ -101,25 +102,39 @@ export function VisibilityJudgePanel({
             {res.judge.cost_basis === "list_price_equivalent" ? " (구독 환산)" : ""}
             {res.blocks_withheld ? ` · 보내지 않은 문단 ${res.blocks_withheld}개` : ""}
           </p>
-          <ul className="space-y-1.5">
+          <ul className="divide-y divide-line border-t border-line">
             {res.rows.map((r, i) => {
               const v = r.judge;
               const at = v?.quote ? locate(blocks, v.quote) : null;
               const no = at ? blockNo(at.id) : null;
               const base = VISIBILITY[r.baseline_verdict as keyof typeof VISIBILITY];
               return (
-                <li key={`${r.requirement}-${i}`} className="rounded-md border border-line bg-surface px-2.5 py-2 text-[13px]">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="min-w-0 flex-1 font-medium">{r.requirement}</span>
-                    {v ? <Badge tone={VERDICT[v.verdict].tone}>판정 모델: {VERDICT[v.verdict].label}</Badge> : null}
-                    <Badge tone="neutral">기준선: {base?.label ?? r.baseline_verdict}</Badge>
-                    {r.agrees === false ? <Badge tone="warn">기준선과 다름</Badge> : null}
-                  </div>
+                <li key={`${r.requirement}-${i}`} className="py-2.5 text-[13px]">
+                  <p className="font-medium">{r.requirement}</p>
+                  <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-muted">
+                    {v ? (
+                      <span className={cn(toneText(VERDICT[v.verdict].tone))}>
+                        판정 모델: {VERDICT[v.verdict].label}
+                      </span>
+                    ) : null}
+                    <span>
+                      {v ? "· " : ""}기준선: {base?.label ?? r.baseline_verdict}
+                    </span>
+                    {r.agrees === false ? <span className="font-medium text-fg">· 기준선과 다름</span> : null}
+                  </p>
                   {v?.quote ? (
-                    <p className="mt-1 border-l-2 border-warn pl-2 text-xs leading-5">
-                      {at ? <QuoteInContext text={at.text} start={at.start} end={at.end} /> : <mark className="rounded bg-warn-soft px-0.5">{v.quote}</mark>}
+                    <p className="mt-1.5 text-xs leading-5">
+                      {at ? (
+                        <QuoteInContext text={at.text} start={at.start} end={at.end} />
+                      ) : (
+                        <mark className="rounded bg-warn-soft px-0.5 text-fg">{v.quote}</mark>
+                      )}
                       {at && no !== null ? (
-                        <button className="ml-1.5 text-accent hover:underline" onClick={() => onJump(at.id)}>
+                        <button
+                          type="button"
+                          className="ml-1.5 text-muted underline underline-offset-2 hover:text-fg"
+                          onClick={() => onJump(at.id)}
+                        >
                           문단 {no + 1}
                         </button>
                       ) : null}
@@ -127,7 +142,9 @@ export function VisibilityJudgePanel({
                   ) : null}
                   {v?.reason ? <p className="mt-1 text-xs text-muted">{v.reason}</p> : null}
                   {v?.note ? <p className="mt-1 text-xs text-muted">{NOTE[v.note] ?? v.note}</p> : null}
-                  {!v && res.judge.status !== "unavailable" ? <p className="mt-1 text-xs text-muted">이 요건에는 의견이 없습니다.</p> : null}
+                  {!v && res.judge.status !== "unavailable" ? (
+                    <p className="mt-1 text-xs text-muted">이 요건에는 의견이 없습니다.</p>
+                  ) : null}
                 </li>
               );
             })}

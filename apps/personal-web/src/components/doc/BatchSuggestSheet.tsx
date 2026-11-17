@@ -114,7 +114,8 @@ function BatchSuggestSheet({
               <p>
                 수정안 {result?.proposed ?? 0}개
                 {result?.rejected ? ` · 사실 변경 등으로 거부 ${result.rejected}개` : ""}
-                {result?.questions ? ` · AI가 물어본 것 ${result.questions}개` : ""}. 적용은 AI 수정안 탭에서 하나씩 고릅니다.
+                {result?.questions ? ` · AI가 물어본 것 ${result.questions}개` : ""}. 적용은 AI 수정안 탭에서 하나씩
+                고릅니다.
               </p>
               <Button variant="primary" size="sm" onClick={onShowSuggestions}>
                 AI 수정안 탭에서 보기
@@ -131,17 +132,18 @@ function BatchSuggestSheet({
           }}
         >
           <p className="text-[13px] text-muted">
-            고른 문단마다 한 번씩 AI에게 수정안을 요청합니다. 문단 글을 모델로 보내며 비용이 듭니다 (제한 자료 근거는 보내지
-            않음). 수정안은 초안이고 문서는 바뀌지 않습니다. 실행 중에 문서를 저장하면 남은 문단은 하지 않고 멈춥니다.
+            고른 문단마다 한 번씩 AI에게 수정안을 요청합니다. 문단 글을 모델로 보내며 비용이 듭니다 (제한 자료 근거는
+            보내지 않음). 수정안은 초안이고 문서는 바뀌지 않습니다. 실행 중에 문서를 저장하면 남은 문단은 하지 않고
+            멈춥니다.
           </p>
           {dirty ? (
-            <p role="alert" className="rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-[13px]">
+            <p role="alert" className="text-[13px] font-medium">
               저장하지 않은 편집이 있습니다. 저장한 r{doc.revision_no} 기준으로만 시작할 수 있습니다 — 먼저 저장하세요.
             </p>
           ) : null}
           <fieldset className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <legend className="text-[13px] font-medium">
+              <legend className="text-[13px] font-medium tabular-nums">
                 문단 {chosen.length}/{blocks.length}
                 {blocks.length > MAX_BLOCKS ? ` (최대 ${MAX_BLOCKS})` : ""}
               </legend>
@@ -159,10 +161,10 @@ function BatchSuggestSheet({
                 </Button>
               </div>
             </div>
-            <ul className="max-h-[40dvh] divide-y divide-line overflow-y-auto rounded-md border border-line">
+            <ul className="-mx-2 max-h-[40dvh] divide-y divide-line overflow-y-auto border-y border-line">
               {blocks.map((b, i) => (
                 <li key={b.id}>
-                  <label className="flex cursor-pointer items-start gap-2 px-3 py-2 text-[13px] hover:bg-subtle/60">
+                  <label className="flex cursor-pointer items-start gap-2 px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
                     <input
                       type="checkbox"
                       className="mt-1"

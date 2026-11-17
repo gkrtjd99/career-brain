@@ -33,7 +33,13 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
   const qc = useQueryClient();
   // 확인할 것이 남은 경험부터 고른다
   const [picked, setPicked] = useState<Set<string>>(
-    () => new Set(experiences.filter((e) => e.needs_review > 0).slice(0, MAX_EXPERIENCES).map((e) => e.id)),
+    () =>
+      new Set(
+        experiences
+          .filter((e) => e.needs_review > 0)
+          .slice(0, MAX_EXPERIENCES)
+          .map((e) => e.id),
+      ),
   );
   const [count, setCount] = useState(3);
   const [runId, setRunId] = useState<string | null>(null);
@@ -79,12 +85,12 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
           }}
         >
           <p className="text-[13px] text-muted">
-            고른 경험마다 인터뷰 세션을 만들고 AI에게 보충 질문을 한 번 요청합니다. 경험의 주장을 모델로 보내며 비용이 듭니다
-            (제한 자료 근거의 주장은 보내지 않음). AI는 질문만 만들고, 답과 주장은 직접 씁니다.
+            고른 경험마다 인터뷰 세션을 만들고 AI에게 보충 질문을 한 번 요청합니다. 경험의 주장을 모델로 보내며 비용이
+            듭니다 (제한 자료 근거의 주장은 보내지 않음). AI는 질문만 만들고, 답과 주장은 직접 씁니다.
           </p>
           <fieldset className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <legend className="text-[13px] font-medium">
+              <legend className="text-[13px] font-medium tabular-nums">
                 경험 {chosen.length}/{experiences.length}
                 {experiences.length > MAX_EXPERIENCES ? ` (최대 ${MAX_EXPERIENCES})` : ""}
               </legend>
@@ -102,21 +108,18 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
                 </Button>
               </div>
             </div>
-            <ul className="max-h-[40dvh] divide-y divide-line overflow-y-auto rounded-md border border-line">
+            <ul className="-mx-2 max-h-[40dvh] divide-y divide-line overflow-y-auto border-y border-line">
               {experiences.map((e) => (
                 <li key={e.id}>
-                  <label className="flex cursor-pointer items-start gap-2 px-3 py-2 text-[13px] hover:bg-subtle/60">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={picked.has(e.id)}
-                      onChange={() => toggle(e.id)}
-                    />
+                  <label className="flex cursor-pointer items-start gap-2 px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
+                    <input type="checkbox" className="mt-1" checked={picked.has(e.id)} onChange={() => toggle(e.id)} />
                     <span className="min-w-0 flex-1">
                       <span className="block break-words font-medium">{e.title}</span>
                       <span className="block text-muted">
                         {[e.organization, e.period_text].filter(Boolean).join(" · ")}
-                        {e.needs_review ? `${e.organization || e.period_text ? " · " : ""}확인 필요 ${e.needs_review}` : ""}
+                        {e.needs_review
+                          ? `${e.organization || e.period_text ? " · " : ""}확인 필요 ${e.needs_review}`
+                          : ""}
                       </span>
                     </span>
                   </label>
@@ -157,7 +160,7 @@ function RunSessions({ runId, questions }: { runId: string; questions: unknown }
       </p>
       <ErrorText error={q.error} />
       {sessions.length ? (
-        <ul className="divide-y divide-line rounded-md border border-line">
+        <ul className="divide-y divide-line border-t border-line">
           {sessions.map((s) =>
             s.experience_id ? (
               <li key={s.id}>
@@ -165,7 +168,7 @@ function RunSessions({ runId, questions }: { runId: string; questions: unknown }
                   to="/brain/$experienceId"
                   params={{ experienceId: s.experience_id }}
                   search={{ tab: "interview" }}
-                  className="flex items-center gap-2 px-3 py-2 hover:bg-subtle/60"
+                  className="-mx-2 flex items-center gap-2 rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-subtle/60"
                 >
                   <span className="min-w-0 flex-1 break-words">{s.experience_title ?? "경험"}</span>
                   <span className="shrink-0 text-muted tabular-nums">

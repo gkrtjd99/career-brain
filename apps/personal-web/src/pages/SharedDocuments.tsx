@@ -1,8 +1,8 @@
 import type { SharedDocumentKind, SharedDocumentSummary } from "@career-brain/client";
-import { Badge, Button, EmptyState, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, EmptyState, Input, Label, Select, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, FileText, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { ErrorText, List, Loaded, PageHeader } from "../components/common";
 import { HiddenTextCheck } from "../components/doc/ExportSheet";
@@ -40,11 +40,16 @@ export function SharedDocumentsPage() {
               ))}
             </List>
           ) : (
-            <EmptyState>공용 문서가 없습니다. 기본 이력서나 포트폴리오를 한 번 써 두면 지원마다 복사할 수 있습니다.</EmptyState>
+            <EmptyState>
+              공용 문서가 없습니다. 기본 이력서나 포트폴리오를 한 번 써 두면 지원마다 복사할 수 있습니다.{" "}
+              <button type="button" onClick={() => setAdding(true)} className="text-fg underline underline-offset-2">
+                공용 문서 추가
+              </button>
+            </EmptyState>
           )
         }
       </Loaded>
-      <div className="mt-6">
+      <div className="mt-10">
         <HiddenTextCheck />
       </div>
       <AddSharedSheet open={adding} onClose={() => setAdding(false)} />
@@ -53,28 +58,25 @@ export function SharedDocumentsPage() {
 }
 
 function SharedRow({ d }: { d: SharedDocumentSummary }) {
+  const meta = [
+    DOC_KIND[d.kind] ?? d.kind,
+    countLine(d.counts),
+    d.current_revision ? `r${d.current_revision}` : null,
+    d.copies ? `지원 ${d.copies}곳에 복사` : null,
+    formatDateTime(d.updated_at),
+  ].filter(Boolean);
   return (
     <li>
       <Link
         to="/documents/$documentId"
         params={{ documentId: d.id }}
-        className="flex items-start gap-3 px-3 py-3 hover:bg-subtle/60"
+        className="-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
       >
-        <FileText size={16} className="mt-0.5 shrink-0 text-muted" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">{d.title}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted">
-            <span>{DOC_KIND[d.kind] ?? d.kind}</span>
-            <span>· {countLine(d.counts)}</span>
-            {d.current_revision ? <span>· r{d.current_revision}</span> : null}
-            <span>· {formatDateTime(d.updated_at)}</span>
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {d.current_revision === 0 ? <Badge tone="warn">안 씀</Badge> : null}
-            {d.copies ? <Badge tone="neutral">지원 {d.copies}곳에 복사</Badge> : null}
-          </div>
+          <div className="truncate text-sm font-medium">{d.title}</div>
+          <div className="text-[13px] text-muted tabular-nums">{meta.join(" · ")}</div>
         </div>
-        <ChevronRight size={16} className="mt-0.5 shrink-0 text-muted" />
+        {d.current_revision === 0 ? <span className="shrink-0 text-[13px] font-medium">안 씀</span> : null}
       </Link>
     </li>
   );
@@ -94,7 +96,12 @@ function AddSharedSheet({ open, onClose }: { open: boolean; onClose: () => void 
     },
   });
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="공용 문서 추가" description="공고 문항은 지원마다 다르므로 공용 문서로 만들지 않습니다.">
+    <Sheet
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="공용 문서 추가"
+      description="공고 문항은 지원마다 다르므로 공용 문서로 만들지 않습니다."
+    >
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -104,7 +111,11 @@ function AddSharedSheet({ open, onClose }: { open: boolean; onClose: () => void 
       >
         <div>
           <Label htmlFor="sd-kind">종류</Label>
-          <Select id="sd-kind" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as SharedDocumentKind })}>
+          <Select
+            id="sd-kind"
+            value={form.kind}
+            onChange={(e) => setForm({ ...form, kind: e.target.value as SharedDocumentKind })}
+          >
             {KINDS.map((k) => (
               <option key={k} value={k}>
                 {DOC_KIND[k]}

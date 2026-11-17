@@ -1,5 +1,5 @@
 import type { ClaimKind, Contribution, InterviewQuestion } from "@career-brain/client";
-import { Badge, Button, EmptyState, Label, Select, Textarea } from "@career-brain/ui";
+import { Button, cn, EmptyState, Label, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
@@ -53,20 +53,25 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
   return (
     <Loaded query={q}>
       {(iv) => (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {list.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-1.5 text-[13px]" role="radiogroup" aria-label="인터뷰 세션">
+            <div
+              className="-mx-2 flex flex-wrap items-center gap-x-1 text-[13px]"
+              role="radiogroup"
+              aria-label="인터뷰 세션"
+            >
               {list.map((se, i) => (
                 <button
                   key={se.id}
                   role="radio"
                   aria-checked={se.id === sessionId}
                   onClick={() => setChosen(se.id)}
-                  className={
+                  className={cn(
+                    "inline-flex h-9 items-center rounded-md px-2 tabular-nums transition-colors duration-150",
                     se.id === sessionId
-                      ? "rounded-full bg-accent-soft px-2.5 py-0.5 font-medium text-accent"
-                      : "rounded-full border border-line bg-surface px-2.5 py-0.5 text-muted hover:text-fg"
-                  }
+                      ? "bg-subtle font-medium text-fg"
+                      : "text-muted hover:bg-subtle/60 hover:text-fg",
+                  )}
                 >
                   {formatDate(se.created_at)} · {se.answered}/{se.questions}
                   {se.run_ids?.length ? " · 일괄" : ""}
@@ -75,9 +80,10 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
               ))}
             </div>
           ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted">
-              답변은 인터뷰 근거가 붙은 주장으로 저장됩니다. 기여(본인/팀)를 고르면 바로 “본인 확인” 상태가 됩니다.
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <p className="min-w-0 flex-1 basis-64 text-[13px] text-muted">
+              답변은 인터뷰 근거가 붙은 주장으로 저장됩니다. 기여(본인/팀)를 고르면 바로 “본인 확인” 상태가 됩니다. AI
+              보충 질문은 이 경험의 내용을 모델에 보내며 비용이 듭니다.
             </p>
             <div className="flex gap-1.5">
               <Button size="sm" onClick={() => ai.mutate()} disabled={ai.isPending || iv.status !== "open"}>
@@ -88,24 +94,23 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
               </Button>
             </div>
           </div>
-          <p className="-mt-2 text-xs text-muted">AI 보충 질문은 이 경험의 내용을 모델에 보내며 비용이 듭니다.</p>
           <ErrorText error={ai.error} />
           {iv.questions.some((x) => x.run_id) ? (
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="flex min-h-9 items-center gap-2 text-[13px]">
               <input type="checkbox" checked={byRun} onChange={(e) => setByRun(e.target.checked)} />
               실행별로 묶기
             </label>
           ) : null}
           {(byRun ? groupByRun(iv.questions) : [{ key: "all", title: null, runId: null, items: iv.questions }]).map(
             (g) => (
-              <section key={g.key} className="space-y-2">
+              <section key={g.key}>
                 {g.title ? (
-                  <h3 className="flex flex-wrap items-center gap-2 text-[13px] font-medium">
-                    {g.title} <span className="font-normal text-muted">{g.items.length}개</span>
+                  <h3 className="mb-2 flex flex-wrap items-baseline gap-2 text-[13px] font-semibold">
+                    {g.title} <span className="font-normal text-muted tabular-nums">{g.items.length}개</span>
                     {g.runId ? <RunLink runId={g.runId} /> : null}
                   </h3>
                 ) : null}
-                <ol className="space-y-3">
+                <ol className="divide-y divide-line border-t border-line">
                   {g.items.map((question) => (
                     <QuestionCard
                       key={question.id}
@@ -151,7 +156,7 @@ function RunLink({ runId }: { runId: string }) {
     <Link
       to="/system"
       search={{ run: runId }}
-      className="text-xs font-normal text-accent hover:underline"
+      className="text-xs font-normal text-muted underline underline-offset-2 hover:text-fg"
       title="시스템 화면에서 이 실행 보기"
     >
       실행 보기
@@ -202,26 +207,34 @@ function QuestionCard({
   });
 
   return (
-    <li className="rounded-lg border border-line bg-surface p-3">
-      <div className="mb-1 flex flex-wrap items-center gap-1.5">
-        <Badge tone="neutral">{FOCUS_LABEL[question.focus] ?? question.focus}</Badge>
-        {question.origin === "ai" ? <Badge tone="accent">AI 질문</Badge> : null}
+    <li className="py-4">
+      <p className="mb-1 flex flex-wrap gap-x-1.5 text-xs text-muted">
+        <span>{FOCUS_LABEL[question.focus] ?? question.focus}</span>
+        {question.origin === "ai" ? <span className="font-medium text-fg">· AI 질문</span> : null}
         {question.run_id && showRun ? (
-          <Link to="/system" search={{ run: question.run_id }} className="hover:underline" title="이 질문을 만든 일괄 실행">
-            <Badge tone="neutral">일괄 {question.run_id.slice(0, 8)}</Badge>
-          </Link>
+          <span>
+            ·{" "}
+            <Link
+              to="/system"
+              search={{ run: question.run_id }}
+              className="underline underline-offset-2 hover:text-fg"
+              title="이 질문을 만든 일괄 실행"
+            >
+              일괄 {question.run_id.slice(0, 8)}
+            </Link>
+          </span>
         ) : null}
-        {question.answers.length ? <Badge tone="ok">답함</Badge> : null}
-      </div>
+        {question.answers.length ? <span>· 답함</span> : null}
+      </p>
       <p className="text-sm leading-6 font-medium">{question.prompt}</p>
       {question.answers.map((a, i) => (
-        <p key={i} className="mt-2 rounded-md bg-subtle px-2.5 py-1.5 text-[13px] leading-6 whitespace-pre-wrap">
+        <p key={i} className="mt-2 text-[13px] leading-6 whitespace-pre-wrap">
           {a}
         </p>
       ))}
       {closed ? null : open ? (
         <form
-          className="mt-2 space-y-2"
+          className="mt-3 space-y-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (answer.trim()) send.mutate();
@@ -235,13 +248,13 @@ function QuestionCard({
             aria-label="답변"
           />
           {answer.trim() ? (
-            <label className="flex items-center gap-2 text-[13px]">
+            <label className="flex min-h-9 items-center gap-2 text-[13px]">
               <input type="checkbox" checked={makeClaim} onChange={(e) => setMakeClaim(e.target.checked)} />
               주장으로 저장
             </label>
           ) : null}
           {makeClaim && answer.trim() ? (
-            <div className="space-y-2 rounded-md border border-line p-2">
+            <div className="space-y-2">
               <Textarea
                 value={statement}
                 onChange={(e) => setStatement(e.target.value)}
@@ -289,7 +302,7 @@ function QuestionCard({
           </div>
         </form>
       ) : (
-        <Button size="sm" variant="ghost" className="mt-1" onClick={() => setOpen(true)}>
+        <Button size="sm" variant="ghost" className="mt-1 -ml-2.5" onClick={() => setOpen(true)}>
           덧붙이기
         </Button>
       )}

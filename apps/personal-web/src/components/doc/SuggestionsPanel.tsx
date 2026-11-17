@@ -1,5 +1,5 @@
 import type { Suggestion, SuggestionRequest, SuggestOut } from "@career-brain/client";
-import { Badge, Button, EmptyState, Label, Textarea } from "@career-brain/ui";
+import { Button, cn, EmptyState, Label, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, Check, Sparkles, X } from "lucide-react";
 import { useRef, useState } from "react";
@@ -7,6 +7,7 @@ import { api } from "../../lib/api";
 import { wordDiff } from "../../lib/diff";
 import { formatDateTime } from "../../lib/dates";
 import { REJECT_REASON, SUGGESTION_STATUS } from "../../lib/labels";
+import { toneText } from "../../pages/Application";
 import { ErrorText, Loaded } from "../common";
 
 /** 요청 하나의 멱등 키 (보안 문맥이 아니면 randomUUID 가 없을 수 있다) */
@@ -106,21 +107,27 @@ export function SuggestionsPanel({
     mutationFn: (s: Suggestion) => api.dismissSuggestion(appId, docId, s.id),
     onSuccess: refresh,
   });
-  const blocked = !editable ? "제출한 문서입니다." : dirty ? "먼저 저장하세요. 수정안은 저장한 글을 기준으로 만듭니다." : base === 0 ? "먼저 글을 쓰고 저장하세요." : null;
+  const blocked = !editable
+    ? "제출한 문서입니다."
+    : dirty
+      ? "먼저 저장하세요. 수정안은 저장한 글을 기준으로 만듭니다."
+      : base === 0
+        ? "먼저 글을 쓰고 저장하세요."
+        : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {editable ? (
         <form
-          className="space-y-2 rounded-lg border border-line bg-surface p-3"
+          className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
             ask.mutate();
           }}
         >
           <p className="text-xs text-muted">
-            AI는 사용자가 쓴 문단을 최소한으로 다듬는 제안만 합니다. 사실(수치·역할·조직·기술명)을 바꾸는 제안은 코드가 거부합니다.
-            고른 문단, 연결한 확인된 근거, 공고 요건과 문항을 모델로 보내며 비용이 듭니다.
+            AI는 사용자가 쓴 문단을 최소한으로 다듬는 제안만 합니다. 사실(수치·역할·조직·기술명)을 바꾸는 제안은 코드가
+            거부합니다. 고른 문단, 연결한 확인된 근거, 공고 요건과 문항을 모델로 보내며 비용이 듭니다.
           </p>
           <div>
             <Label htmlFor="sg-ins">요청 (선택)</Label>
@@ -133,7 +140,7 @@ export function SuggestionsPanel({
               onChange={(e) => setInstruction(e.target.value)}
             />
           </div>
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex min-h-9 items-center gap-2 text-[13px]">
             <input
               type="checkbox"
               checked={onlyActive}
@@ -144,7 +151,7 @@ export function SuggestionsPanel({
               ? `선택한 문단(${blockNo(activeBlockId)! + 1})만`
               : "선택한 문단만 (저장된 문단을 먼저 누르세요)"}
           </label>
-          {blocked ? <p className="text-xs text-warn">{blocked}</p> : null}
+          {blocked ? <p className="text-xs font-medium">{blocked}</p> : null}
           <ErrorText error={ask.error} />
           <Button type="submit" size="sm" disabled={!!blocked || ask.isPending}>
             <Sparkles size={14} /> {ask.isPending ? "요청하는 중" : "수정안 요청"}
@@ -153,10 +160,11 @@ export function SuggestionsPanel({
       ) : null}
 
       {last ? (
-        <div className="space-y-1 text-[13px]">
+        <div className="space-y-1 text-[13px]" aria-live="polite">
           {last.questions.length ? (
-            <div className="rounded-lg border border-line bg-accent-soft/50 px-3 py-2">
-              <p className="mb-1 text-xs font-medium text-accent">AI가 사실 대신 물어본 것 — 답은 브레인 인터뷰에 직접 적습니다</p>
+            <div className="pb-2">
+              <p className="mb-1 text-[13px] font-semibold">AI가 사실 대신 물어본 것</p>
+              <p className="mb-1.5 text-xs text-muted">답은 브레인 인터뷰에 직접 적습니다.</p>
               <ul className="list-disc space-y-0.5 pl-4">
                 {last.questions.map((q, i) => (
                   <li key={i}>{q}</li>
@@ -164,8 +172,12 @@ export function SuggestionsPanel({
               </ul>
             </div>
           ) : null}
-          {last.dropped ? <p className="text-xs text-muted">없는 문단·같은 글·중복이라 버린 제안 {last.dropped}개</p> : null}
-          {last.replayed ? <p className="text-xs text-muted">같은 요청을 다시 보내 모델을 부르지 않고 저장된 수정안을 보여 줍니다.</p> : null}
+          {last.dropped ? (
+            <p className="text-xs text-muted">없는 문단·같은 글·중복이라 버린 제안 {last.dropped}개</p>
+          ) : null}
+          {last.replayed ? (
+            <p className="text-xs text-muted">같은 요청을 다시 보내 모델을 부르지 않고 저장된 수정안을 보여 줍니다.</p>
+          ) : null}
           {!last.suggestions.length ? <p className="text-xs text-muted">이번에는 제안이 없습니다.</p> : null}
         </div>
       ) : null}
@@ -181,26 +193,30 @@ export function SuggestionsPanel({
           const past = rows.filter((s) => !isOpen(s));
           if (!rows.length) return <EmptyState>수정안이 없습니다.</EmptyState>;
           return (
-            <div className="space-y-3">
-              {open.map((s) => (
-                <SuggestionCard
-                  key={s.id}
-                  s={s}
-                  no={blockNo(s.block_id)}
-                  canApply={editable && !dirty}
-                  busy={apply.isPending || dismiss.isPending}
-                  onApply={() => apply.mutate(s)}
-                  onDismiss={() => dismiss.mutate(s)}
-                />
-              ))}
+            <div className="space-y-4">
+              <ul className="divide-y divide-line border-t border-line">
+                {open.map((s) => (
+                  <SuggestionCard
+                    key={s.id}
+                    s={s}
+                    no={blockNo(s.block_id)}
+                    canApply={editable && !dirty}
+                    busy={apply.isPending || dismiss.isPending}
+                    onApply={() => apply.mutate(s)}
+                    onDismiss={() => dismiss.mutate(s)}
+                  />
+                ))}
+              </ul>
               {past.length ? (
                 <details className="text-[13px]">
-                  <summary className="cursor-pointer text-muted">지난 수정안 {past.length}개</summary>
-                  <div className="mt-2 space-y-2">
+                  <summary className="cursor-pointer py-1 text-muted hover:text-fg">
+                    지난 수정안 {past.length}개
+                  </summary>
+                  <ul className="mt-2 divide-y divide-line border-t border-line">
                     {past.map((s) => (
                       <SuggestionCard key={s.id} s={s} no={blockNo(s.block_id)} canApply={false} busy />
                     ))}
-                  </div>
+                  </ul>
                 </details>
               ) : null}
             </div>
@@ -217,16 +233,13 @@ function PastQuestions({ rows }: { rows: SuggestionRequest[] }) {
   const total = rows.reduce((n, r) => n + r.questions.length, 0);
   return (
     <details className="text-[13px]">
-      <summary className="cursor-pointer text-muted">지난 요청에서 AI가 물어본 것 {total}개</summary>
-      <ul className="mt-2 space-y-2">
+      <summary className="cursor-pointer py-1 text-muted hover:text-fg">지난 요청에서 AI가 물어본 것 {total}개</summary>
+      <ul className="mt-2 divide-y divide-line border-t border-line">
         {rows.map((r) => (
-          <li key={r.id} className="rounded-md border border-line bg-surface px-2.5 py-2">
-            <p className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+          <li key={r.id} className="py-2.5">
+            <p className="mb-1 text-xs text-muted tabular-nums">
               {formatDateTime(r.created_at)}
-              {r.run_id ? <Badge tone="neutral">일괄 실행</Badge> : null}
-              <span>
-                · 제안 {r.proposed} · 거부 {r.rejected}
-              </span>
+              {r.run_id ? " · 일괄 실행" : ""} · 제안 {r.proposed} · 거부 {r.rejected}
             </p>
             <ul className="list-disc space-y-0.5 pl-4">
               {r.questions.map((q, i) => (
@@ -257,16 +270,16 @@ function SuggestionCard({
 }) {
   const st = SUGGESTION_STATUS[s.status] ?? { label: s.status, tone: "neutral" as const };
   return (
-    <article className="rounded-lg border border-line bg-surface p-3">
-      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-        <Badge tone={st.tone}>{st.label}</Badge>
-        <span>{no !== null ? `문단 ${no + 1}` : "지금은 없는 문단"}</span>
+    <li className="py-3">
+      <p className="mb-1.5 flex flex-wrap gap-x-1.5 text-xs text-muted tabular-nums">
+        <span className={cn(toneText(st.tone))}>{st.label}</span>
+        <span>· {no !== null ? `문단 ${no + 1}` : "지금은 없는 문단"}</span>
         <span>· {formatDateTime(s.created_at)}</span>
-      </div>
+      </p>
       <Diff before={s.original_text} after={s.suggested_text} />
       {s.reason ? <p className="mt-1.5 text-xs text-muted">이유: {s.reason}</p> : null}
       {s.status === "rejected" ? (
-        <div className="mt-2 rounded-md bg-danger-soft px-2.5 py-1.5 text-xs text-danger">
+        <div className="mt-2 text-xs text-danger">
           <p className="flex items-center gap-1 font-medium">
             <Ban size={12} /> 사실을 바꾸는 수정이라 적용할 수 없습니다
           </p>
@@ -291,6 +304,6 @@ function SuggestionCard({
           {!canApply ? <span className="self-center text-xs text-muted">저장한 뒤 적용할 수 있습니다</span> : null}
         </div>
       ) : null}
-    </article>
+    </li>
   );
 }

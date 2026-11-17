@@ -284,15 +284,17 @@ export function BlockEditor({
           <div
             key={b.key}
             className={cn(
-              "group relative rounded-md border-l-2 py-1 pr-1 pl-3 transition-colors",
-              active ? "border-accent bg-subtle/50" : "border-transparent hover:bg-subtle/30",
+              "group relative rounded-md py-1 pr-1 pl-3 transition-colors duration-150",
+              active ? "bg-subtle/60" : "hover:bg-subtle/30",
             )}
           >
             <AutoTextarea
               value={b.text}
               readOnly={readOnly}
               label={`문단 ${i + 1}`}
-              placeholder={i === 0 && blocks.length === 1 ? "직접 쓴 문장으로 시작합니다. AI는 먼저 쓰지 않습니다." : undefined}
+              placeholder={
+                i === 0 && blocks.length === 1 ? "직접 쓴 문장으로 시작합니다. AI는 먼저 쓰지 않습니다." : undefined
+              }
               onChange={(v) => update(i, { text: v })}
               onKeyDown={onKeyDown(i)}
               onPaste={onPaste(i)}
@@ -312,7 +314,7 @@ export function BlockEditor({
                 return (
                   <span
                     key={cid}
-                    className="inline-flex max-w-full items-center gap-1 rounded border border-line bg-surface px-1.5 py-0.5 text-xs"
+                    className="inline-flex max-w-full items-center gap-1 rounded border border-line px-1.5 py-0.5 text-xs"
                     title={c?.statement}
                   >
                     {c ? <StatusBadge status={c.status} /> : <Badge tone="none">근거</Badge>}
@@ -332,10 +334,10 @@ export function BlockEditor({
               {(b.spans ?? []).map((sp, si) => (
                 <span
                   key={`sp-${si}`}
-                  className="inline-flex max-w-full items-center gap-1 rounded border border-accent/40 bg-accent-soft/40 px-1.5 py-0.5 text-xs"
+                  className="inline-flex max-w-full items-center gap-1 rounded border border-line px-1.5 py-0.5 text-xs"
                   title={sp.claim_ids.map((c) => claims.get(c)?.statement ?? c).join("\n")}
                 >
-                  <Quote size={11} className="shrink-0 text-accent" />
+                  <Quote size={11} className="shrink-0 text-muted" />
                   <span className="max-w-[12rem] truncate">“{sp.quote}”</span>
                   <span className="text-muted">근거 {sp.claim_ids.length}</span>
                   {!readOnly ? (
@@ -353,7 +355,7 @@ export function BlockEditor({
                 <span
                   role="group"
                   aria-label="문장 근거 끊기 확인"
-                  className="flex w-full flex-wrap items-center gap-1.5 rounded-md border border-line bg-subtle/60 px-2 py-1.5 text-xs"
+                  className="flex w-full flex-wrap items-center gap-1.5 py-1.5 text-xs"
                 >
                   <span className="min-w-0 flex-1">
                     이 문장의 근거 {unlinking.shared.length}개는 문단 근거에도 연결돼 있습니다. 문단 근거에서도 뺄까요?
@@ -379,7 +381,12 @@ export function BlockEditor({
                 );
               })}
               {!readOnly ? (
-                <span className={cn("ml-auto flex gap-0.5", active ? "" : "md:opacity-0 md:group-hover:opacity-100")}>
+                <span
+                  className={cn(
+                    "ml-auto flex gap-0.5",
+                    active ? "" : "md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100",
+                  )}
+                >
                   {selection?.key === b.key ? (
                     <Button
                       size="sm"
@@ -398,7 +405,12 @@ export function BlockEditor({
                       <Quote size={14} /> 고른 문장 근거
                     </Button>
                   ) : null}
-                  <Button size="sm" variant="ghost" onClick={() => onPickEvidence(b.key)} aria-label={`문단 ${i + 1} 근거 연결`}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onPickEvidence(b.key)}
+                    aria-label={`문단 ${i + 1} 근거 연결`}
+                  >
                     <Link2 size={14} /> 근거
                   </Button>
                   {blocks.length > 1 ? (

@@ -1,11 +1,5 @@
-import type {
-  AppDocument,
-  ClaimBrief,
-  CountRule,
-  RevisionConflictDetail,
-  TextCounts,
-} from "@career-brain/client";
-import { Badge, Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
+import type { AppDocument, ClaimBrief, CountRule, RevisionConflictDetail, TextCounts } from "@career-brain/client";
+import { Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useBlocker } from "@tanstack/react-router";
 import { AlertTriangle, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
@@ -116,7 +110,9 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
   const [blocks, setBlocks] = useState<DraftBlock[]>(() => toDraft(doc));
   const [conflict, setConflict] = useState<RevisionConflictDetail | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [pickFor, setPickFor] = useState<{ key: string; range?: { start: number; end: number; quote: string } } | null>(null);
+  const [pickFor, setPickFor] = useState<{ key: string; range?: { start: number; end: number; quote: string } } | null>(
+    null,
+  );
   const [exporting, setExporting] = useState(false);
   const [focus, setFocus] = useState<{ key: string; n: number } | null>(null);
   const [panel, setPanel] = useState<Panel>("checks");
@@ -246,12 +242,17 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
   const pickBlock = blocks.find((b) => b.key === pickFor?.key) ?? null;
   const docs = app.data?.documents ?? [];
   const idx = docs.findIndex((d) => d.id === doc.id);
-  const saveError = save.error && !(save.error instanceof ApiError && save.error.status === 409 && conflict) ? save.error : null;
+  const saveError =
+    save.error && !(save.error instanceof ApiError && save.error.status === 409 && conflict) ? save.error : null;
 
   return (
     <div>
       <PageHeader
-        back={appId ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" } : { to: "/documents", label: "공용 문서" }}
+        back={
+          appId
+            ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" }
+            : { to: "/documents", label: "공용 문서" }
+        }
         title={
           <>
             {doc.question_index !== null ? `${doc.question_index + 1}. ` : ""}
@@ -259,15 +260,15 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
           </>
         }
         subtitle={
-          <span className="flex flex-wrap items-center gap-1.5">
+          <span className="flex flex-wrap items-center gap-x-1.5 tabular-nums" aria-live="polite">
             <span>{DOC_KIND[doc.kind] ?? doc.kind}</span>
-            {appId === null ? <Badge tone="neutral">공용</Badge> : null}
+            {appId === null ? <span>· 공용</span> : null}
             <span>· {base ? `r${base}` : "저장 전"}</span>
-            {dirty ? <Badge tone="warn">저장 안 함</Badge> : base ? <Badge tone="ok">저장됨</Badge> : null}
+            {dirty ? <span className="font-medium text-fg">· 저장 안 함</span> : base ? <span>· 저장됨</span> : null}
             {!editable ? (
-              <Badge tone="none">
-                <Lock size={11} /> 읽기 전용
-              </Badge>
+              <span className="inline-flex items-center gap-1">
+                · <Lock size={12} /> 읽기 전용
+              </span>
             ) : null}
           </span>
         }
@@ -292,15 +293,16 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
       />
 
       {appId && docs.length > 1 ? (
-        <nav className="mb-4 flex flex-wrap gap-1 text-[13px]" aria-label="같은 지원의 문서">
+        <nav className="-mx-2 mb-6 flex flex-wrap gap-x-1 text-[13px]" aria-label="같은 지원의 문서">
           {docs.map((d, i) => (
             <Link
               key={d.id}
               to="/applications/$applicationId/documents/$documentId"
               params={{ applicationId: appId, documentId: d.id }}
+              aria-current={i === idx ? "page" : undefined}
               className={cn(
-                "rounded-full border px-2.5 py-0.5",
-                i === idx ? "border-accent bg-accent-soft text-accent" : "border-line bg-surface text-muted hover:text-fg",
+                "inline-flex h-9 items-center rounded-md px-2 transition-colors duration-150",
+                i === idx ? "bg-subtle font-medium text-fg" : "text-muted hover:bg-subtle/60 hover:text-fg",
               )}
             >
               {d.question_index !== null ? `문항 ${d.question_index + 1}` : d.title}
@@ -310,40 +312,57 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
       ) : null}
 
       {doc.source ? (
-        <p className="mb-4 flex flex-wrap items-center gap-1.5 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px] text-muted">
+        <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
           <Copy size={14} />
           <span>
             공용 문서{" "}
-            <Link to="/documents/$documentId" params={{ documentId: doc.source.document_id }} className="text-accent hover:underline">
+            <Link
+              to="/documents/$documentId"
+              params={{ documentId: doc.source.document_id }}
+              className="text-fg underline underline-offset-2"
+            >
               {doc.source.title ?? "(지운 문서)"}
             </Link>{" "}
             r{doc.source.revision_no ?? "?"}에서 복사했습니다.
           </span>
-          {doc.source.current_revision && doc.source.revision_no && doc.source.current_revision > doc.source.revision_no ? (
-            <span>원본은 그 뒤 r{doc.source.current_revision}까지 바뀌었습니다. 이 문서에는 자동으로 들어오지 않습니다.</span>
+          {doc.source.current_revision &&
+          doc.source.revision_no &&
+          doc.source.current_revision > doc.source.revision_no ? (
+            <span>
+              원본은 그 뒤 r{doc.source.current_revision}까지 바뀌었습니다. 이 문서에는 자동으로 들어오지 않습니다.
+            </span>
           ) : null}
         </p>
       ) : null}
 
       {!editable ? (
-        <p className="mb-4 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px] text-muted">
-          제출본을 고정한 지원이라 고칠 수 없습니다. 다음 지원은 새로 만듭니다.
+        <p className="mb-4 flex items-center gap-1.5 text-[13px] text-muted">
+          <Lock size={14} /> 제출본을 고정한 지원이라 고칠 수 없습니다. 다음 지원은 새로 만듭니다.
         </p>
       ) : null}
 
       {conflict ? (
-        <div role="alert" className="mb-4 rounded-lg border border-danger/40 bg-danger-soft px-3 py-3 text-[13px] text-danger">
+        <div
+          role="alert"
+          className="mb-6 rounded-md border border-danger/40 bg-danger-soft px-3 py-3 text-[13px] text-danger"
+        >
           <p className="flex items-center gap-1.5 font-semibold">
             <AlertTriangle size={15} /> 저장 충돌: 다른 곳에서 r{conflict.current_revision}을 먼저 저장했습니다
           </p>
           <p className="mt-1 text-fg">
-            이 편집은 r{base}를 기준으로 했습니다. 아직 아무것도 덮어쓰지 않았고, 내 편집은 이 화면에 그대로 있습니다. 어떻게 할지 고르세요.
+            이 편집은 r{base}를 기준으로 했습니다. 아직 아무것도 덮어쓰지 않았고, 내 편집은 이 화면에 그대로 있습니다.
+            어떻게 할지 고르세요.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Button size="sm" onClick={() => setCompare(true)}>
               최신 글과 비교
             </Button>
-            <Button size="sm" variant="danger" onClick={() => docQuery.data && reset(docQuery.data)} disabled={docQuery.isFetching}>
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => docQuery.data && reset(docQuery.data)}
+              disabled={docQuery.isFetching}
+            >
               내 편집 버리고 최신 불러오기
             </Button>
             <Button
@@ -351,7 +370,10 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
               variant="primary"
               disabled={save.isPending || docQuery.isFetching}
               onClick={() =>
-                save.mutate({ baseRevision: conflict.current_revision, reason: `r${base} 편집을 r${conflict.current_revision} 위에 다시 저장` })
+                save.mutate({
+                  baseRevision: conflict.current_revision,
+                  reason: `r${base} 편집을 r${conflict.current_revision} 위에 다시 저장`,
+                })
               }
             >
               확인했고, 내 편집으로 새 revision 저장
@@ -360,23 +382,25 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
+      <div className="grid grid-cols-1 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] lg:gap-x-12">
         <div className="min-w-0 space-y-3">
-          {doc.question_prompt ? (
-            <div className="rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px] leading-6">{doc.question_prompt}</div>
-          ) : null}
+          {doc.question_prompt ? <p className="text-sm leading-6">{doc.question_prompt}</p> : null}
           <CountBar counts={counts} counting={counting} onSettings={editable ? () => setSettings(true) : undefined} />
-          <div className="rounded-lg border border-line bg-surface px-2 py-3 md:px-4">
+          <div className="rounded-lg border border-line bg-surface px-1 py-2 md:px-3 md:py-3">
             <BlockEditor
               blocks={blocks}
               onChange={setBlocks}
               readOnly={!editable || save.isPending}
               claims={claimMap}
-              findings={!dirty ? (validate.data?.findings ?? []) : (validate.data?.findings ?? []).filter((f) => {
-                const b = blocks.find((x) => x.id === f.block_id);
-                const orig = baseBlocks.find((x) => x.id === f.block_id);
-                return b && orig && b.text === orig.text;
-              })}
+              findings={
+                !dirty
+                  ? (validate.data?.findings ?? [])
+                  : (validate.data?.findings ?? []).filter((f) => {
+                      const b = blocks.find((x) => x.id === f.block_id);
+                      const orig = baseBlocks.find((x) => x.id === f.block_id);
+                      return b && orig && b.text === orig.text;
+                    })
+              }
               activeKey={activeKey}
               onActive={setActiveKey}
               onPickEvidence={(key, range) => setPickFor({ key, range })}
@@ -384,7 +408,8 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
             />
           </div>
           <p className="text-xs text-muted">
-            Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장. 문장을 고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 주장만 셉니다.
+            Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장.
+            문장을 고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 주장만 셉니다.
           </p>
           <ErrorText error={saveError} />
         </div>
@@ -405,7 +430,14 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
             </Loaded>
           ) : null}
           {panel === "checks" && appId ? (
-            <VisibilityJudgePanel appId={appId} docId={doc.id} dirty={dirty} blocks={baseBlocks} onJump={jump} blockNo={blockNo} />
+            <VisibilityJudgePanel
+              appId={appId}
+              docId={doc.id}
+              dirty={dirty}
+              blocks={baseBlocks}
+              onJump={jump}
+              blockNo={blockNo}
+            />
           ) : null}
           {panel === "ai" ? (
             <SuggestionsPanel
@@ -417,14 +449,19 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
               activeBlockId={activeBlock?.id ?? null}
               blockNo={blockNo}
               onApplied={async () => {
-                const fresh = await qc.fetchQuery({ queryKey: ["document", doc.id], queryFn: () => api.document(appId, doc.id) });
+                const fresh = await qc.fetchQuery({
+                  queryKey: ["document", doc.id],
+                  queryFn: () => api.document(appId, doc.id),
+                });
                 reset(fresh);
                 qc.invalidateQueries({ queryKey: ["revisions", doc.id] });
                 if (appId) qc.invalidateQueries({ queryKey: ["application", appId] });
               }}
             />
           ) : null}
-          {panel === "history" ? <HistoryPanel appId={appId} docId={doc.id} current={doc.current_revision} onOpen={setHistoryRev} /> : null}
+          {panel === "history" ? (
+            <HistoryPanel appId={appId} docId={doc.id} current={doc.current_revision} onOpen={setHistoryRev} />
+          ) : null}
         </aside>
       </div>
 
@@ -468,7 +505,10 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
         open={compare}
         onClose={() => setCompare(false)}
         latest={docQuery.data}
-        mine={blocks.map((b) => b.text).filter((t) => t.trim()).join("\n")}
+        mine={blocks
+          .map((b) => b.text)
+          .filter((t) => t.trim())
+          .join("\n")}
         base={base}
       />
       <RevisionSheet appId={appId} docId={doc.id} revision={historyRev} onClose={() => setHistoryRev(null)} />
@@ -476,45 +516,66 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
   );
 }
 
-function CountBar({ counts, counting, onSettings }: { counts: TextCounts; counting: boolean; onSettings?: () => void }) {
+function CountBar({
+  counts,
+  counting,
+  onSettings,
+}: {
+  counts: TextCounts;
+  counting: boolean;
+  onSettings?: () => void;
+}) {
   const over = counts.over_char_limit || counts.over_byte_limit;
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-[13px]",
-        over ? "border-danger/40 bg-danger-soft text-danger" : "border-line bg-surface",
-        counting && "opacity-70",
+        "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] transition-opacity",
+        counting && "opacity-60",
       )}
       aria-live="polite"
     >
-      <span className="font-medium tabular-nums">
+      <span className={cn("font-semibold tabular-nums", counts.over_char_limit && "text-danger")}>
         {int(counts.chars)}
         {counts.char_limit ? ` / ${int(counts.char_limit)}` : ""}자
       </span>
-      <span className="tabular-nums">
+      <span className={cn("tabular-nums", counts.over_byte_limit ? "font-semibold text-danger" : "text-muted")}>
         {int(counts.bytes)}
         {counts.byte_limit ? ` / ${int(counts.byte_limit)}` : ""} byte
       </span>
-      <span className="text-xs text-muted">
+      {over ? <span className="font-medium text-danger">분량 초과</span> : null}
+      <span className="text-xs text-muted tabular-nums">
         {SPACES_RULE[counts.rule.spaces]} · {NEWLINE_RULE[counts.rule.newlines]} · {counts.rule.encoding} · 공백 포함{" "}
-        {int(counts.chars_with_spaces)} / 제외 {int(counts.chars_without_spaces)}
+        {int(counts.chars_with_spaces)} / 제외 {int(counts.chars_without_spaces)} · 서버 계산
       </span>
       {counts.unencodable.length ? (
-        <span className="text-xs text-warn">양식에 없는 문자: {counts.unencodable.join(" ")}</span>
+        <span className="text-xs font-medium">양식에 없는 문자: {counts.unencodable.join(" ")}</span>
       ) : null}
-      <span className="ml-auto flex items-center gap-1 text-xs text-muted">
-        서버 계산
-        {onSettings ? (
-          <Button size="sm" variant="ghost" onClick={onSettings} aria-label="세는 기준 바꾸기">
-            <Settings2 size={14} />
-          </Button>
-        ) : null}
-      </span>
+      {onSettings ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="ml-auto -mr-2"
+          onClick={onSettings}
+          aria-label="세는 기준 바꾸기"
+        >
+          <Settings2 size={15} />
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-function SettingsSheet({ appId, doc, open, onClose }: { appId: string | null; doc: AppDocument; open: boolean; onClose: () => void }) {
+function SettingsSheet({
+  appId,
+  doc,
+  open,
+  onClose,
+}: {
+  appId: string | null;
+  doc: AppDocument;
+  open: boolean;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     title: doc.title,
@@ -524,7 +585,12 @@ function SettingsSheet({ appId, doc, open, onClose }: { appId: string | null; do
   });
   useEffect(() => {
     if (open)
-      setForm({ title: doc.title, char: doc.char_limit?.toString() ?? "", byte: doc.byte_limit?.toString() ?? "", rule: doc.count_rule });
+      setForm({
+        title: doc.title,
+        char: doc.char_limit?.toString() ?? "",
+        byte: doc.byte_limit?.toString() ?? "",
+        rule: doc.count_rule,
+      });
   }, [open, doc]);
   const save = useMutation({
     mutationFn: () =>
@@ -544,20 +610,44 @@ function SettingsSheet({ appId, doc, open, onClose }: { appId: string | null; do
   });
   const rule = (k: keyof CountRule, v: string) => setForm({ ...form, rule: { ...form.rule, [k]: v } });
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="문서 설정" description="제한과 세는 기준은 지원 양식에 맞춥니다. 숫자는 항상 서버 코드가 셉니다.">
+    <Sheet
+      open={open}
+      onOpenChange={(o) => !o && onClose()}
+      title="문서 설정"
+      description="제한과 세는 기준은 지원 양식에 맞춥니다. 숫자는 항상 서버 코드가 셉니다."
+    >
       <div className="space-y-3">
         <div>
           <Label htmlFor="ds-title">제목</Label>
-          <Input id="ds-title" value={form.title} maxLength={300} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+          <Input
+            id="ds-title"
+            value={form.title}
+            maxLength={300}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+          />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Label htmlFor="ds-char">글자 제한</Label>
-            <Input id="ds-char" type="number" min={1} inputMode="numeric" value={form.char} onChange={(e) => setForm({ ...form, char: e.target.value })} />
+            <Input
+              id="ds-char"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={form.char}
+              onChange={(e) => setForm({ ...form, char: e.target.value })}
+            />
           </div>
           <div>
             <Label htmlFor="ds-byte">바이트 제한</Label>
-            <Input id="ds-byte" type="number" min={1} inputMode="numeric" value={form.byte} onChange={(e) => setForm({ ...form, byte: e.target.value })} />
+            <Input
+              id="ds-byte"
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={form.byte}
+              onChange={(e) => setForm({ ...form, byte: e.target.value })}
+            />
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -609,14 +699,18 @@ function CompareSheet({
 }) {
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="최신 글과 내 편집 비교" width="lg">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-8 md:grid-cols-2 md:gap-6">
         <section>
-          <h3 className="mb-1 text-[13px] font-semibold">서버 최신 r{latest?.revision_no ?? "?"}</h3>
-          <div className="rounded-md border border-line bg-subtle/50 p-3 text-sm leading-7 whitespace-pre-wrap">{latest?.text || "(비어 있음)"}</div>
+          <h3 className="mb-2 text-[13px] font-semibold">서버 최신 r{latest?.revision_no ?? "?"}</h3>
+          <div className="border-t border-line pt-3 text-sm leading-7 whitespace-pre-wrap">
+            {latest?.text || <span className="text-muted">(비어 있음)</span>}
+          </div>
         </section>
         <section>
-          <h3 className="mb-1 text-[13px] font-semibold">내 편집 (r{base} 기준, 저장 안 함)</h3>
-          <div className="rounded-md border border-accent/40 bg-surface p-3 text-sm leading-7 whitespace-pre-wrap">{mine || "(비어 있음)"}</div>
+          <h3 className="mb-2 text-[13px] font-semibold">내 편집 (r{base} 기준, 저장 안 함)</h3>
+          <div className="border-t border-line pt-3 text-sm leading-7 whitespace-pre-wrap">
+            {mine || <span className="text-muted">(비어 있음)</span>}
+          </div>
         </section>
       </div>
       <p className="mt-3 text-xs text-muted">자동으로 합치지 않습니다. 필요한 문장은 직접 옮긴 뒤 저장하세요.</p>
@@ -640,15 +734,20 @@ function HistoryPanel({
     <Loaded query={q}>
       {(revs) =>
         revs.length ? (
-          <ul className="divide-y divide-line rounded-lg border border-line bg-surface text-[13px]">
+          <ul className="divide-y divide-line border-t border-line text-[13px]">
             {[...revs].reverse().map((r) => (
               <li key={r.id}>
-                <button className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-subtle/60" onClick={() => onOpen(r.revision_no)}>
+                <button
+                  type="button"
+                  className="-mx-2 flex w-[calc(100%+1rem)] items-start gap-2 rounded-md px-2 py-2.5 text-left transition-colors duration-150 hover:bg-subtle/60"
+                  onClick={() => onOpen(r.revision_no)}
+                >
                   <History size={14} className="mt-0.5 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1">
-                    <span className="font-medium">r{r.revision_no}</span> · {REVISION_ORIGIN[r.origin] ?? r.origin}
-                    {r.revision_no === current ? <Badge tone="ok" className="ml-1">최신</Badge> : null}
-                    <span className="block text-xs text-muted">
+                    <span className="font-medium tabular-nums">r{r.revision_no}</span> ·{" "}
+                    {REVISION_ORIGIN[r.origin] ?? r.origin}
+                    {r.revision_no === current ? <span className="text-muted"> · 최신</span> : null}
+                    <span className="block text-xs text-muted tabular-nums">
                       {formatDateTime(r.created_at)} · {int(r.counts.chars)}자{r.reason ? ` · ${r.reason}` : ""}
                     </span>
                   </span>
@@ -657,14 +756,24 @@ function HistoryPanel({
             ))}
           </ul>
         ) : (
-          <p className="text-[13px] text-muted">아직 저장한 기록이 없습니다.</p>
+          <p className="border-t border-line pt-3 text-sm text-muted">아직 저장한 기록이 없습니다.</p>
         )
       }
     </Loaded>
   );
 }
 
-function RevisionSheet({ appId, docId, revision, onClose }: { appId: string | null; docId: string; revision: number | null; onClose: () => void }) {
+function RevisionSheet({
+  appId,
+  docId,
+  revision,
+  onClose,
+}: {
+  appId: string | null;
+  docId: string;
+  revision: number | null;
+  onClose: () => void;
+}) {
   const q = useQuery({
     queryKey: ["document", docId, "rev", revision],
     queryFn: () => api.document(appId, docId, revision!),
@@ -672,11 +781,17 @@ function RevisionSheet({ appId, docId, revision, onClose }: { appId: string | nu
     staleTime: Infinity,
   });
   return (
-    <Sheet open={revision !== null} onOpenChange={(o) => !o && onClose()} title={`r${revision ?? ""} 보기`} description="저장된 revision 은 바뀌지 않습니다." width="lg">
+    <Sheet
+      open={revision !== null}
+      onOpenChange={(o) => !o && onClose()}
+      title={`r${revision ?? ""} 보기`}
+      description="저장된 revision 은 바뀌지 않습니다."
+      width="lg"
+    >
       <Loaded query={q}>
         {(d) => (
           <div className="space-y-2">
-            <p className="text-xs text-muted">
+            <p className="text-xs text-muted tabular-nums">
               {int(d.counts.chars)}자 · {int(d.counts.bytes)} byte · AI 수정 문단 {Math.round(d.ai_ratio * 100)}%
             </p>
             <div className="space-y-3 text-base leading-8">
@@ -720,7 +835,7 @@ function DocumentExportSheet({
       enabled={doc.current_revision > 0}
       check={(format) => api.exportCheck(appId, doc.id, format)}
       download={(format, c) => api.exportFile(appId, doc.id, format, c.revision)}
-      note={dirty ? <p className="text-xs text-warn">저장하지 않은 편집은 들어가지 않습니다.</p> : null}
+      note={dirty ? <p className="text-xs font-medium">저장하지 않은 편집은 들어가지 않습니다.</p> : null}
     />
   );
 }
