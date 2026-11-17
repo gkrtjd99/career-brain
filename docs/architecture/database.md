@@ -531,3 +531,53 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 사진을 지우면 같은 key를 가리키는 행이 이 공간에 남지 않을 때 BlobStore 파일도 지운다 (내보내기와 같은 `blob_columns` 규칙으로 찾는다).
 - 내보내기: 두 표는 카탈로그로 자동 포함, `blob_key`라 사진 바이트가 `blobs/`에 들어간다. `@schema_step("c0036")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 DB UNIQUE(`profiles`는 공간, `profile_photos`는 sha256). 삭제 기록(tombstone) 대상은 아니다.
 - 시험: `packages/core/tests/test_profiles.py` (메타데이터 지우기, 공간당 하나, 규칙·권한, 지운 바이트만 저장, 크기·형식·비율 상한, 기본 하나·지우면 옮김, 다른 공간 404, 내보내기 왕복 해시, 합치기에서 기본 사진, MCP 요약).
+
+## 학력 (c0040, O23)
+
+`c0040` (`down_revision = c0036`; 다른 묶음의 c0037–c0039와 합칠 때 그 마지막 revision으로 맞춘다). 브레인 "나 › 학력" (plan §20). 자격·이수의 `degree` 종류를 대신한다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `education` | 학교(1–100자)·캠퍼스(50)·전공(100)·복수/부전공(100)과 구분(`double`·`minor`)·학위 과정(`high_school`·`associate`·`bachelor`·`master`·`doctor`)·상태(`enrolled`·`on_leave`·`expected`·`graduated`·`completed`·`dropped`)·편입(bool)·입학/졸업 달(date, 그 달 1일)·학점·만점(`numeric(5,2)`)·메모(1,000)·`source_id`·`experience_id`(둘 다 FK `ON DELETE SET NULL (col)`) | 전체 |
+
+- CHECK: 종류 값, 글 길이, 달은 1일, 졸업 ≥ 입학, 학점과 만점은 둘 다 있거나 둘 다 없음, 만점은 4.5·4.3·4.0·100 가운데 하나, `0 ≤ 학점 ≤ 만점`, 복수/부전공과 그 구분은 함께 있거나 함께 없음. 부분 색인 `ix_education_source`. RLS·권한은 다른 공간 표와 같다.
+- 규칙 (`career_core.domain.education`, usecase `career_core.usecases.education`): 사람이 쓰는 기록이라 후보·확인 단계가 없다. 증빙은 용도 `proof` 원본만(`source_not_proof`). 편입은 상태가 아니라 표시(사람인 양식과 같다).
+- 옛 기록 옮기기 `POST /core/credentials/{id}/to-education`: 학력 종류 기록 하나를 학력 한 줄로 만들고 원래 기록을 지운다(한 트랜잭션). 학교는 발급 기관(없으면 이름), 학위 과정은 이름의 낱말(없으면 학사), 졸업 달은 취득일·끝난 날의 달, 이름·점수·상세는 메모로. 증빙 파싱이 다시 학력 후보를 만들려 하면 같은 원본의 학력이 있을 때 `already_recorded`.
+- 내보내기: 카탈로그로 자동 포함, `@schema_step("c0040")`. 합치기 키 same_except (학교·학위 과정이 정체).
+- 시험: `packages/core/tests/test_brain_me.py`.
+
+## 프로필 더하기 (c0041, O23)
+
+`c0041` (`down_revision = c0040`). `profiles`에 칸을 더한다. 모두 선택이고 restricted다: 모델로 보내는 경로·검색 색인·MCP 도구가 없다 (`profile_summary`에도 없음).
+
+| 칸 | 내용 |
+|---|---|
+| `military_status` | `served`(군필)·`serving`(복무 중)·`not_served`(미필)·`exempt`(면제)·`not_applicable`(비대상) 또는 NULL |
+| `military_branch`·`military_rank` | 군별·계급 (20자). 복무(`served`·`serving`)일 때만 남긴다 |
+| `military_started_on`·`military_ended_on` | 복무 달 (그 달 1일, 끝 ≥ 시작). 복무일 때만 |
+| `military_exemption_reason` | 면제 사유 (200자). 면제일 때만 |
+| `veteran`·`disability` | bool, NULL = 적지 않음 |
+| `desired_roles`·`desired_locations` | `text[]` NOT NULL 기본 `{}` (10개, 항목 50자) |
+| `desired_salary`·`available_from` | 희망 연봉(100자)·입사 가능일("즉시" 같은 글, 50자) |
+| `employment_types` | `text[]` (`regular`·`contract`·`intern`) |
+
+- CHECK `ck_profiles_military`(값)·`_military_period`·`_military_months`·`_preferences`(배열 길이). 칸 사이 규칙(복무가 아니면 복무 칸 비우기, 면제가 아니면 사유 비우기)은 usecase(`settle_details`)가 맞춘다.
+- HTTP `GET/PATCH /core/profile/details`(준 칸만). `PUT /core/profile`은 이 칸을 건드리지 않는다.
+- 블라인드 대상 칸 목록: `career_core.domain.blind.blind_sensitive_fields()` (사진·생년월일·출신 학교 등, 선택으로 병역·보훈·장애). 이력서(O17)의 블라인드 모드가 쓴다.
+- 내보내기: `@schema_step("c0041")`가 옛 묶음의 프로필 행에 빈 값을 넣는다.
+
+## 공통 답변 (c0042, O23)
+
+`c0042` (`down_revision = c0041`). 지원을 넘어 다시 쓰는 내 글 (plan §19.4 `answer_assets`).
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `answer_assets` | 종류(`intro`·`motivation`·`personality`·`conflict`·`failure`·`aspiration`·`other`)·제목(1–200)·본문(20,000자 이하)·시작한 제출본 `source_submission_id`(FK `ON DELETE SET NULL`)와 그 안의 `source_document_id`·만든 사람·시각 | 전체 |
+| `answer_asset_claims` | 근거로 이은 주장. `UNIQUE (answer_asset_id, claim_id)`, 답변·주장이 지워지면 함께 | 전체 |
+| `answer_asset_uses` | 지원서에 넣은 기록: 지원·문서(지워지면 함께)·만든 revision(`SET NULL`)·만든 사람·시각 | 전체 |
+
+- 근거는 잇는 때에 확인한 상태(`self_confirmed`·`evidence_supported`)인 주장만 (`claim_not_confirmed`, 30개까지). 나중에 확인이 풀린 근거는 화면에 표시하고 지원서에 넣을 때 붙이지 않는다(`claims_dropped`).
+- 지원서에 넣기 `POST /core/answer-assets/{id}/use` (`applications.write`): 문서를 주면 그 끝에 문단(빈 줄로 나눔)으로 더한다 — `base_revision`이 최신이어야 하고 아니면 409. 없으면 새 문서(문항 문구가 있으면 `question`, 괄호의 글자 수를 제한으로). 문단마다 아직 확인한 근거를 붙이고 출처는 `user`. 쓴 곳 기록을 남긴다. 글에 이 지원이 아닌 회사 이름(회사 이름·별칭·공고 회사명, 법인 표시를 뺀 비교)이 보이면 `company_mentions`. `dry_run`은 쓰지 않고 경고만.
+- 지난 제출본 `GET /core/submitted-documents`(`applications.read`): `application_submissions.documents`의 고정본만 (새 표 없음). `…/{submission_id}/{document_id}`는 글·블록·근거 복사본·회사 이름·여기서 시작한 답변. `…/to-answer`는 새 공통 답변(지금도 확인한 근거만), `…/use`는 작성 중인 지원 문서로 복사(블록 출처 유지, 같은 409·경고 규칙).
+- 내보내기: 세 표는 카탈로그로 자동 포함, `@schema_step("c0042")`. 합치기 키: 답변 same_except(제목·본문이 정체), 근거는 DB UNIQUE, 쓴 곳은 `CONTENT_ONLY_TABLES`.
+- 시험: `packages/core/tests/test_brain_me.py` (학력 CRUD·규칙·DB CHECK, 옛 학력 옮기기, 프로필 더하기 규칙과 MCP·모델 경로 0건, 기술 모으기·합치기·나누기, 공통 답변 근거·넣기·409·dry_run·쓴 곳, 다른 회사 경고, 지난 제출본, 다른 공간 0건, 내보내기·복원 왕복, MCP 도구, 블라인드 칸).

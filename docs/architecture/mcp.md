@@ -117,10 +117,17 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 
 `reference_search`·`reference_get`은 **다른 사람의 글**(합격 자기소개서·이력서·면접 후기·직무 글)이다. 설명과 결과의 `note`에 "사용자의 경험이 아니며 근거로 인용하거나 문장을 옮기지 않는다, 구조만 참고한다"는 안내가 붙고 `record: "reference"`, `untrusted_content: true`다. 결과는 구조 메모(문항·문단 구성·소재 종류·강조 역량)와 짧은 발췌뿐이라 원문을 통째로 받을 수 없다. 참고 글·메모 ID를 문서 근거로 넣으면 `unknown_claim`, 쓰거나 확인하는 MCP 도구는 없다 (`test_references.py`).
 | `profile_summary` — 이름·한 줄 소개·링크만, 읽기 전용, c0036 | `profile.read` | `GET /core/profile` (그중 세 칸) |
+| `education_list` — 학교·전공·학위 과정·상태·기간·학점, 증빙 글 없음, 읽기 전용, c0040 | `education.read` | `GET /core/education` |
+| `skills_overview` — 태그·확인한 사실·자격에서 모은 기술과 쓴 경험·기간·마지막 해·수, 읽기 전용 | `brain.read` | `GET /core/skills` |
+| `answer_asset_list` (`kind`) · `answer_asset_get` (`answer_id`, 본문·근거·쓴 곳) — 공통 답변, 읽기 전용, c0042 | `answers.read` | `GET /core/answer-assets`, `/core/answer-assets/{id}` |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
 
 `profile_summary`(c0036)는 프로필에서 **이름·한 줄 소개·링크만** 준다. 생년월일·이메일·전화·주소·증명사진은 개인 식별 정보(restricted)라 어떤 MCP 도구로도 나가지 않는다 — 에이전트가 이력서 초안에 연락처가 필요하면 사용자가 직접 채운다. 결과에 `record: "profile"`과 그 안내(`note`)가 붙고, 사용자가 쓴 글이라 `untrusted_content: true`다 (`test_profiles.py`).
+
+프로필 더하기(c0041: 병역·보훈·장애·희망 직무·근무지·연봉·입사 가능일·고용 형태)는 **어떤 MCP 도구로도 나가지 않는다** — `profile_summary`에도 없다. 희망 직무도 뺀다: 에이전트가 지원 방향을 미리 정해 쓰기보다 사용자가 대화에서 말하는 편이 낫다. 모델 요청을 만드는 코드도 이 칸을 읽지 않는다 (`test_brain_me.py`의 MCP 결과 검사와 정적 검사).
+
+`education_list`·`skills_overview`·`answer_asset_list`·`answer_asset_get`(c0040·c0042)은 사용자가 쓴 기록이라 `untrusted_content: true`다. 기술 보기는 따로 저장한 값이 아니라 경험 태그·확인한 "사용한 기술" 사실·자격증 이름에서 모은 것이고, 확인 전 사실은 세지 않는다. 공통 답변의 근거는 확인한 사실만 이어져 있다. 공통 답변을 쓰거나 지원서에 넣는 MCP 도구는 아직 없다 — HTTP `POST /core/answer-assets/{id}/use`(지원 쓰기 권한)를 쓴다.
 
 `search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`).
 
