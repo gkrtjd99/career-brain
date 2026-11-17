@@ -18,7 +18,9 @@ from __future__ import annotations
 import struct
 import zlib
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
+from typing import Any
 
 
 class ProfileRuleError(ValueError):
@@ -334,3 +336,128 @@ def clean_links(links: list[tuple[str | None, str | None]]) -> list[ProfileLink]
     if len(out) > MAX_LINKS:
         raise ProfileRuleError("too_many_links")
     return out
+
+
+# ---------------------------------------------------------------- 병역·보훈·장애·희망 조건 (c0041)
+# 모두 선택 칸이다. restricted: 모델·검색 색인·MCP(profile_summary 포함)로 나가지 않는다.
+# 희망 직무도 MCP에 넣지 않는다 — 에이전트가 직무를 알아야 하면 공고·지원에서 본다 (docs/architecture/mcp.md).
+
+
+class MilitaryStatus(StrEnum):
+    SERVED = "served"  # 군필
+    NOT_SERVED = "not_served"  # 미필
+    EXEMPT = "exempt"  # 면제
+    NOT_APPLICABLE = "not_applicable"  # 비대상
+    SERVING = "serving"  # 복무 중
+
+
+class EmploymentType(StrEnum):
+    REGULAR = "regular"  # 정규직
+    CONTRACT = "contract"  # 계약직
+    INTERN = "intern"  # 인턴
+
+
+MAX_MILITARY_TEXT = 20  # 군별·계급
+MAX_EXEMPTION_REASON = 200
+MAX_PREFERENCE_ITEMS = 10
+MAX_PREFERENCE_ITEM = 50
+MAX_SALARY = 100
+MAX_AVAILABLE_FROM = 50
+
+# 복무 기간·군별·계급을 두는 상태 (그 밖의 상태로 바꾸면 그 칸을 비운다)
+SERVICE_STATUSES = frozenset({MilitaryStatus.SERVED, MilitaryStatus.SERVING})
+
+DETAIL_FIELDS = (
+    "military_status",
+    "military_branch",
+    "military_rank",
+    "military_started_on",
+    "military_ended_on",
+    "military_exemption_reason",
+    "veteran",
+    "disability",
+    "desired_roles",
+    "desired_locations",
+    "desired_salary",
+    "available_from",
+    "employment_types",
+)
+
+
+def clean_items(values: list[str] | None, code: str) -> list[str]:
+    """목록 칸: 앞뒤·겹친 공백 정리, 빈 줄 빼기, 대소문자 무시 중복 빼기, 10개·항목 50자."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in values or []:
+        s = " ".join(str(v or "").split())
+        if not s:
+            continue
+        if len(s) > MAX_PREFERENCE_ITEM:
+            raise ProfileRuleError(code)
+        if s.casefold() in seen:
+            continue
+        seen.add(s.casefold())
+        out.append(s)
+    if len(out) > MAX_PREFERENCE_ITEMS:
+        raise ProfileRuleError(code)
+    return out
+
+
+def first_of_month(value: date | None, code: str) -> date | None:
+    if value is None:
+        return None
+    if not isinstance(value, date) or not (1900 <= value.year <= 2100):
+        raise ProfileRuleError(code)
+    return date(value.year, value.month, 1)
+
+
+def clean_details(values: dict[str, Any]) -> dict[str, Any]:
+    """준 칸만 검사·정리한다 (PATCH). 칸 사이 규칙은 ``settle_details``."""
+    out: dict[str, Any] = {}
+    for key, value in values.items():
+        if key == "military_status":
+            try:
+                out[key] = None if value is None else MilitaryStatus(value).value
+            except ValueError as exc:
+                raise ProfileRuleError("invalid_military_status") from exc
+        elif key in ("military_branch", "military_rank"):
+            out[key] = clean_text(value, MAX_MILITARY_TEXT, f"invalid_{key}")
+        elif key == "military_exemption_reason":
+            out[key] = clean_text(value, MAX_EXEMPTION_REASON, "invalid_exemption_reason")
+        elif key in ("military_started_on", "military_ended_on"):
+            out[key] = first_of_month(value, "invalid_military_period")
+        elif key in ("veteran", "disability"):
+            if value is not None and not isinstance(value, bool):
+                raise ProfileRuleError(f"invalid_{key}")
+            out[key] = value
+        elif key in ("desired_roles", "desired_locations"):
+            out[key] = clean_items(value, f"invalid_{key}")
+        elif key == "desired_salary":
+            out[key] = clean_text(value, MAX_SALARY, "invalid_desired_salary")
+        elif key == "available_from":
+            out[key] = clean_text(value, MAX_AVAILABLE_FROM, "invalid_available_from")
+        elif key == "employment_types":
+            try:
+                types = {EmploymentType(v).value for v in value or []}
+            except ValueError as exc:
+                raise ProfileRuleError("invalid_employment_types") from exc
+            out[key] = [t.value for t in EmploymentType if t.value in types]
+        else:
+            raise ProfileRuleError("unknown_field")
+    return out
+
+
+def settle_details(row: Any) -> None:
+    """한 행의 병역 칸 사이 규칙. 복무하지 않은 상태면 복무 칸을, 면제가 아니면 면제 사유를 비운다."""
+    status = row.military_status
+    if status not in SERVICE_STATUSES:
+        row.military_branch = row.military_rank = None
+        row.military_started_on = row.military_ended_on = None
+    if status != MilitaryStatus.EXEMPT:
+        row.military_exemption_reason = None
+    if (
+        row.military_started_on
+        and row.military_ended_on
+        and row.military_ended_on < row.military_started_on
+    ):
+        raise ProfileRuleError("invalid_military_period")

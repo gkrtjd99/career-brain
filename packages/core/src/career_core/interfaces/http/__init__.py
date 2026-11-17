@@ -34,10 +34,12 @@ from career_core.domain.brain import ClaimRuleError
 from career_core.domain.sources import SUGGEST_TEXT_HEAD, suggest_purpose
 from career_core.domain.workspace import ScopePermissionPolicy
 from career_core.interfaces.http.activity import add_activity_routes
+from career_core.interfaces.http.answers import add_answer_routes
 from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.companies import add_company_routes
 from career_core.interfaces.http.credentials import add_credential_routes
+from career_core.interfaces.http.education import add_education_routes
 from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.models import add_model_routes
@@ -288,6 +290,8 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_profile_routes(
         router, deps, authorize
     )  # O21 프로필·증명사진 (사진 올리기는 blobs가 있을 때)
+    add_education_routes(router, deps, authorize)  # c0040 학력
+    add_answer_routes(router, deps, authorize)  # c0042 공통 답변·지난 제출본·기술 보기
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
     add_settings_routes(router, deps, authorize)  # c0021 공간 공용 설정

@@ -25,6 +25,7 @@ from career_core.db.base import utcnow
 from career_core.db.models import Profile, ProfilePhoto
 from career_core.db.session import Database
 from career_core.domain.profiles import (
+    DETAIL_FIELDS,
     MAX_ADDRESS,
     MAX_HEADLINE,
     MAX_NAME,
@@ -33,11 +34,13 @@ from career_core.domain.profiles import (
     PROFILE_SUMMARY_FIELDS,
     ProfileRuleError,
     check_spec_size,
+    clean_details,
     clean_email,
     clean_links,
     clean_phone,
     clean_text,
     photo_spec,
+    settle_details,
     strip_metadata,
 )
 from career_core.ports import ActorContext, BlobStore
@@ -172,6 +175,56 @@ async def save_profile(
             update(Profile).where(Profile.workspace_id == actor.workspace_id).values(**values)
         )
     return await get_profile(db, actor)
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileDetailsView:
+    """병역·보훈·장애·희망 조건 (c0041). 모두 선택. restricted: MCP·모델로 보내지 않는다."""
+
+    military_status: str | None = None
+    military_branch: str | None = None
+    military_rank: str | None = None
+    military_started_on: date | None = None
+    military_ended_on: date | None = None
+    military_exemption_reason: str | None = None
+    veteran: bool | None = None
+    disability: bool | None = None
+    desired_roles: list[str] = field(default_factory=list)
+    desired_locations: list[str] = field(default_factory=list)
+    desired_salary: str | None = None
+    available_from: str | None = None
+    employment_types: list[str] = field(default_factory=list)
+
+
+def _details_view(profile: Profile | None) -> ProfileDetailsView:
+    if profile is None:
+        return ProfileDetailsView()
+    values = {f: getattr(profile, f) for f in DETAIL_FIELDS}
+    for f in ("desired_roles", "desired_locations", "employment_types"):
+        values[f] = list(values[f] or [])
+    return ProfileDetailsView(**values)
+
+
+async def get_profile_details(db: Database, actor: ActorContext) -> ProfileDetailsView:
+    async with db.workspace_session(actor.workspace_id) as s:
+        return _details_view(await s.scalar(select(Profile)))
+
+
+async def update_profile_details(
+    db: Database, actor: ActorContext, changes: dict
+) -> ProfileDetailsView:
+    """준 칸만 바꾼다 (None·빈 목록은 비우기). 병역 상태에 맞지 않는 칸은 비운다 (``settle_details``)."""
+    clean = clean_details(changes)
+    async with db.workspace_session(actor.workspace_id) as s:
+        await _ensure_profile(s, actor)
+        row = await s.scalar(select(Profile).with_for_update())
+        for key, value in clean.items():
+            setattr(row, key, value)
+        settle_details(row)
+        row.updated_by = actor.subject_id
+        row.updated_at = utcnow()
+        await s.flush()
+        return _details_view(row)
 
 
 async def profile_summary(db: Database, actor: ActorContext) -> dict:

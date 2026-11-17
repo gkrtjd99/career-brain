@@ -1510,6 +1510,46 @@ def _c0039_ingest(arc) -> None:
         arc.add_columns("core.document_blocks", bbox=None)
 
 
+@schema_step(
+    "c0040",
+    "학력 표 education (옛 묶음에는 빈 표). 자격·이수의 옛 학력 기록(credentials kind=degree)은 그대로",
+)
+def _c0040_education(arc) -> None:
+    arc.ensure_tables("core.education")
+
+
+@schema_step(
+    "c0041",
+    "profiles에 병역·보훈·장애·희망 조건 칸 (옛 묶음에는 빈 값: 글·날짜·bool은 null, 목록은 [])",
+)
+def _c0041_profile_details(arc) -> None:
+    if arc.has("core.profiles"):
+        arc.add_columns(
+            "core.profiles",
+            "desired_roles",
+            "desired_locations",
+            "employment_types",
+            military_status=None,
+            military_branch=None,
+            military_rank=None,
+            military_started_on=None,
+            military_ended_on=None,
+            military_exemption_reason=None,
+            veteran=None,
+            disability=None,
+            desired_salary=None,
+            available_from=None,
+        )
+
+
+@schema_step(
+    "c0042",
+    "공통 답변 표 answer_assets·answer_asset_claims·answer_asset_uses (옛 묶음에는 빈 표)",
+)
+def _c0042_answer_assets(arc) -> None:
+    arc.ensure_tables("core.answer_assets", "core.answer_asset_claims", "core.answer_asset_uses")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2560,6 +2600,30 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
             ("question", "structure", "materials", "competencies"),
         ),
     ),
+    # c0040 학력: 상태·날짜·학점·메모·연결은 고친다. 학교·학위 과정·만든 시각이 정체 (학교를 고친 행은 비슷한 행)
+    "core.education": (
+        SameExcept(
+            (
+                "campus",
+                "major",
+                "extra_major",
+                "extra_major_kind",
+                "status",
+                "transferred",
+                "entered_on",
+                "graduated_on",
+                "gpa",
+                "gpa_scale",
+                "note",
+                "source_id",
+                "experience_id",
+                "updated_at",
+            ),
+            ("school", "degree"),
+        ),
+    ),
+    # c0042 공통 답변: 종류는 고친다. 제목·본문이 정체 (고친 답변은 비슷한 행)
+    "core.answer_assets": (SameExcept(("kind", "updated_at"), ("title", "body")),),
     # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)
     "core.company_facts": (
         SameExcept(
@@ -2587,6 +2651,7 @@ CONTENT_ONLY_TABLES: dict[str, str] = {
     # CHECK(ck_claim_evidence_kind)로 범위·답 중 하나만 있으므로 UNIQUE(주장, 범위)·(주장, 답) 중 하나가 늘 걸린다
     "core.claim_evidence": "UNIQUE(claim_id, source_span_id)·(claim_id, interview_answer_id) 중 하나",
     "core.job_fetch_confirmations": "가져오기 실행 하나의 비용 확인 기록 (c0025, 같은 실행·같은 내용이면 겹친다)",
+    "core.answer_asset_uses": "공통 답변을 지원 문서에 넣은 기록 (c0042, 넣을 때 한 번 쓰고 고치지 않는다)",
 }
 # 자식 행의 키로 부모를 찾는 경우: 원본은 버전의 sha256(같은 파일)으로 겹친다 (업로드 중복 방지와 같은 규칙)
 CHILD_MERGE_KEYS: dict[str, tuple[str, str, str]] = {

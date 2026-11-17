@@ -86,6 +86,12 @@ ACTION_SCOPES: dict[str, str] = {
     # c0036 (O21) 프로필·증명사진. 개인 식별 정보(restricted): MCP에는 profile_summary(이름·소개·링크)만
     "profile.read": "read",
     "profile.write": "draft-write",
+    # c0040 학력. 사람이 쓰는 기록 (자격·이수의 옛 학력 기록을 옮기는 것도 쓰기)
+    "education.read": "read",
+    "education.write": "draft-write",
+    # c0042 공통 답변 (사용자가 쓴 글). 지원서에 넣기는 applications.write
+    "answers.read": "read",
+    "answers.write": "draft-write",
 }
 
 
