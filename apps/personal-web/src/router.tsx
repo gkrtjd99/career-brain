@@ -220,6 +220,23 @@ export const answerRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Answer"), "AnswerPage"),
 });
 
+/** 나 › 이력서 (O17). 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+export const resumesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/resumes",
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { application?: string } =>
+    typeof s.application === "string" ? { application: s.application } : {},
+  component: lazyRouteComponent(() => import("./pages/Resumes"), "ResumesPage"),
+});
+
+export const resumeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/resumes/$versionId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Resume"), "ResumePage"),
+});
+
 const submissionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/brain/submissions",
@@ -438,6 +455,8 @@ const routeTree = rootRoute.addChildren([
   skillsRoute,
   answersRoute,
   answerRoute,
+  resumesRoute,
+  resumeRoute,
   submissionsRoute,
   submissionRoute,
   postingsRoute,

@@ -98,6 +98,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0042 | `schema_step` | 새 표 `answer_assets`·`answer_asset_claims`·`answer_asset_uses` (옛 묶음엔 빈 표). 쓴 곳 기록은 내용만 합친다(겹침을 찾지 않는다) |
 | c0043 | `schema_step` | `sources.origin_url = null` (옛 원본은 파일로 올렸다). 공고 버전 `method`에 `browser_capture`가 더해졌을 뿐 옛 버전은 그대로 |
 | c0046 | `no_data_change` | `export_runs.kind`에 `markdown` (Markdown으로 내보내기 기록, CHECK만 넓힘) |
+| c0047 | `schema_step` | 새 표 `resume_versions`·`resume_revisions`·`resume_line_claims` (옛 묶음엔 빈 표). 본문 해시는 ID 칸을 빼고 만들어 새 ID로 복원해도 근거 상태가 그대로다 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -283,6 +284,7 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `reference_notes` | same_except | 상태·확인한 사람·확인 시각·`updated_at` (c0035) | 참고 글·문항·문단 구성·소재·역량이 정체 (메모를 고치면 다른 행) |
   | `education` | same_except | 캠퍼스·전공·복수/부전공·상태·편입·입학/졸업 달·학점·만점·메모·증빙·경험·`updated_at` (c0040) | 학교와 학위 과정이 정체 (같은 학교의 학사·석사는 다른 행) |
   | `answer_assets` | same_except | 종류·`updated_at` (c0042) | 제목과 본문이 정체 (글을 고치면 다른 행) |
+  | `resume_versions` | same_except | 제목·목표 직무·템플릿·블라인드·쪽 수 한도·최신 revision·이은 지원·`updated_at` (c0047) | 종류·위 판본·복사해 온 revision·만든 사람·만든 시각이 정체. revision은 `UNIQUE (version_id, revision_no)`, 줄 근거는 `UNIQUE (revision_id, line_id)`로 겹침을 찾는다 |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |
   | `approvals` | same_except | 결정·사용·무효 칸·`updated_at` | 행위·대상·대상 버전·내용 해시·요청 시각이 정체 |

@@ -46,6 +46,7 @@ from career_core.interfaces.http.models import add_model_routes
 from career_core.interfaces.http.postings import add_posting_routes
 from career_core.interfaces.http.profiles import add_profile_routes
 from career_core.interfaces.http.references import add_reference_routes
+from career_core.interfaces.http.resumes import add_resume_routes
 from career_core.interfaces.http.search import add_search_routes
 from career_core.interfaces.http.settings import add_settings_routes
 from career_core.interfaces.http.study import add_study_routes
@@ -303,6 +304,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     )  # O21 프로필·증명사진 (사진 올리기는 blobs가 있을 때)
     add_education_routes(router, deps, authorize)  # c0040 학력
     add_answer_routes(router, deps, authorize)  # c0042 공통 답변·지난 제출본·기술 보기
+    add_resume_routes(router, deps, authorize)  # c0047 (O17) 이력서 판본
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
     add_settings_routes(router, deps, authorize)  # c0021 공간 공용 설정

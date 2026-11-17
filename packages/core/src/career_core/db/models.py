@@ -1544,3 +1544,61 @@ class AnswerAssetUse(Base):
     revision_id: Mapped[UUID | None] = mapped_column(default=None)
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- c0047: 이력서 판본 (O17)
+
+
+class ResumeVersion(Base):
+    """이력서 판본 하나: 마스터 → 직무별 → 공고별. 위 판본을 복사해 시작하고 출처(판본·revision)를 남긴다."""
+
+    __tablename__ = "resume_versions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)  # master | role | posting
+    title: Mapped[str] = mapped_column(Text)
+    target_role: Mapped[str | None] = mapped_column(Text, default=None)
+    parent_id: Mapped[UUID | None] = mapped_column(default=None)
+    source_revision_id: Mapped[UUID | None] = mapped_column(default=None)
+    application_id: Mapped[UUID | None] = mapped_column(default=None)
+    template: Mapped[str] = mapped_column(Text, default="one_column")
+    blind: Mapped[bool] = mapped_column(Boolean, default=False)
+    max_pages: Mapped[int] = mapped_column(Integer, default=2)
+    current_revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ResumeRevision(Base):
+    """판본 본문 (``domain.resume`` 구역 JSON). 저장할 때마다 새 행, 앱 role은 추가·조회만."""
+
+    __tablename__ = "resume_revisions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    version_id: Mapped[UUID]
+    revision_no: Mapped[int] = mapped_column(Integer)
+    content: Mapped[dict] = mapped_column(JSONB)
+    content_hash: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)  # user | agent | copy | ai
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResumeLineClaim(Base):
+    """revision의 줄 ↔ 확인한 사실. 추가·조회만."""
+
+    __tablename__ = "resume_line_claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    revision_id: Mapped[UUID]
+    line_id: Mapped[str] = mapped_column(Text)
+    claim_id: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

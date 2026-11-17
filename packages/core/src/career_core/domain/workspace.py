@@ -92,6 +92,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0042 공통 답변 (사용자가 쓴 글). 지원서에 넣기는 applications.write
     "answers.read": "read",
     "answers.write": "draft-write",
+    # c0047 (O17) 이력서 판본. 줄 다듬기(모델 호출)는 documents.ai도 있어야 한다
+    "resume.read": "read",
+    "resume.write": "draft-write",
 }
 
 
