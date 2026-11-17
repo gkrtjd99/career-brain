@@ -654,3 +654,21 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 세 표 모두 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
 - 내보내기: 카탈로그로 자동 포함, `@schema_step("c0047")`(옛 묶음엔 빈 표). 합치기 키: 판본 same_except, revision·줄 근거는 DB UNIQUE.
 - 시험: `packages/core/tests/test_resumes.py`.
+
+## 면접 준비 (c0048, O16)
+
+`c0048` (`down_revision = c0047`). 지원 하나의 예상 질문과 사람이 쓰는 답변 메모 (plan §19.4). 경험을 채우는 인터뷰(O04, `interview_sessions`)와 표·화면을 나눈다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `interview_preps` | 지원마다 하나(`UNIQUE (workspace_id, application_id)`, 지원이 지워지면 함께). 공고·만들 때의 제출본(`SET NULL (submission_id)`)·방식(`model`·`search`)·만들 때의 해시 `basis`(공고 버전·제출본·회사 항목·참고 메모·경험)·메모·모델 호출·만든 사람·시각 | 전체 |
+| `interview_prep_questions` | 질문. `UNIQUE (prep_id, source_key)`(다시 만들 때 같은 출처의 질문을 찾는 열쇠). 출처 종류(`posting`·`submission`·`company`·`reference`·`common`·`user`)·문구를 쓴 쪽(`rule`·`model`·`user`)·질문(1–500)·출처 JSON·쓸 경험 후보·답 메모(5,000자 이하)·이은 공통 답변(`SET NULL (answer_asset_id)`)·답 저장 시각·사람 | 전체 |
+
+- 출처 없는 질문은 저장되지 않는다: `source->>'kind' = source_kind` CHECK와 종류별 필수 키 CHECK(제출본: 제출본·revision·인용·위치, 공고: 칸·글, 회사: 항목 ID, 참고: 메모 ID, 공통: 공통 종류).
+- 제출본·회사 항목·참고 메모는 칸으로도 이어(`submission_id`·`company_fact_id`·`reference_note_id`, 모두 `SET NULL (col)`) 지워져도 질문은 남고 "오래됨"이 된다.
+- 오래됨은 저장하지 않고 읽을 때 계산한다: 지금 제출본 ≠ 질문의 제출본이면 `submission_replaced`, 그 밖에는 `basis` 해시와 지금 값을 견준다.
+- 회사 항목·참고 메모는 참고 지식이라 쓸 경험 후보(`suggestions`)에 들어가지 않는다. 후보는 내 경험의 확인한 사실과 원문 근거뿐이다.
+- 권한: `interview_prep.read`(read)·`interview_prep.write`(draft-write)·`interview_prep.ai`(egress: 모델로 질문 다듬기·답 의견). "공통 답변으로 저장"은 `answers.write`도 본다.
+- 두 표 모두 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
+- 내보내기: 카탈로그로 자동 포함, `@schema_step("c0048")`(옛 묶음엔 빈 표). 합치기 키는 DB UNIQUE(지원마다 준비 하나, 준비 안의 `source_key`).
+- 시험: `packages/core/tests/test_interview_prep.py`.

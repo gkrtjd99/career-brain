@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { ErrorText, PageHeader } from "../components/common";
+import { interviewReady } from "../lib/interview";
 import { api } from "../lib/api";
 import { daysLeft, ddayLabel, formatDateTime } from "../lib/dates";
 import { APP_STATUS, STAGE_OUTCOME } from "../lib/labels";
@@ -176,6 +177,15 @@ function AppRow({ a }: { a: ApplicationSummary }) {
           <span className={cn("shrink-0 text-[13px] tabular-nums", soon ? "font-semibold" : "text-muted")}>{dday}</span>
         ) : null}
       </Link>
+      {interviewReady(a) ? (
+        <Link
+          to="/applications/$applicationId/interview"
+          params={{ applicationId: a.id }}
+          className="-mt-2 mb-1 inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-6"
+        >
+          면접 준비
+        </Link>
+      ) : null}
     </li>
   );
 }

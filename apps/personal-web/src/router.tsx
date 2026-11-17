@@ -347,6 +347,18 @@ export const applicationRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Workbench"), "ApplicationWorkbenchPage"),
 });
 
+/** 지원 › 면접 준비 (O16). q = 고른 질문, practice = 연습 보기 */
+export const interviewPrepRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/applications/$applicationId/interview",
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { q?: string; practice?: boolean } => ({
+    ...(typeof s.q === "string" ? { q: s.q } : {}),
+    ...(s.practice === true || s.practice === "true" ? { practice: true } : {}),
+  }),
+  component: lazyRouteComponent(() => import("./pages/Interview"), "InterviewPrepPage"),
+});
+
 export const documentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications/$applicationId/documents/$documentId",
@@ -468,6 +480,7 @@ const routeTree = rootRoute.addChildren([
   applicationsRoute,
   applicationRoute,
   documentRoute,
+  interviewPrepRoute,
   sharedDocumentsRoute,
   sharedDocumentRoute,
   studyRoute,

@@ -375,6 +375,37 @@ async def _get_prep(env: ToolEnv, a: ApplicationArgs) -> Any:
     return out
 
 
+INTERVIEW_PREP_NOTE = (
+    "Interview prep questions, each with its source (posting requirement, a sentence from the "
+    "submitted documents, a confirmed company fact, a question noted from someone else's interview "
+    "review, a common question, or added by the user). Suggested experiences are the user's own "
+    "confirmed claims with their source quotes. Answers are written by the user; never write or "
+    "rewrite an answer, and never present reference material or company facts as the user's "
+    "experience."
+)
+
+
+async def _interview_prep_get(env: ToolEnv, a: ApplicationArgs) -> Any:
+    """면접 준비 (O16). 이 기기 밖으로 보내지 않는(restricted) 원본의 인용은 빼고 준다. 읽기 전용."""
+    from career_core.usecases import interview_prep as interview_prep_uc
+
+    out = jsonable(await interview_prep_uc.get(env.db, env.actor, a.application_id))
+    withheld = 0
+    for q in out["questions"]:
+        for c in q.get("suggestions", []):
+            for ev in c.get("evidence", []):
+                if ev.get("restricted"):
+                    ev["quote"] = None
+                    withheld += 1
+        if q["source_kind"] == "reference":
+            q["source"]["record"] = "reference"
+            q["source"]["note"] = REFERENCE_RECORD_NOTE
+    out["note"] = INTERVIEW_PREP_NOTE
+    if withheld:
+        out["quotes_withheld"] = withheld
+    return out
+
+
 class SuggestArgs(Args):
     application_id: UUID
     document_id: UUID
@@ -1016,6 +1047,19 @@ TOOLS: tuple[Tool, ...] = (
         "applications.read",
         ApplicationArgs,
         _get_prep,
+        untrusted=True,
+    ),
+    Tool(
+        "interview_prep_get",
+        "Get the interview prep for an application: expected questions, each with its source "
+        "(posting item with version, an exact sentence span from the submitted documents bound to "
+        "that submission, a confirmed company fact with its as-of date, a reference interview-review "
+        "structure note, a common question, or user-added), suggested experiences with the user's "
+        "confirmed claims and source quotes, the user's own answer memo or linked reusable answer, "
+        "and stale flags. Read-only: answers are written by the user, never by you.",
+        "interview_prep.read",
+        ApplicationArgs,
+        _interview_prep_get,
         untrusted=True,
     ),
     Tool(

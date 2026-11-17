@@ -77,6 +77,10 @@ embed = "openai/text-embedding-3-large"
 # judge_visibility = "claude/claude-haiku-5-5"   # 지원 문서 요건 가시성 + 문서 속 인용
 # 지원 준비 문서: 검색 후보 안에서 문항마다 쓸 경험을 고르고 이유를 쓴다(글은 쓰지 않음). 없으면 default.
 # application_prep = "claude/claude-sonnet-5-5"
+# 면접 준비: 출처마다 예상 질문 문구를 다듬고 후보 안에서 쓸 경험을 고른다(답은 쓰지 않음). 없으면 default.
+# interview_prep = "claude/claude-haiku-5-5"
+# 면접 답 의견: 사람이 쓴 답에 짧은 지적만, 요청할 때만(저장하지 않음). 없으면 default.
+# interview_feedback = "claude/claude-haiku-5-5"
 
 [embedding]
 dimensions = 1024  # OpenAI text-embedding-3만. 3-large는 1024와 3072의 정확도가 같고, pgvector HNSW 색인은 2000차원까지.

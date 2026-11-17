@@ -101,6 +101,8 @@ export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
   judge_claim: "학습 연결 판정 (참고)",
   judge_visibility: "요건 가시성 판정 (참고)",
   application_prep: "지원 준비 (쓸 경험 고르기)",
+  interview_prep: "면접 준비 (예상 질문 다듬기)",
+  interview_feedback: "면접 답 의견 (요청할 때만)",
 };
 
 /** default로 넘어가지 않는 용도 (models.example.toml): 비어 있으면 그 일을 하지 않는다 */
