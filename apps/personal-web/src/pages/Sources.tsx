@@ -9,6 +9,7 @@ import { ProofPanel } from "../components/credentials/ProofPanel";
 import { PurposeChoice } from "../components/sources/PurposeChoice";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
+import { reasonText } from "../lib/ingest";
 import {
   ATTENTION_LABEL,
   DATA_CLASS_LABEL,
@@ -89,6 +90,7 @@ export function SourceInbox() {
       <ErrorText error={q.error ?? extract.error} className="mt-2" />
       <ul className="mt-3 divide-y divide-line border-y border-line">
         {rows.map((src) => {
+          if (src.attention === "purpose_unconfirmed") return <ConfirmRow key={src.id} src={src} />;
           const why = src.attention ? ATTENTION_LABEL[src.attention] : null;
           return (
             <li key={src.id} className="flex items-center gap-2">
@@ -126,6 +128,70 @@ export function SourceInbox() {
         <p className="mt-2 text-[13px] text-muted">경험 추출은 원문을 모델로 보내며 비용이 듭니다.</p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * 넣을 때 무엇인지 확신하지 못한 자료 (c0039). 제안한 용도를 미리 골라 두고, 한 번 눌러 확인하거나 바꾼다.
+ * 확인 전에는 이 기기 밖으로 보내지 않는다 (서버가 restricted로 둔다).
+ */
+function ConfirmRow({ src }: { src: SourceListItem }) {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (purpose: SourcePurpose) =>
+      api.updateSourcePurpose(src.id, { purpose, data_class: purpose === "proof" ? "restricted" : "private" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+      void qc.invalidateQueries({ queryKey: ["source", src.id] });
+      void qc.invalidateQueries({ queryKey: ["experiences"] });
+      void qc.invalidateQueries({ queryKey: ["credentials"] });
+    },
+  });
+  const why = reasonText(src.purpose_hint, src.purpose);
+  return (
+    <li className="space-y-2 py-3">
+      <div className="flex items-start gap-4">
+        <Link
+          to="/brain/sources/$sourceId"
+          params={{ sourceId: src.id }}
+          className="-mx-2 min-w-0 flex-1 rounded-md px-2 py-0.5 transition-colors duration-150 hover:bg-subtle/60"
+        >
+          <div className="truncate text-sm font-medium">{src.title}</div>
+          <div className="truncate text-[13px] text-muted tabular-nums">{sourceMeta(src, false)}</div>
+        </Link>
+        <span className="shrink-0 pt-0.5 text-[13px] font-semibold">확인 필요</span>
+      </div>
+      {why ? <p className="text-[13px] text-muted">{why}. 맞으면 확인을 누르세요.</p> : null}
+      <div className="-ml-1 flex flex-wrap items-center gap-1" role="radiogroup" aria-label={`${src.title} 용도`}>
+        {PURPOSE_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={src.purpose === o.value}
+            disabled={save.isPending}
+            onClick={() => save.mutate(o.value)}
+            className={cn(
+              CHIP,
+              "sm:h-8",
+              src.purpose === o.value ? "bg-fg font-medium text-bg" : "text-muted hover:bg-subtle hover:text-fg",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+        <Button
+          size="sm"
+          variant="primary"
+          className="ml-1"
+          disabled={save.isPending}
+          onClick={() => save.mutate(src.purpose)}
+        >
+          확인
+        </Button>
+      </div>
+      <ErrorText error={save.error} />
+    </li>
   );
 }
 
@@ -274,6 +340,9 @@ export function SourcePage() {
                     {parse ? (
                       <span className={TONE_TEXT[PARSE_STATUS[parse.status]?.tone ?? "none"]}>
                         {PARSE_STATUS[parse.status]?.label ?? parse.status}
+                        {/* "읽음 · 이 기기에서 읽음"처럼 겹치지 않게: 어디서 읽었는지만 붙인다 */}
+                        {parse.read_by === "device" ? " · 이 기기에서" : ""}
+                        {parse.read_by === "model" ? " · 연결된 모델로" : ""}
                         {parse.missing_pages.length ? ` · 못 읽은 쪽 ${parse.missing_pages.join(", ")}` : ""}
                         {parse.error_code ? ` · ${parse.error_code}` : ""}
                       </span>
@@ -363,7 +432,15 @@ function PurposeSection({
   src,
   parseDone,
 }: {
-  src: { id: string; purpose: SourcePurpose; data_class: string; pending_claims: number; confirmed_claims: number };
+  src: {
+    id: string;
+    purpose: SourcePurpose;
+    data_class: string;
+    pending_claims: number;
+    confirmed_claims: number;
+    purpose_pending?: boolean;
+    purpose_hint?: string | null;
+  };
   parseDone: boolean;
 }) {
   const qc = useQueryClient();
@@ -378,6 +455,19 @@ function PurposeSection({
       api.updateSourcePurpose(src.id, {
         purpose,
         data_class: purpose === "proof" ? "restricted" : (dataClass as "public" | "private" | "restricted"),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["source", src.id] });
+      void qc.invalidateQueries({ queryKey: ["sources"] });
+      void qc.invalidateQueries({ queryKey: ["experiences"] });
+    },
+  });
+  // c0039: 넣을 때 확신하지 못한 용도를 그대로 확인 (확인 대기 동안의 제한 등급은 고른 용도의 기본으로)
+  const confirm = useMutation({
+    mutationFn: () =>
+      api.updateSourcePurpose(src.id, {
+        purpose: src.purpose,
+        data_class: src.purpose === "proof" ? "restricted" : "private",
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["source", src.id] });
@@ -403,6 +493,19 @@ function PurposeSection({
 
   return (
     <Block title="용도">
+      {src.purpose_pending && !changed ? (
+        <div className="space-y-2">
+          <p className="text-[13px]">
+            <span className="font-semibold">확인 필요.</span>{" "}
+            {reasonText(src.purpose_hint, src.purpose) ?? "넣을 때 무엇인지 확신하지 못했습니다"}. 확인 전에는 이 기기 밖으로
+            보내지 않습니다.
+          </p>
+          <Button variant="primary" disabled={confirm.isPending} onClick={() => confirm.mutate()}>
+            이대로 확인
+          </Button>
+          <ErrorText error={confirm.error} />
+        </div>
+      ) : null}
       <PurposeChoice
         name="src-purpose"
         hideLegend

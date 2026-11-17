@@ -9,6 +9,7 @@ import { BrainIndex } from "../components/brain/BrainIndex";
 import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/ExperienceForm";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
+import { IngestDropTarget } from "../components/ingest/DropTarget";
 import { api } from "../lib/api";
 import {
   confirmedCount,
@@ -44,6 +45,7 @@ export function BrainPage() {
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [dropped, setDropped] = useState<File[] | null>(null);
   const setSearch = (patch: Partial<BrainSearch>) =>
     navigate({
       to: "/brain",
@@ -57,7 +59,7 @@ export function BrainPage() {
 
   const o = overview.data;
   return (
-    <div>
+    <IngestDropTarget onFiles={(f) => (setDropped(f), setUploading(true))}>
       <PageHeader
         title="브레인"
         subtitle="내 기록과 참고 지식을 나눠 둡니다. 확인한 주장만 문서와 검색 근거로 씁니다."
@@ -65,7 +67,7 @@ export function BrainPage() {
           <>
             <InterviewBatchButton experiences={all.data ?? []} />
             <Button onClick={() => setUploading(true)}>
-              <Upload size={15} /> 자료 올리기
+              <Upload size={15} /> 브레인에 넣기
             </Button>
             <Button variant="primary" onClick={() => setCreating(true)}>
               <Plus size={15} /> 경험 추가
@@ -97,7 +99,7 @@ export function BrainPage() {
         <Quiet>
           아직 경험이 없습니다. 자료를 올리거나 경험을 직접 추가하세요.{" "}
           <button type="button" onClick={() => setUploading(true)} className={TEXT_LINK}>
-            자료 올리기
+            브레인에 넣기
           </button>{" "}
           ·{" "}
           <button type="button" onClick={() => setCreating(true)} className={TEXT_LINK}>
@@ -112,8 +114,8 @@ export function BrainPage() {
       ) : null}
 
       <CreateExperienceSheet open={creating} onClose={() => setCreating(false)} />
-      <UploadSheet open={uploading} onClose={() => setUploading(false)} />
-    </div>
+      <UploadSheet open={uploading} onClose={() => setUploading(false)} initialFiles={dropped} />
+    </IngestDropTarget>
   );
 }
 

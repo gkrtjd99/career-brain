@@ -531,3 +531,19 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 사진을 지우면 같은 key를 가리키는 행이 이 공간에 남지 않을 때 BlobStore 파일도 지운다 (내보내기와 같은 `blob_columns` 규칙으로 찾는다).
 - 내보내기: 두 표는 카탈로그로 자동 포함, `blob_key`라 사진 바이트가 `blobs/`에 들어간다. `@schema_step("c0036")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 DB UNIQUE(`profiles`는 공간, `profile_photos`는 sha256). 삭제 기록(tombstone) 대상은 아니다.
 - 시험: `packages/core/tests/test_profiles.py` (메타데이터 지우기, 공간당 하나, 규칙·권한, 지운 바이트만 저장, 크기·형식·비율 상한, 기본 하나·지우면 옮김, 다른 공간 404, 내보내기 왕복 해시, 합치기에서 기본 사진, MCP 요약).
+
+## 브레인에 넣기 (c0039)
+
+`c0039` (`down_revision = c0036`). 브레인에 넣기 창과 이 기기에서 읽은 글자 층 (plan §9·§20).
+
+| 테이블 | 바뀐 칸 |
+|---|---|
+| `sources` | `purpose_pending` boolean NOT NULL DEFAULT false (앱이 확신하지 못해 사람 확인을 기다림), `purpose_hint` text NULL (제안 이유 코드, 200자 `ck_sources_purpose_hint_len`). `ck_sources_pending_restricted`: 확인 전이면 `data_class = 'restricted'`. 부분 색인 `ix_sources_purpose_pending (workspace_id) WHERE purpose_pending` |
+| `parse_runs` | `text_layer` jsonb NULL (`ck_parse_runs_text_layer_object`): 붙인 글자 층의 요약 `{origin: device\|model, engine, pages, blocks, chars, masked_resident_numbers, at[, call_id]}` — 글 자체는 블록에 있다 |
+| `document_blocks` | `bbox` jsonb NULL (`ck_document_blocks_bbox`: 길이 4 배열 `[x0, y0, x1, y1]`, 원본 그림 px). `origin`에 `device_ocr`·`model_ocr:<endpoint>`가 더해진다 (칸 타입은 그대로) |
+
+- 규칙 (usecase `career_core.usecases.ingest`·`parsing`, 규칙 `career_core.domain.ingest`): 글자 층은 검사(블록·글자·쪽·좌표 상한, 사진·PDF만)하고 주민등록번호를 다시 가린 뒤 그 run의 `device_ocr` 블록을 바꾼다(쌓지 않음). 순번은 로컬 블록 뒤. 로컬 글이 있는 쪽은 받지 않는다. 끝난 run에 붙으면 상태·빠진 쪽(`missing_pages`)을 다시 계산한다(`parsing.settle`). worker의 `_finish`는 run을 잠그고 OCR이 채운 쪽을 빠진 쪽에서 뺀다.
+- 자료 등급: 확인 전 자료와 증빙은 모델 OCR로 가지 않는다(`ParsingDeps.gateway`, 명시 라우트 `source_ocr`·`job_extract_image`만).
+- 내보내기: 칸이 더해져 `@schema_step("c0039")`가 옛 묶음에 `purpose_pending = false`·`purpose_hint = null`·`text_layer = null`·`bbox = null`을 넣는다. 합치기 키(parse_run_id, ordinal)는 그대로.
+- downgrade: 칸·제약·색인을 지운다 (`device_ocr` 블록 행은 남는다).
+- 시험: `packages/core/tests/test_ingest.py` (파일·주소 고르기 규칙과 주민등록번호 꼴, 글자 층 검사·가리기, 증빙 사진의 글자 층 → 위치 있는 자격 항목·외부 호출 0, 올릴 때 같이 보낸 층, 다른 공간 404, 스캔 PDF는 읽기 뒤, 모델 OCR은 증빙·확인 전 아님·명시 라우트만, 확인 필요 → 사람 확인, 내보내기 왕복, migration).

@@ -40,5 +40,7 @@ career-brain은 Apache-2.0이다. 직접 의존하는 패키지와 라이선스�
 | clsx, tailwind-merge | MIT |
 | lucide-react | ISC |
 | pretendard (글꼴) | SIL OFL 1.1 — 글꼴 CSS 머리말에 고지 |
+| tesseract.js, tesseract.js-core (이 기기 글자 읽기, 따로 불러오는 조각·`dist/ocr/`) | Apache-2.0 |
+| @tesseract.js-data/kor, @tesseract.js-data/eng (학습 데이터 `4.0.0_best_int`, `dist/ocr/lang/`) | MIT (데이터 원본 tesseract-ocr/tessdata_best: Apache-2.0) |
 
 빌드 도구(Vite, TypeScript, Tailwind CSS 등)는 번들에 들어가지 않는다.

@@ -91,6 +91,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0034 | `schema_step` | 새 표 `credentials` (옛 묶음엔 빈 표) |
 | c0035 | `schema_step` | 새 표 `reference_items`·`reference_notes` (옛 묶음엔 빈 표). manifest `reference_tables`가 참고 지식 표(회사·참고 글)를 표시한다 — 내 경험이 아니다 |
 | c0036 | `schema_step` | 새 표 `profiles`·`profile_photos` (옛 묶음엔 빈 표). 사진 바이트는 `blob_key`로 `blobs/`에 들어가 복원 후 sha256이 같다. 합치기는 DB UNIQUE로 겹침을 찾고(프로필은 공간당 하나라 받는 공간 것이 남는다, 사진은 sha256), 기본 사진은 받는 공간 것이 그대로다 |
+| c0039 | `schema_step` | `sources.purpose_pending = false`·`purpose_hint = null` (옛 자료는 모두 확인된 용도), `parse_runs.text_layer = null`, `document_blocks.bbox = null`. 이 기기에서 읽은 블록(`origin = device_ocr`)은 다른 블록처럼 묶음에 들어가고, 증빙 원본 그림은 바이트 그대로 복원된다 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
