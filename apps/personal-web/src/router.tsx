@@ -3,6 +3,7 @@ import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirec
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
 import { BrainPage } from "./pages/Brain";
+import { ConnectPage } from "./pages/Connect";
 import { ApplicationsPage } from "./pages/Applications";
 import { ExperiencePage } from "./pages/Experience";
 import { NotFoundPage } from "./pages/NotFound";
@@ -17,10 +18,26 @@ import { UsagePage } from "./pages/Usage";
 
 const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFoundPage });
 
-/** 토큰이 없으면 설정 화면으로 */
-function requireToken() {
-  if (!getToken()) throw redirect({ to: "/settings", search: { reason: "missing" } });
+/** 토큰이 없으면 첫 연결 화면으로. 연결한 뒤 원래 가려던 곳으로 돌아온다. */
+function requireToken({ location }: { location: { href: string } }) {
+  if (!getToken())
+    throw redirect({ to: "/connect", search: { next: location.href === "/" ? undefined : location.href } });
 }
+
+/** 같은 앱 안의 경로만 돌아갈 곳으로 받는다 */
+function safeNext(v: unknown): string | undefined {
+  return typeof v === "string" && v.startsWith("/") && !v.startsWith("//") ? v : undefined;
+}
+
+export const connectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/connect",
+  validateSearch: (s: Record<string, unknown>): { reason?: "invalid"; next?: string } => ({
+    ...(s.reason === "invalid" ? { reason: "invalid" as const } : {}),
+    ...(safeNext(s.next) ? { next: safeNext(s.next) } : {}),
+  }),
+  component: ConnectPage,
+});
 
 const todayRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -181,6 +198,7 @@ const routeTree = rootRoute.addChildren([
   postingRoute,
   usageRoute,
   settingsRoute,
+  connectRoute,
   applicationsRoute,
   applicationRoute,
   documentRoute,

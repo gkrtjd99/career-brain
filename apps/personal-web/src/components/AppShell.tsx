@@ -57,7 +57,9 @@ function SideLink({ item, path, onClick }: { item: NavItem; path: string; onClic
       onClick={onClick}
       className={cn(
         "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm",
-        active ? "bg-subtle font-medium text-fg" : "text-muted transition-colors duration-150 hover:bg-subtle/60 hover:text-fg",
+        active
+          ? "bg-subtle font-medium text-fg"
+          : "text-muted transition-colors duration-150 hover:bg-subtle/60 hover:text-fg",
       )}
     >
       <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
@@ -82,6 +84,14 @@ export function AppShell() {
   useEffect(() => setDisplayTimeZone(settings.data?.timezone), [settings.data?.timezone]);
   const zone = useDisplayTimeZone();
 
+  // 첫 연결 화면은 메뉴 없이 그 일만 보여 준다.
+  if (path === "/connect")
+    return (
+      <main className="min-h-dvh px-4 pb-12">
+        <Outlet />
+      </main>
+    );
+
   return (
     <div className="min-h-dvh md:flex">
       {/* 넓은 화면: 왼쪽 메뉴 */}
@@ -97,13 +107,12 @@ export function AppShell() {
             <SideLink key={it.to} item={it} path={path} />
           ))}
         </nav>
-        <nav className="mt-auto space-y-0.5 border-t border-line pt-3" aria-label="시스템">
+        <nav className="mt-auto space-y-0.5 border-t border-line pt-3" aria-label="연결·관리">
+          <p className="px-2.5 pb-1 text-xs text-muted">연결·관리</p>
           {SYSTEM.map((it) => (
             <SideLink key={it.to} item={it} path={path} />
           ))}
-          {me.data ? (
-            <p className="truncate px-2.5 pt-2 text-xs text-muted">공간: {me.data.workspace.name}</p>
-          ) : null}
+          {me.data ? <p className="truncate px-2.5 pt-2 text-xs text-muted">공간: {me.data.workspace.name}</p> : null}
         </nav>
       </aside>
 
@@ -140,9 +149,7 @@ export function AppShell() {
           onClick={() => setMore(true)}
           className={cn(
             "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px]",
-            [...MAIN.slice(4), ...SYSTEM].some((it) => isActive(path, it.to))
-              ? "font-medium text-fg"
-              : "text-muted",
+            [...MAIN.slice(4), ...SYSTEM].some((it) => isActive(path, it.to)) ? "font-medium text-fg" : "text-muted",
           )}
         >
           <Menu size={20} />
@@ -151,7 +158,13 @@ export function AppShell() {
       </nav>
       <Sheet open={more} onOpenChange={setMore} title="더보기">
         <div className="space-y-0.5">
-          {[...MAIN.slice(4), ...SYSTEM].map((it) => (
+          {MAIN.slice(4).map((it) => (
+            <SideLink key={it.to} item={it} path={path} onClick={() => setMore(false)} />
+          ))}
+        </div>
+        <p className="mt-4 border-t border-line px-2.5 pt-3 pb-1 text-xs text-muted">연결·관리</p>
+        <div className="space-y-0.5">
+          {SYSTEM.map((it) => (
             <SideLink key={it.to} item={it} path={path} onClick={() => setMore(false)} />
           ))}
         </div>
