@@ -1,7 +1,7 @@
 import type { UsageGroup, UsageRow } from "@career-brain/client";
-import { Badge, Card, EmptyState, Select } from "@career-brain/ui";
+import { Badge, cn, Select } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Loaded, PageHeader } from "../components/common";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
@@ -24,6 +24,11 @@ const PURPOSE_LABEL: Record<string, string> = {
   ping: "연결 확인",
 };
 
+/** 종량제 환산. 모든 호출의 단가를 모르면 0 대신 "미집계". */
+function equivalent(r: UsageRow) {
+  return r.calls > 0 && r.unknown_cost_calls === r.calls ? "미집계" : usd(r.equivalent_usd);
+}
+
 export function UsagePage() {
   const [days, setDays] = useState(30);
   const [groupBy, setGroupBy] = useState<UsageGroup>("day");
@@ -34,9 +39,9 @@ export function UsagePage() {
   });
 
   return (
-    <div>
+    <div className="max-w-4xl">
       <PageHeader title="사용량" subtitle="모델 호출 토큰과 비용. 호출마다 기록합니다." />
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-6 flex flex-wrap gap-2">
         <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-auto" aria-label="기간">
           <option value={7}>최근 7일</option>
           <option value={30}>최근 30일</option>
@@ -62,99 +67,119 @@ export function UsagePage() {
           const spent = Number(u.month_spent_usd);
           const ratio = budget ? Math.min(1, spent / budget) : 0;
           return (
-            <div className={q.isFetching ? "space-y-6 opacity-70" : "space-y-6"}>
-              <Card className="space-y-2 p-4">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-[13px] text-muted">이번 달 실제 청구</span>
-                  <span className="text-base font-semibold tabular-nums">
-                    {usd(spent, 4)}
-                    {budget !== null ? <span className="text-[13px] font-normal text-muted"> / 예산 {usd(budget, 2)}</span> : null}
-                  </span>
-                </div>
-                {budget !== null ? (
-                  <div
-                    className="h-1.5 overflow-hidden rounded-full bg-subtle"
-                    role="meter"
-                    aria-valuemin={0}
-                    aria-valuemax={budget}
-                    aria-valuenow={spent}
-                    aria-label="이번 달 예산 사용"
-                  >
-                    <div
-                      className={ratio >= 0.8 ? "h-full bg-warn" : "h-full bg-accent"}
-                      style={{ width: `${ratio * 100}%` }}
-                    />
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted">월 예산이 설정되지 않았습니다 (models.toml [budget]).</p>
-                )}
-                <p className="text-xs text-muted">
-                  기간 합계: 호출 {int(u.total.calls)}회 · 청구 {usd(u.total.spent_usd)} · 종량제 환산{" "}
-                  {usd(u.total.equivalent_usd)}
-                  {u.total.unknown_cost_calls ? ` · 단가 미상 ${u.total.unknown_cost_calls}회` : ""}
-                </p>
-                {u.notes.map((n) => (
-                  <p key={n} className="text-xs text-warn">
-                    {n}
-                  </p>
-                ))}
-              </Card>
-
-              {u.rows.length ? (
-                <>
-                  {/* 넓은 화면: 표 */}
-                  <div className="hidden overflow-x-auto rounded-lg border border-line bg-surface md:block">
-                    <table className="w-full text-[13px] tabular-nums">
-                      <thead className="border-b border-line text-left text-xs text-muted">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">{GROUPS.find((g) => g[0] === u.group_by)?.[1].replace("별", "")}</th>
-                          <th className="px-3 py-2 text-right font-medium">호출</th>
-                          <th className="px-3 py-2 text-right font-medium">입력</th>
-                          <th className="px-3 py-2 text-right font-medium">캐시 입력</th>
-                          <th className="px-3 py-2 text-right font-medium">출력</th>
-                          <th className="px-3 py-2 text-right font-medium">청구</th>
-                          <th className="px-3 py-2 text-right font-medium">환산</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line">
-                        {[...u.rows, u.total].map((r) => (
-                          <tr key={r.key} className={r === u.total ? "font-medium" : undefined}>
-                            <td className="px-3 py-2">
-                              <RowKey row={r} group={u.group_by} total={r === u.total} />
-                            </td>
-                            <td className="px-3 py-2 text-right">{int(r.calls)}</td>
-                            <td className="px-3 py-2 text-right">{int(r.input_tokens)}</td>
-                            <td className="px-3 py-2 text-right">{int(r.cached_input_tokens)}</td>
-                            <td className="px-3 py-2 text-right">{int(r.output_tokens + r.reasoning_tokens)}</td>
-                            <td className="px-3 py-2 text-right">{usd(r.spent_usd)}</td>
-                            <td className="px-3 py-2 text-right text-muted">{usd(r.equivalent_usd)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {/* 좁은 화면: 목록 */}
-                  <ul className="divide-y divide-line rounded-lg border border-line bg-surface md:hidden">
-                    {u.rows.map((r) => (
-                      <li key={r.key} className="px-3 py-2.5 text-[13px] tabular-nums">
-                        <div className="flex items-center justify-between gap-2">
-                          <RowKey row={r} group={u.group_by} />
-                          <span className="font-medium">{usd(r.spent_usd)}</span>
-                        </div>
-                        <div className="text-xs text-muted">
-                          {int(r.calls)}회 · 입력 {int(r.input_tokens)} · 출력 {int(r.output_tokens + r.reasoning_tokens)} · 환산{" "}
-                          {usd(r.equivalent_usd)}
-                        </div>
+            <div className={cn("space-y-10", q.isFetching && "opacity-70")}>
+              <section>
+                <h2 className="mb-2 text-[15px] font-semibold">요약</h2>
+                <dl className="divide-y divide-line border-y border-line">
+                  <Row label="이번 달 실제 청구">
+                    <span className="font-medium">{usd(spent, 4)}</span>
+                    {budget !== null ? <span className="text-muted"> / 예산 {usd(budget, 2)}</span> : null}
+                    {budget !== null ? (
+                      <div
+                        className="mt-1.5 ml-auto h-1 w-32 overflow-hidden rounded-full bg-subtle"
+                        role="meter"
+                        aria-valuemin={0}
+                        aria-valuemax={budget}
+                        aria-valuenow={spent}
+                        aria-label="이번 달 예산 사용"
+                      >
+                        <div
+                          className={ratio >= 0.8 ? "h-full bg-danger" : "h-full bg-fg"}
+                          style={{ width: `${ratio * 100}%` }}
+                        />
+                      </div>
+                    ) : null}
+                  </Row>
+                  {budget === null ? (
+                    <Row label="월 예산">
+                      <span className="text-muted">설정 안 함 (models.toml [budget])</span>
+                    </Row>
+                  ) : null}
+                  <Row label="기간 호출">{int(u.total.calls)}회</Row>
+                  <Row label="기간 청구">{usd(u.total.spent_usd)}</Row>
+                  <Row label="종량제 환산">
+                    {equivalent(u.total)}
+                    {u.total.unknown_cost_calls ? (
+                      <span className="text-muted"> · 단가 미상 {int(u.total.unknown_cost_calls)}회</span>
+                    ) : null}
+                  </Row>
+                </dl>
+                {u.notes.length ? (
+                  <ul className="mt-3 space-y-1">
+                    {u.notes.map((n) => (
+                      <li key={n} className="text-[13px] font-medium">
+                        {n}
                       </li>
                     ))}
                   </ul>
-                  <p className="text-xs text-muted">
-                    청구는 실제로 낸 금액, 환산은 같은 토큰을 종량제 단가로 계산한 값입니다 (구독·무료 크레딧이면 청구가 0).
-                  </p>
-                </>
-              ) : (
-                <EmptyState>이 기간에 모델 호출이 없습니다.</EmptyState>
-              )}
+                ) : null}
+              </section>
+
+              <section>
+                <h2 className="mb-2 text-[15px] font-semibold">
+                  {GROUPS.find((g) => g[0] === u.group_by)?.[1] ?? "내역"}
+                </h2>
+                {u.rows.length ? (
+                  <>
+                    {/* 넓은 화면: 표 */}
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="w-full border-t border-line text-[13px] tabular-nums">
+                        <thead className="border-b border-line text-left text-xs text-muted">
+                          <tr>
+                            <th className="py-2 pr-3 font-medium">
+                              {GROUPS.find((g) => g[0] === u.group_by)?.[1].replace("별", "")}
+                            </th>
+                            <th className="px-3 py-2 text-right font-medium">호출</th>
+                            <th className="px-3 py-2 text-right font-medium">입력</th>
+                            <th className="px-3 py-2 text-right font-medium">캐시 입력</th>
+                            <th className="px-3 py-2 text-right font-medium">출력</th>
+                            <th className="px-3 py-2 text-right font-medium">청구</th>
+                            <th className="py-2 pl-3 text-right font-medium">환산</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                          {[...u.rows, u.total].map((r) => (
+                            <tr key={r.key} className={r === u.total ? "font-medium" : undefined}>
+                              <td className="py-2.5 pr-3">
+                                <RowKey row={r} group={u.group_by} total={r === u.total} />
+                              </td>
+                              <td className="px-3 py-2.5 text-right">{int(r.calls)}</td>
+                              <td className="px-3 py-2.5 text-right">{int(r.input_tokens)}</td>
+                              <td className="px-3 py-2.5 text-right">{int(r.cached_input_tokens)}</td>
+                              <td className="px-3 py-2.5 text-right">{int(r.output_tokens + r.reasoning_tokens)}</td>
+                              <td className="px-3 py-2.5 text-right">{usd(r.spent_usd)}</td>
+                              <td className="py-2.5 pl-3 text-right text-muted">{equivalent(r)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {/* 좁은 화면: 목록 */}
+                    <ul className="divide-y divide-line border-t border-line md:hidden">
+                      {u.rows.map((r) => (
+                        <li key={r.key} className="py-3 text-[13px] tabular-nums">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="min-w-0 text-sm font-medium">
+                              <RowKey row={r} group={u.group_by} />
+                            </span>
+                            <span className="shrink-0 font-medium">{usd(r.spent_usd)}</span>
+                          </div>
+                          <div className="text-muted">
+                            {int(r.calls)}회 · 입력 {int(r.input_tokens)} · 출력{" "}
+                            {int(r.output_tokens + r.reasoning_tokens)} · 환산 {equivalent(r)}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-3 text-[13px] text-muted">
+                      청구는 실제로 낸 금액, 환산은 같은 토큰을 종량제 단가로 계산한 값입니다 (구독·무료 크레딧이면
+                      청구가 0).
+                    </p>
+                  </>
+                ) : (
+                  <p className="border-t border-line pt-3 text-sm text-muted">이 기간에 모델 호출이 없습니다.</p>
+                )}
+              </section>
             </div>
           );
         }}
@@ -163,14 +188,25 @@ export function UsagePage() {
   );
 }
 
+function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2.5 text-sm">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 text-right tabular-nums">{children}</dd>
+    </div>
+  );
+}
+
 function RowKey({ row, group, total }: { row: UsageRow; group: UsageGroup; total?: boolean }) {
   if (total) return <>합계</>;
   const problems = row.errors + row.denied;
   return (
-    <span className="inline-flex flex-wrap items-center gap-1.5">
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
       {group === "day" ? formatDate(row.key) : group === "purpose" ? (PURPOSE_LABEL[row.key] ?? row.key) : row.key}
       {problems ? <Badge tone="danger">오류·거부 {problems}</Badge> : null}
-      {row.unknown_cost_calls ? <Badge tone="warn">단가 미상 {row.unknown_cost_calls}</Badge> : null}
+      {row.unknown_cost_calls ? (
+        <span className="text-xs font-normal text-muted">단가 미상 {row.unknown_cost_calls}</span>
+      ) : null}
     </span>
   );
 }

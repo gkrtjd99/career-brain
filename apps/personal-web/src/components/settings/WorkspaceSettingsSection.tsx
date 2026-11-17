@@ -1,6 +1,6 @@
 // 공간 공용 설정 (c0021 workspace-settings): 표시 시간대와 기술명 별칭 사전.
 import type { TechAliasEntry, WorkspaceSettings } from "@career-brain/client";
-import { Badge, Button, Card, Label, Section, Select, Textarea } from "@career-brain/ui";
+import { Button, Label, Section, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -16,7 +16,14 @@ export function parseAliasLines(text: string): TechAliasEntry[] {
     if (!line || line.startsWith("#")) continue;
     const at = line.indexOf("=");
     const term = (at < 0 ? line : line.slice(0, at)).trim();
-    const aliases = at < 0 ? [] : line.slice(at + 1).split(",").map((x) => x.trim()).filter(Boolean);
+    const aliases =
+      at < 0
+        ? []
+        : line
+            .slice(at + 1)
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean);
     if (term) out.push({ term, aliases });
   }
   return out;
@@ -54,11 +61,13 @@ export function WorkspaceSettingsSection() {
   const zones = Array.from(new Set([d?.timezone, browser, ...COMMON_ZONES].filter((z): z is string => Boolean(z))));
   return (
     <Section title="작업 공간">
-      <Card className="space-y-4 p-4">
+      <div className="space-y-8 border-t border-line pt-4">
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
             <Label htmlFor="workspace-timezone">표시 시간대</Label>
-            {d ? <Badge tone={d.timezone_is_default ? "neutral" : "accent"}>{d.timezone_is_default ? "기본값" : "직접 정함"}</Badge> : null}
+            {d ? (
+              <span className="text-[13px] text-muted">{d.timezone_is_default ? "기본값" : "직접 정함"}</span>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Select
@@ -81,12 +90,13 @@ export function WorkspaceSettingsSection() {
               </Button>
             ) : null}
           </div>
-          <p className="text-xs text-muted">
-            모든 화면의 날짜·시각, D-day, 복습 마감(오늘 끝)이 이 시간대를 따릅니다.{d ? ` 지금 기준 오늘: ${d.today}` : ""}
+          <p className="text-[13px] text-muted">
+            모든 화면의 날짜·시각, D-day, 복습 마감(오늘 끝)이 이 시간대를 따릅니다.
+            {d ? ` 지금 기준 오늘: ${d.today}` : ""}
           </p>
           <ErrorText error={saveZone.error} />
         </div>
-        <div className="space-y-2 border-t border-line pt-4">
+        <div className="space-y-2">
           <Label htmlFor="tech-aliases">기술명 별칭 (한 줄에 하나: 대표 표기 = 다른 표기, 다른 표기)</Label>
           <Textarea
             id="tech-aliases"
@@ -96,25 +106,34 @@ export function WorkspaceSettingsSection() {
             onChange={(e) => setAliases(e.target.value)}
             disabled={!d}
           />
-          <p className="text-xs text-muted">
-            문서 검사(요건이 문서에 보이는지, 사실 바뀜)와 학습 화면의 요건 빈도 묶기가 같은 기술로 보고, 키워드 검색도 다른 표기까지
-            넓혀 찾습니다(의미 검색 질문은 그대로). 기본 표 위에 합쳐지며, 같은
-            대표 표기를 적으면 기본 표 항목을 대신합니다. 200개, 항목당 다른 표기 20개, 40자까지.
+          <p className="text-[13px] text-muted">
+            문서 검사(요건이 문서에 보이는지, 사실 바뀜)와 학습 화면의 요건 빈도 묶기가 같은 기술로 보고, 키워드 검색도
+            다른 표기까지 넓혀 찾습니다(의미 검색 질문은 그대로). 기본 표 위에 합쳐지며, 같은 대표 표기를 적으면 기본 표
+            항목을 대신합니다. 200개, 항목당 다른 표기 20개, 40자까지.
           </p>
           <ErrorText error={saveAliases.error} />
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" size="sm" disabled={!d || saveAliases.isPending} onClick={() => saveAliases.mutate()}>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!d || saveAliases.isPending}
+              onClick={() => saveAliases.mutate()}
+            >
               별칭 저장
             </Button>
           </div>
           {d?.builtin_aliases.length ? (
-            <details className="text-xs text-muted">
-              <summary className="cursor-pointer">기본 표 ({d.builtin_aliases.length}개, 읽기 전용)</summary>
-              <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap font-mono">{aliasLines(d.builtin_aliases)}</pre>
+            <details className="text-[13px] text-muted">
+              <summary className="cursor-pointer py-1 hover:text-fg">
+                기본 표 ({d.builtin_aliases.length}개, 읽기 전용)
+              </summary>
+              <pre className="mt-2 max-h-60 overflow-auto border-t border-line pt-2 font-mono text-xs whitespace-pre-wrap">
+                {aliasLines(d.builtin_aliases)}
+              </pre>
             </details>
           ) : null}
         </div>
-      </Card>
+      </div>
     </Section>
   );
 }

@@ -1,6 +1,5 @@
 import type { ApiToken, ApiTokenStatus, IssuedApiToken } from "@career-brain/client";
-import { Badge, Button, Card, ConfirmDialog, Input, Label, Section, Select } from "@career-brain/ui";
-import type { BadgeTone } from "@career-brain/ui";
+import { Button, ConfirmDialog, Input, Label, Section, Select } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, api } from "../lib/api";
@@ -8,10 +7,10 @@ import { formatDate, formatDateTime } from "../lib/dates";
 import { TOKEN_SOON_DAYS, tokenDaysLeft, tokenExpiresSoon, tokenExpiryText } from "../lib/tokens";
 import { ErrorText, Loaded } from "./common";
 
-const STATUS: Record<ApiTokenStatus, { label: string; tone: BadgeTone }> = {
-  active: { label: "사용 가능", tone: "ok" },
-  expired: { label: "만료", tone: "warn" },
-  revoked: { label: "폐기", tone: "none" },
+const STATUS: Record<ApiTokenStatus, string> = {
+  active: "사용 가능",
+  expired: "만료",
+  revoked: "폐기",
 };
 
 const EXPIRY_CHOICES: [string, string][] = [
@@ -122,8 +121,7 @@ export function TokensSection() {
   const soon = (tokens.data ?? []).filter((t) => tokenExpiresSoon(t));
 
   const issue = useMutation({
-    mutationFn: () =>
-      api.issueApiToken({ label: label.trim(), expires_days: expires ? Number(expires) : null }),
+    mutationFn: () => api.issueApiToken({ label: label.trim(), expires_days: expires ? Number(expires) : null }),
     onSuccess: (res) => {
       setIssued(res);
       setCopied(false);
@@ -141,54 +139,60 @@ export function TokensSection() {
 
   return (
     <Section title="토큰 관리">
-      <Card className="space-y-4 p-4">
-        <p className="text-xs leading-5 text-muted">
+      <div className="space-y-6">
+        <p className="text-[13px] leading-5 text-muted">
           이 작업 공간의 API 토큰입니다. 서버에는 토큰 원문이 없고(해시만), 이 목록에도 나오지 않습니다. 마지막 사용
           시각은 최대 5분 늦게 바뀝니다.
         </p>
         {soon.length ? (
-          <div role="status" className="rounded-lg border border-warn/40 bg-surface px-3 py-2 text-[13px]">
+          <div role="status" className="space-y-1 text-[13px]">
             <p className="font-medium">곧 만료되는 토큰 ({TOKEN_SOON_DAYS}일 안)</p>
-            <ul className="mt-1 list-disc pl-5 text-muted">
+            <ul className="text-muted">
               {soon.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="tabular-nums">
                   {t.label}
                   {t.current ? " (지금 이 브라우저가 쓰는 토큰)" : ""} — {tokenExpiryText(tokenDaysLeft(t) ?? 0)} (
                   {formatDate(t.expires_at)})
                 </li>
               ))}
             </ul>
-            <p className="mt-1 text-xs text-muted">
-              "고치기"로 만료를 연장하거나, 새 토큰을 만들어 바꾼 뒤 옛 토큰을 폐기하세요.
-            </p>
+            <p className="text-muted">"고치기"로 만료를 연장하거나, 새 토큰을 만들어 바꾼 뒤 옛 토큰을 폐기하세요.</p>
           </div>
         ) : null}
         <Loaded query={tokens}>
           {(rows) => (
-            <ul className="divide-y divide-line rounded-lg border border-line">
+            <ul className="divide-y divide-line border-y border-line">
               {rows.map((t) => (
-                <li key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-[13px]">
-                  <span className="font-medium">{t.label}</span>
-                  <Badge tone={STATUS[t.status].tone}>{STATUS[t.status].label}</Badge>
-                  {t.current ? <Badge tone="accent">지금 사용 중</Badge> : null}
-                  {tokenExpiresSoon(t) ? <Badge tone="warn">곧 만료</Badge> : null}
-                  <span className="text-xs text-muted">
-                    만든 날 {formatDate(t.created_at)}
-                    {t.expires_at ? ` · 만료 ${formatDate(t.expires_at)}` : " · 만료 없음"}
-                    {` · 마지막 사용 ${t.last_used_at ? formatDateTime(t.last_used_at) : "없음"}`}
-                  </span>
-                  <span className="ml-auto flex gap-2">
+                <li key={t.id} className="py-3 text-[13px]">
+                  <div className="flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {t.label}
+                        {t.current ? <span className="font-normal text-muted"> · 이 브라우저</span> : null}
+                      </div>
+                      <div className="text-muted tabular-nums">
+                        {t.status === "active" ? null : (
+                          <span className="font-medium text-fg">{STATUS[t.status]} · </span>
+                        )}
+                        {tokenExpiresSoon(t) ? <span className="font-medium text-fg">곧 만료 · </span> : null}
+                        만든 날 {formatDate(t.created_at)}
+                        {t.expires_at ? ` · 만료 ${formatDate(t.expires_at)}` : " · 만료 없음"}
+                        {` · 마지막 사용 ${t.last_used_at ? formatDateTime(t.last_used_at) : "없음"}`}
+                      </div>
+                    </div>
                     {t.status === "active" ? (
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(editing === t.id ? null : t.id)}>
-                        고치기
-                      </Button>
+                      <div className="flex shrink-0 gap-1.5">
+                        <Button size="sm" variant="ghost" onClick={() => setEditing(editing === t.id ? null : t.id)}>
+                          고치기
+                        </Button>
+                        {!t.current ? (
+                          <Button size="sm" variant="danger" onClick={() => setTarget(t)}>
+                            폐기
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
-                    {t.status === "active" && !t.current ? (
-                      <Button size="sm" variant="danger" onClick={() => setTarget(t)}>
-                        폐기
-                      </Button>
-                    ) : null}
-                  </span>
+                  </div>
                   {editing === t.id ? <TokenEditor token={t} onDone={() => setEditing(null)} /> : null}
                 </li>
               ))}
@@ -197,13 +201,13 @@ export function TokensSection() {
         </Loaded>
 
         <form
-          className="space-y-2 border-t border-line pt-4"
+          className="space-y-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (label.trim()) issue.mutate();
           }}
         >
-          <p className="text-[13px] font-medium">새 토큰</p>
+          <h3 className="text-sm font-medium">새 토큰</h3>
           <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
             <div>
               <Label htmlFor="token-label">이름 (어디서 쓰는지)</Label>
@@ -233,11 +237,11 @@ export function TokensSection() {
         </form>
 
         {issued ? (
-          <div className="space-y-2 rounded-lg border border-line bg-accent-soft p-3" role="status">
+          <div className="space-y-2 rounded-md border border-fg p-3" role="status">
             <p className="text-[13px] font-medium">
               새 토큰 "{issued.token.label}" — 지금 한 번만 보입니다. 안전한 곳에 보관하세요.
             </p>
-            <code className="block break-all rounded bg-surface px-2 py-1.5 text-[12px]">{issued.secret}</code>
+            <code className="block rounded bg-subtle px-2 py-1.5 text-xs break-all">{issued.secret}</code>
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -253,7 +257,7 @@ export function TokensSection() {
             </div>
           </div>
         ) : null}
-      </Card>
+      </div>
 
       <ConfirmDialog
         open={target !== null}

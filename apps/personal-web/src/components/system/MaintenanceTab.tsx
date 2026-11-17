@@ -1,7 +1,14 @@
 // 시스템 화면 "백업·유지보수" 탭: 저장된 자료, 내보내기, 웹 복원(합치기), 초안 정리.
 // System.tsx에서 떼어 낸 파일이다 (다른 탭과 따로 고칠 수 있게).
-import type { DuplicatePolicy, Maintenance, NearChoice, NearDecision, NearDuplicate, RestoreJob } from "@career-brain/client";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Select, Spinner, Textarea } from "@career-brain/ui";
+import type {
+  DuplicatePolicy,
+  Maintenance,
+  NearChoice,
+  NearDecision,
+  NearDuplicate,
+  RestoreJob,
+} from "@career-brain/client";
+import { Badge, Button, ConfirmDialog, Input, Label, Section, Select, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -93,14 +100,26 @@ function Problem({ error }: { error: unknown }) {
   );
 }
 
+/** 라벨·값 줄을 얇은 선으로 나눈 목록 */
+function Fields({ children }: { children: ReactNode }) {
+  return <dl className="divide-y divide-line border-y border-line">{children}</dl>;
+}
+
 function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1 text-[13px]">
-      <span className="shrink-0 text-muted">{label}</span>
-      <span className="min-w-0 text-right break-words">{children}</span>
+    <div className="flex items-baseline justify-between gap-4 py-2.5 text-[13px]">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 text-right break-words tabular-nums">{children}</dd>
     </div>
   );
 }
+
+function Quiet({ children }: { children: ReactNode }) {
+  return <p className="border-t border-line pt-3 text-sm text-muted">{children}</p>;
+}
+
+/** 펼쳐 보는 보조 목록 (표별 행 수 등) */
+const HAIRLINE_LIST = "mt-2 divide-y divide-line border-y border-line";
 
 const short = (name: string) => name.replace(/^core\./, "");
 const running = (job: RestoreJob | RestoreJobMore | null | undefined) =>
@@ -146,37 +165,39 @@ export function MaintenanceTab() {
   return (
     <Loaded query={q}>
       {(m) => (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="max-w-3xl space-y-10">
           <Section title="저장된 자료">
-            <Card className="px-3 py-2">
+            <Fields>
               <Field label="행">{int(m.rows_total)}개</Field>
               <Field label="원본 파일">
                 {int(m.blobs.referenced)}개 참조 · 저장소 {m.blobs.files === null ? "—" : `${int(m.blobs.files)}개`} ·{" "}
                 {bytes(m.blobs.bytes)}
               </Field>
               <Field label="마지막 내보내기">
-                {m.last_export ? `${formatDateTime(m.last_export.created_at)} · ${bytes(m.last_export.archive_bytes)}` : "없음"}
+                {m.last_export
+                  ? `${formatDateTime(m.last_export.created_at)} · ${bytes(m.last_export.archive_bytes)}`
+                  : "없음"}
               </Field>
               {m.last_restore ? (
                 <Field label={m.last_restore.kind === "merge" ? "마지막 합치기" : "마지막 복원"}>
                   {formatDateTime(m.last_restore.created_at)} · {int(m.last_restore.rows_total)}행
                 </Field>
               ) : null}
-            </Card>
+            </Fields>
             <details className="text-[13px]">
-              <summary className="cursor-pointer text-muted">표별 행 수</summary>
-              <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+              <summary className="cursor-pointer py-1 text-muted hover:text-fg">표별 행 수</summary>
+              <ul className={HAIRLINE_LIST}>
                 {Object.entries(m.tables)
                   .filter(([, n]) => n > 0)
                   .sort((x, y) => y[1] - x[1])
                   .map(([name, n]) => (
-                    <li key={name} className="flex justify-between gap-2 px-3 py-1 tabular-nums">
+                    <li key={name} className="flex justify-between gap-2 py-1.5 tabular-nums">
                       <span className="min-w-0 truncate">{short(name)}</span>
                       <span>{int(n)}</span>
                     </li>
                   ))}
               </ul>
-              <p className="mt-2 text-xs text-muted">
+              <p className="mt-2 text-[13px] text-muted">
                 묶음에 넣지 않는 것: {Object.keys(m.excluded).map(short).join(", ")} (복원 뒤 다시 만듦)
               </p>
             </details>
@@ -184,7 +205,7 @@ export function MaintenanceTab() {
 
           <Section title="내보내기">
             {m.export_available ? (
-              <div className="space-y-2">
+              <div className="space-y-2 sm:max-w-md">
                 <Label htmlFor="age-recipient">age 공개 키 (선택, 넣으면 암호화)</Label>
                 <Input
                   id="age-recipient"
@@ -204,38 +225,46 @@ export function MaintenanceTab() {
                     삭제 기록 내려받기
                   </Button>
                 </div>
-                {saved ? <p className="text-xs text-ok break-all">{saved}</p> : null}
+                {saved ? <p className="text-[13px] break-all">내려받음: {saved}</p> : null}
                 <Problem error={exportArchive.error ?? deletions.error} />
-                <p className="text-xs text-muted">
-                  묶음에는 개인 자료가 들어 있습니다. 암호화하지 않았다면 안전한 곳에 보관하세요. 삭제 기록은 작으니 자주 받아 두면 오래된
-                  묶음을 복원한 뒤 그 사이 지운 자료를 다시 지웁니다.
+                <p className="text-[13px] text-muted">
+                  묶음에는 개인 자료가 들어 있습니다. 암호화하지 않았다면 안전한 곳에 보관하세요. 삭제 기록은 작으니
+                  자주 받아 두면 오래된 묶음을 복원한 뒤 그 사이 지운 자료를 다시 지웁니다.
                 </p>
               </div>
             ) : (
-              <EmptyState>원본 저장소가 없어 이 설치에서는 내려받을 수 없습니다. CLI(personal-api export)를 쓰세요.</EmptyState>
+              <Quiet>원본 저장소가 없어 이 설치에서는 내려받을 수 없습니다. CLI(personal-api export)를 쓰세요.</Quiet>
             )}
           </Section>
 
-          <Section title="복원 (이 공간에 합치기)" className="lg:col-span-2">
+          <Section title="복원 (이 공간에 합치기)">
             {m.restore_available ? (
               <RestorePanel m={m} />
             ) : (
-              <EmptyState>원본 저장소가 없어 이 설치에서는 올릴 수 없습니다. CLI(personal-api restore --merge)를 쓰세요.</EmptyState>
+              <Quiet>
+                원본 저장소가 없어 이 설치에서는 올릴 수 없습니다. CLI(personal-api restore --merge)를 쓰세요.
+              </Quiet>
             )}
           </Section>
 
           <Section title="초안 정리">
-            <Card className="space-y-2 px-3 py-2.5">
-              <p className="text-[13px]">
-                확정하지 않은 공고 초안 중 {m.draft_retention_days}일 지난 것: <span className="font-medium">{int(m.drafts_purgeable)}개</span>
-              </p>
-              <Button size="sm" variant="danger" disabled={!m.drafts_purgeable || purge.isPending} onClick={() => setConfirmPurge(true)}>
+            <div className="flex items-center justify-between gap-4 border-y border-line py-2.5 text-[13px]">
+              <span className="min-w-0">
+                확정하지 않은 공고 초안 중 {m.draft_retention_days}일 지난 것{" "}
+                <span className="font-medium tabular-nums">{int(m.drafts_purgeable)}개</span>
+              </span>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={!m.drafts_purgeable || purge.isPending}
+                onClick={() => setConfirmPurge(true)}
+              >
                 지금 정리
               </Button>
-              {purge.data ? <p className="text-xs text-ok">{purge.data.deleted}개를 지웠습니다.</p> : null}
-              <Problem error={purge.error} />
-              {m.auto ? <AutoMaintenanceLine auto={m.auto} /> : null}
-            </Card>
+            </div>
+            {purge.data ? <p className="text-[13px]">{purge.data.deleted}개를 지웠습니다.</p> : null}
+            <Problem error={purge.error} />
+            {m.auto ? <AutoMaintenanceLine auto={m.auto} /> : null}
           </Section>
           <ConfirmDialog
             open={confirmPurge}
@@ -340,7 +369,12 @@ function RestorePanel({ m }: { m: Maintenance }) {
   const nearChoices = (): NearChoice[] =>
     ((current?.report ?? null) as MergeReportMore | null)?.near_duplicates
       ?.filter((p) => near[nearKey(p)] === "skip_incoming")
-      .map((p) => ({ table: p.table, incoming_id: p.incoming_id, existing_id: p.existing_id, decision: "skip_incoming" })) ?? [];
+      .map((p) => ({
+        table: p.table,
+        incoming_id: p.incoming_id,
+        existing_id: p.existing_id,
+        decision: "skip_incoming",
+      })) ?? [];
   const apply = useMutation({
     mutationFn: () =>
       api.applyRestore(current!.id, {
@@ -380,10 +414,11 @@ function RestorePanel({ m }: { m: Maintenance }) {
   const report = (current?.report ?? null) as MergeReportMore | null;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p className="text-[13px] text-muted">
-        내보내기 묶음(.tar.gz, 암호화했다면 .age)을 올려 <span className="text-fg">지금 공간에 합칩니다</span>. 이미 있는 자료는 고치지 않고, 없는
-        행만 새 ID로 더합니다. 먼저 확인(아무것도 쓰지 않음)으로 무엇이 들어갈지 보고 합칩니다.
+        내보내기 묶음(.tar.gz, 암호화했다면 .age)을 올려 <span className="text-fg">지금 공간에 합칩니다</span>. 이미
+        있는 자료는 고치지 않고, 없는 행만 새 ID로 더합니다. 먼저 확인(아무것도 쓰지 않음)으로 무엇이 들어갈지 보고
+        합칩니다.
       </p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="space-y-1">
@@ -436,7 +471,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
               disabled={busy}
               className="font-mono text-xs"
             />
-            <p className="text-xs text-muted">
+            <p className="text-[13px] text-muted">
               확인·합치기 요청에만 실어 보내고, 서버는 worker가 쓸 때까지 작업 폴더에 본인만 읽는 파일로 둔 뒤 지웁니다.
             </p>
           </div>
@@ -532,23 +567,25 @@ function NearDuplicates({
   const total = report.near_duplicates_total ?? pairs.length;
   return (
     <details className="text-[13px]" open>
-      <summary className="cursor-pointer text-muted">
+      <summary className="cursor-pointer py-1 font-medium">
         비슷한 행 {int(total)}쌍 {report.dry_run ? "— 합치기 전에 고르세요" : "— 고른 처리"}
       </summary>
-      <p className="mt-1 text-xs text-muted">
-        만든 시각·만든 사람이 같고 제목·문장 같은 칸만 다른 행입니다. 기본은 둘 다 둡니다 (들어오는 행을 새 행으로). 같은 자료를
-        고친 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
+      <p className="mt-1 text-muted">
+        만든 시각·만든 사람이 같고 제목·문장 같은 칸만 다른 행입니다. 기본은 둘 다 둡니다 (들어오는 행을 새 행으로).
+        같은 자료를 고친 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
         {total > pairs.length ? ` 앞 ${pairs.length}쌍만 보여 주고, 나머지는 둘 다 둡니다.` : ""}
       </p>
-      <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+      <ul className={HAIRLINE_LIST}>
         {pairs.map((p) => {
           const key = nearKey(p);
           const decision = report.dry_run ? (choices[key] ?? "keep_both") : p.decision;
           return (
-            <li key={key} className="space-y-1.5 px-3 py-2">
+            <li key={key} className="space-y-2 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium">{short(p.table)}</span>
-                <span className="text-xs text-muted">다른 칸: {p.columns.map((c) => COLUMN_LABEL[c] ?? c).join(", ") || "—"}</span>
+                <span className="text-xs text-muted">
+                  다른 칸: {p.columns.map((c) => COLUMN_LABEL[c] ?? c).join(", ") || "—"}
+                </span>
               </div>
               <dl className="grid grid-cols-1 gap-x-3 gap-y-0.5 text-xs md:grid-cols-[auto_1fr_1fr]">
                 <span className="hidden md:block" />
@@ -558,13 +595,19 @@ function NearDuplicates({
                   <div key={c} className="contents">
                     <dt className="text-muted">{COLUMN_LABEL[c] ?? c}</dt>
                     <dd className="min-w-0 break-words">{shown(p.existing[c])}</dd>
-                    <dd className={`min-w-0 break-words ${p.columns.includes(c) ? "text-warn" : ""}`}>{shown(p.incoming[c])}</dd>
+                    <dd className={`min-w-0 break-words ${p.columns.includes(c) ? "font-semibold" : ""}`}>
+                      {shown(p.incoming[c])}
+                    </dd>
                   </div>
                 ))}
               </dl>
-              <div className="flex flex-wrap gap-3 text-xs" role="radiogroup" aria-label={`${short(p.table)} 처리`}>
+              <div
+                className="flex flex-wrap gap-x-4 text-[13px]"
+                role="radiogroup"
+                aria-label={`${short(p.table)} 처리`}
+              >
                 {(["keep_both", "skip_incoming"] as const).map((d) => (
-                  <label key={d} className="flex items-center gap-1.5">
+                  <label key={d} className="flex min-h-9 items-center gap-1.5">
                     <input
                       type="radio"
                       name={`near-${key}`}
@@ -587,9 +630,9 @@ function NearDuplicates({
 function UploadBar({ progress, name }: { progress: UploadProgress; name: string | undefined }) {
   const pct = progress.total > 0 ? Math.min(100, Math.round((progress.loaded / progress.total) * 100)) : 0;
   return (
-    <Card className="space-y-1.5 px-3 py-2.5 text-[13px]">
+    <div className="space-y-1.5 border-y border-line py-3 text-[13px]">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="accent">올리는 중</Badge>
+        <span className="font-medium">올리는 중</span>
         <span className="min-w-0 truncate text-muted">{name ?? "묶음"}</span>
       </div>
       <div>
@@ -610,7 +653,7 @@ function UploadBar({ progress, name }: { progress: UploadProgress; name: string 
           <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -618,7 +661,7 @@ function JobStatus({ job }: { job: RestoreJob | RestoreJobMore }) {
   const pct = job.total > 0 ? Math.min(100, Math.round((job.done / job.total) * 100)) : null;
   const unit = job.phase === "read" || job.phase === "decrypt" ? bytes : int;
   return (
-    <Card className="space-y-1.5 px-3 py-2.5 text-[13px]">
+    <div className="space-y-1.5 border-y border-line py-3 text-[13px]">
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge job={job} />
         <span className="min-w-0 truncate text-muted">
@@ -637,7 +680,11 @@ function JobStatus({ job }: { job: RestoreJob | RestoreJobMore }) {
               </span>
             ) : null}
           </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded bg-subtle" role="progressbar" aria-valuenow={pct ?? undefined}>
+          <div
+            className="mt-1 h-1.5 overflow-hidden rounded bg-subtle"
+            role="progressbar"
+            aria-valuenow={pct ?? undefined}
+          >
             <div className="h-full bg-accent transition-all" style={{ width: `${pct ?? 15}%` }} />
           </div>
         </div>
@@ -648,23 +695,24 @@ function JobStatus({ job }: { job: RestoreJob | RestoreJobMore }) {
           {job.error_detail ? <span className="block text-xs text-muted">{job.error_detail}</span> : null}
         </p>
       ) : null}
-      <p className="font-mono text-[11px] break-all text-muted">sha256 {job.sha256}</p>
-    </Card>
+      <p className="font-mono text-xs break-all text-muted">sha256 {job.sha256}</p>
+    </div>
   );
 }
 
+/** 실패만 배지로, 나머지 단계는 글자로 */
 function StatusBadge({ job }: { job: RestoreJob | RestoreJobMore }) {
   switch (job.status) {
     case "uploaded":
-      return <Badge tone="none">올림</Badge>;
+      return <span className="font-medium">올림</span>;
     case "verifying":
-      return <Badge tone="accent">확인 중</Badge>;
+      return <span className="font-medium">확인 중</span>;
     case "verified":
-      return <Badge tone="ok">확인됨 · 아직 쓰지 않음</Badge>;
+      return <span className="font-medium">확인됨 · 아직 쓰지 않음</span>;
     case "applying":
-      return <Badge tone="accent">합치는 중</Badge>;
+      return <span className="font-medium">합치는 중</span>;
     case "done":
-      return <Badge tone="ok">합침</Badge>;
+      return <span className="font-medium">합침</span>;
     case "failed":
       return <Badge tone="danger">실패</Badge>;
   }
@@ -673,8 +721,8 @@ function StatusBadge({ job }: { job: RestoreJob | RestoreJobMore }) {
 function ReportView({ report }: { report: MergeReportMore }) {
   const tables = report.tables.filter((t) => t.archive_rows > 0 && !(t.name in report.not_merged));
   return (
-    <div className="space-y-2">
-      <Card className="px-3 py-2">
+    <div className="space-y-4">
+      <Fields>
         <Field label="묶음">
           {report.source_workspace_name}
           {report.source_workspace_id === report.workspace_id ? " (이 공간의 예전 묶음)" : ""}
@@ -688,37 +736,39 @@ function ReportView({ report }: { report: MergeReportMore }) {
             {int(report.deletions_applied)}건 적용 · {int(report.deletions_skipped)}건 건너뜀
           </Field>
         ) : null}
-        <Field label="확인">
-          <Badge tone="ok">기존 행 그대로 · 더한 행 해시 일치</Badge>
-        </Field>
+        <Field label="확인">기존 행 그대로 · 더한 행 해시 일치</Field>
         {report.format_upgraded_from !== null ? (
           <Field label="형식">옛 형식 {report.format_upgraded_from} → 지금 형식으로 바꿔 읽음</Field>
         ) : null}
         {report.schema_converted_from ? (
-          <Field label="버전">옛 설치({report.schema_converted_from.join(", ")})의 묶음 → 지금 표 구성으로 바꿔 읽음</Field>
+          <Field label="버전">
+            옛 설치({report.schema_converted_from.join(", ")})의 묶음 → 지금 표 구성으로 바꿔 읽음
+          </Field>
         ) : null}
         {report.approvals_invalidated ? (
           <Field label="승인 요청">
             {int(report.approvals_invalidated)}건 {report.dry_run ? "닫힘 예정" : "닫음"} (대상 지원이 바뀜 · 다시 요청)
           </Field>
         ) : null}
-      </Card>
+      </Fields>
       {report.notes.map((n) => (
-        <p key={n} className="text-xs text-warn">
+        <p key={n} className="text-[13px] font-medium">
           {n}
         </p>
       ))}
       {report.skipped_deletions.length ? (
         <details className="text-[13px]" open>
-          <summary className="cursor-pointer text-muted">적용하지 않은 삭제 기록 {report.skipped_deletions.length}건</summary>
-          <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+          <summary className="cursor-pointer py-1 text-muted hover:text-fg">
+            적용하지 않은 삭제 기록 {report.skipped_deletions.length}건
+          </summary>
+          <ul className={HAIRLINE_LIST}>
             {report.skipped_deletions.map((d) => (
-              <li key={`${d.target_table}:${d.target_id}`} className="px-3 py-1.5">
+              <li key={`${d.target_table}:${d.target_id}`} className="py-2">
                 <div className="flex flex-wrap justify-between gap-x-2">
                   <span>{short(d.target_table)}</span>
                   <span className="text-muted">{SKIP_REASON[d.reason] ?? d.reason}</span>
                 </div>
-                <div className="font-mono text-[11px] break-all text-muted">
+                <div className="font-mono text-xs break-all text-muted">
                   {d.target_id}
                   {d.detail ? ` · ${d.detail}` : ""}
                 </div>
@@ -728,10 +778,10 @@ function ReportView({ report }: { report: MergeReportMore }) {
         </details>
       ) : null}
       <details className="text-[13px]">
-        <summary className="cursor-pointer text-muted">표별 결과</summary>
-        <ul className="mt-2 divide-y divide-line rounded-md border border-line">
+        <summary className="cursor-pointer py-1 text-muted hover:text-fg">표별 결과</summary>
+        <ul className={HAIRLINE_LIST}>
           {tables.map((t) => (
-            <li key={t.name} className="px-3 py-1.5">
+            <li key={t.name} className="py-1.5">
               <div className="flex justify-between gap-2 tabular-nums">
                 <span className="min-w-0 truncate">{short(t.name)}</span>
                 <span className="shrink-0">
@@ -740,7 +790,7 @@ function ReportView({ report }: { report: MergeReportMore }) {
                 </span>
               </div>
               {Object.keys(t.skipped_by).length ? (
-                <div className="truncate text-[11px] text-muted">
+                <div className="truncate text-xs text-muted">
                   {Object.entries(t.skipped_by)
                     .map(([k, n]) => `${keyLabel(k)} ${n}`)
                     .join(" · ")}
@@ -749,8 +799,9 @@ function ReportView({ report }: { report: MergeReportMore }) {
             </li>
           ))}
         </ul>
-        <p className="mt-2 text-xs text-muted">
-          넣지 않는 표: {Object.keys(report.not_merged).map(short).join(", ")} (공간·구성원은 지금 그대로, 백업·삭제 기록은 이 공간 것만)
+        <p className="mt-2 text-[13px] text-muted">
+          넣지 않는 표: {Object.keys(report.not_merged).map(short).join(", ")} (공간·구성원은 지금 그대로, 백업·삭제
+          기록은 이 공간 것만)
         </p>
       </details>
     </div>
@@ -760,12 +811,17 @@ function ReportView({ report }: { report: MergeReportMore }) {
 /** 자동 정리(주기 유지보수) 상태: 마지막·다음 실행과 이 공간에서 한 일. */
 function AutoMaintenanceLine({ auto }: { auto: NonNullable<Maintenance["auto"]> }) {
   if (auto.interval_seconds === 0) {
-    return <p className="text-xs text-muted">자동 정리: 꺼짐 (CAREER_MAINTENANCE_INTERVAL_SECONDS=0)</p>;
+    return <p className="text-[13px] text-muted">자동 정리: 꺼짐 (CAREER_MAINTENANCE_INTERVAL_SECONDS=0)</p>;
   }
   const done = Object.entries(auto.counts).filter(([, n]) => n > 0);
   return (
-    <p className="text-xs text-muted">
-      자동 정리: {auto.running ? "실행 중" : auto.last_finished_at ? `마지막 ${formatDateTime(auto.last_finished_at)}` : "아직 안 돎"}
+    <p className="text-[13px] text-muted">
+      자동 정리:{" "}
+      {auto.running
+        ? "실행 중"
+        : auto.last_finished_at
+          ? `마지막 ${formatDateTime(auto.last_finished_at)}`
+          : "아직 안 돎"}
       {auto.next_at ? ` · 다음 ${formatDateTime(auto.next_at)}` : ""}
       {done.length ? ` · 이 공간: ${done.map(([k, n]) => `${k} ${int(n)}`).join(", ")}` : ""}
       {auto.errors ? ` · 오류 ${int(auto.errors)}` : ""}

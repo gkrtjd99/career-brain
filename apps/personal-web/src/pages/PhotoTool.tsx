@@ -1,4 +1,4 @@
-import { Badge, Button, cn, Input, Label, Section } from "@career-brain/ui";
+import { Button, cn, Input, Label, Section } from "@career-brain/ui";
 import { Download, ImagePlus, Lock, RotateCcw, RotateCw, Undo2 } from "lucide-react";
 import {
   useCallback,
@@ -133,7 +133,13 @@ async function renderOutput(
   const base = { format: o.format, w, h, dpi };
   if (!P.hasQuality(o.format)) {
     const blob = await encode(1);
-    return { ...base, blob, bytes: blob.size, quality: null, fits: o.maxBytes === null ? null : blob.size <= o.maxBytes };
+    return {
+      ...base,
+      blob,
+      bytes: blob.size,
+      quality: null,
+      fits: o.maxBytes === null ? null : blob.size <= o.maxBytes,
+    };
   }
   if (o.maxBytes === null) {
     const blob = await encode(o.quality);
@@ -154,12 +160,21 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "h-8 rounded-md border px-2.5 text-[13px] whitespace-nowrap",
-        active ? "border-accent bg-accent-soft font-medium text-accent" : "border-line bg-surface text-fg hover:bg-subtle",
+        "h-9 rounded-md border px-3 text-[13px] whitespace-nowrap transition-colors duration-150",
+        active ? "border-fg bg-fg font-medium text-bg" : "border-line text-fg hover:bg-subtle",
       )}
     >
       {children}
     </button>
+  );
+}
+
+function InfoRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-2">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 text-right tabular-nums">{children}</dd>
+    </div>
   );
 }
 
@@ -518,11 +533,11 @@ export function PhotoToolPage() {
         }
       />
       {fileInput}
-      <p className="mb-4 flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2.5 text-[13px] text-muted">
-        <Lock size={15} className="mt-0.5 shrink-0 text-accent" />
+      <p className="mb-8 flex items-start gap-2 text-[13px] text-muted">
+        <Lock size={14} className="mt-0.5 shrink-0" aria-hidden />
         <span>
-          사진은 이 브라우저 안에서만 처리합니다. 서버로 보내거나 저장하지 않습니다. 새로 인코딩하므로 원본의
-          EXIF(촬영 기기·시각·GPS 위치)는 결과 파일에 들어가지 않습니다.
+          사진은 이 브라우저 안에서만 처리합니다. 서버로 보내거나 저장하지 않습니다. 새로 인코딩하므로 원본의 EXIF(촬영
+          기기·시각·GPS 위치)는 결과 파일에 들어가지 않습니다.
         </span>
       </p>
 
@@ -531,13 +546,15 @@ export function PhotoToolPage() {
           {...drop}
           data-testid="photo-drop"
           className={cn(
-            "rounded-lg border-2 border-dashed px-4 py-12 text-center",
-            dragging ? "border-accent bg-accent-soft" : "border-line bg-surface",
+            "rounded-lg border border-dashed px-4 py-14 text-center transition-colors duration-150",
+            dragging ? "border-fg bg-subtle" : "border-line",
           )}
         >
-          <ImagePlus size={28} className="mx-auto mb-3 text-muted" />
-          <p className="mb-1 font-medium">사진을 여기로 끌어다 놓거나 고르세요</p>
-          <p className="mb-4 text-[13px] text-muted">JPG · PNG · WebP. HEIC는 브라우저에 따라 열리지 않을 수 있습니다.</p>
+          <ImagePlus size={24} className="mx-auto mb-3 text-muted" aria-hidden />
+          <p className="mb-1 text-sm font-medium">사진을 여기로 끌어다 놓거나 고르세요</p>
+          <p className="mb-4 text-[13px] text-muted">
+            JPG · PNG · WebP. HEIC는 브라우저에 따라 열리지 않을 수 있습니다.
+          </p>
           <Button variant="primary" onClick={() => fileRef.current?.click()} disabled={loading}>
             {loading ? "여는 중…" : "사진 고르기"}
           </Button>
@@ -548,7 +565,7 @@ export function PhotoToolPage() {
           ) : null}
         </div>
       ) : (
-        <div className="space-y-6" {...drop}>
+        <div className="space-y-10" {...drop}>
           {loadError ? (
             <p role="alert" className="text-[13px] text-danger">
               {loadError}
@@ -616,13 +633,16 @@ export function PhotoToolPage() {
               </p>
             ) : null}
             <p className="text-[13px] text-muted">
-              출력 <b className="font-medium text-fg tabular-nums">{target.w} × {target.h} px</b> · 인쇄하면 {printCm} (
-              {target.dpi} dpi). cm 크기는 {P.PRESET_DPI} dpi 기준 계산값이며 어느 기관의 공식 규격도 아닙니다. 양식의
-              안내를 먼저 확인하세요.
+              출력{" "}
+              <b className="font-medium text-fg tabular-nums">
+                {target.w} × {target.h} px
+              </b>{" "}
+              · 인쇄하면 {printCm} ({target.dpi} dpi). cm 크기는 {P.PRESET_DPI} dpi 기준 계산값이며 어느 기관의 공식
+              규격도 아닙니다. 양식의 안내를 먼저 확인하세요.
             </p>
           </Section>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,27.5rem)]">
+          <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,27.5rem)] lg:gap-14">
             <Section title="자르기">
               <Editor src={src} fw={target.w} fh={target.h} t={t} bg={bg} guides={guides} onChange={update} />
               <p className="text-xs text-muted">
@@ -672,14 +692,14 @@ export function PhotoToolPage() {
                 </div>
                 {guides ? (
                   <p className="text-xs text-muted">
-                    안내선(머리 위 {GUIDE_HEAD_TOP * 100}% · 턱 {GUIDE_CHIN * 100}%)은 맞추기 쉽게 그린 참고선입니다. 양식이 얼굴
-                    비율을 정했다면 그 안내를 따르세요.
+                    안내선(머리 위 {GUIDE_HEAD_TOP * 100}% · 턱 {GUIDE_CHIN * 100}%)은 맞추기 쉽게 그린 참고선입니다.
+                    양식이 얼굴 비율을 정했다면 그 안내를 따르세요.
                   </p>
                 ) : null}
               </div>
             </Section>
 
-            <div className="space-y-6">
+            <div className="space-y-10">
               <Section
                 title={fitView ? "결과 (화면에 맞춤)" : "결과 (실제 크기 1:1)"}
                 action={
@@ -707,7 +727,11 @@ export function PhotoToolPage() {
                       data-testid="photo-output"
                       width={out.w}
                       height={out.h}
-                      style={fitView ? { width: "auto", height: "auto", maxWidth: "100%", maxHeight: 420 } : { width: out.w, height: out.h, maxWidth: "none" }}
+                      style={
+                        fitView
+                          ? { width: "auto", height: "auto", maxWidth: "100%", maxHeight: 420 }
+                          : { width: out.w, height: out.h, maxWidth: "none" }
+                      }
                       className="mx-auto block shadow-[0_0_0_1px_var(--app-line)]"
                     />
                   ) : (
@@ -721,31 +745,23 @@ export function PhotoToolPage() {
                 ) : null}
                 {out ? (
                   <div className="space-y-2" data-testid="photo-info">
-                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
-                      <dt className="text-muted">크기</dt>
-                      <dd className="tabular-nums">
+                    <dl className="divide-y divide-line border-y border-line text-[13px]">
+                      <InfoRow label="크기">
                         {out.w} × {out.h} px
-                      </dd>
-                      <dt className="text-muted">형식</dt>
-                      <dd>
+                      </InfoRow>
+                      <InfoRow label="형식">
                         {P.FORMAT_LABEL[out.format]}
                         {out.quality !== null ? ` · 품질 ${Math.round(out.quality * 100)}%` : ""}
-                      </dd>
-                      <dt className="text-muted">용량</dt>
-                      <dd className="tabular-nums">
+                      </InfoRow>
+                      <InfoRow label="용량">
                         {P.formatKB(out.bytes)} ({out.bytes.toLocaleString("ko-KR")}바이트)
-                      </dd>
-                      <dt className="text-muted">인쇄 크기</dt>
-                      <dd className="tabular-nums">
+                        {out.fits === true ? <span className="font-medium"> · {maxKBText.trim()}KB 이하</span> : null}
+                      </InfoRow>
+                      <InfoRow label="인쇄 크기">
                         {P.pxToCm(out.w, out.dpi).toFixed(2)} × {P.pxToCm(out.h, out.dpi).toFixed(2)} cm ({out.dpi} dpi
                         {out.format === "webp" ? ", 파일에는 적지 않음" : ", 파일에 기록"})
-                      </dd>
+                      </InfoRow>
                     </dl>
-                    {out.fits === true ? (
-                      <div>
-                        <Badge tone="ok">{maxKBText.trim()}KB 이하</Badge>
-                      </div>
-                    ) : null}
                     {out.fits === false ? (
                       <p role="alert" className="text-[13px] text-danger">
                         {out.format === "png"
@@ -778,7 +794,9 @@ export function PhotoToolPage() {
                   ))}
                 </div>
                 {P.hasQuality(format) ? (
-                  <Field label={`품질 ${Math.round(quality * 100)}%${maxBytes !== null ? " (용량 제한이 있으면 이 값 이하에서 찾음)" : ""}`}>
+                  <Field
+                    label={`품질 ${Math.round(quality * 100)}%${maxBytes !== null ? " (용량 제한이 있으면 이 값 이하에서 찾음)" : ""}`}
+                  >
                     <input
                       type="range"
                       min={10}
@@ -813,8 +831,8 @@ export function PhotoToolPage() {
                           aria-pressed={bg === c}
                           onClick={() => setBg(c)}
                           className={cn(
-                            "h-8 w-8 rounded-md border",
-                            bg === c ? "border-accent ring-2 ring-accent/40" : "border-line",
+                            "h-9 w-9 rounded-md border",
+                            bg === c ? "border-fg ring-2 ring-fg/30" : "border-line",
                           )}
                           style={{ background: c }}
                         />
@@ -824,15 +842,15 @@ export function PhotoToolPage() {
                         value={bg}
                         aria-label="배경색 직접 고르기"
                         onChange={(e) => setBg(e.target.value)}
-                        className="h-8 w-10 cursor-pointer rounded-md border border-line bg-surface p-0.5"
+                        className="h-9 w-11 cursor-pointer rounded-md border border-line bg-surface p-0.5"
                       />
                     </div>
                   </div>
                 </div>
                 {maxBytes !== null ? (
                   <p className="text-xs text-muted">
-                    양식마다 1KB를 1,000바이트 또는 1,024바이트로 세므로 더 작은 {maxBytes.toLocaleString("ko-KR")}바이트 이하로
-                    맞춥니다.
+                    양식마다 1KB를 1,000바이트 또는 1,024바이트로 세므로 더 작은 {maxBytes.toLocaleString("ko-KR")}
+                    바이트 이하로 맞춥니다.
                   </p>
                 ) : null}
                 {format !== "jpeg" ? (
