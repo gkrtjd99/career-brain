@@ -19,9 +19,11 @@ const MAX_COUNT = 5;
  */
 export function InterviewBatchButton({ experiences }: { experiences: ExperienceSummary[] }) {
   const [open, setOpen] = useState(false);
+  // 경험이 없으면 고를 것이 없다 — 이유 없이 눌리지 않는 버튼 대신 감춘다
+  if (!experiences.length) return null;
   return (
     <>
-      <Button onClick={() => setOpen(true)} disabled={!experiences.length}>
+      <Button onClick={() => setOpen(true)}>
         <MessagesSquare size={15} /> 질문 받으며 채우기
       </Button>
       {open ? <InterviewBatchSheet experiences={experiences} onClose={() => setOpen(false)} /> : null}

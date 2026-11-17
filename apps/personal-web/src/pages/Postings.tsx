@@ -24,7 +24,7 @@ const SEGMENTS: { value: PostingsView; label: string }[] = [
 ];
 
 const EMPTY: Record<PostingsView, string> = {
-  open: "접수 중인 공고가 없습니다. 위에 공고 URL을 붙여넣으면 확인한 뒤 여기에 쌓입니다.",
+  open: "접수 중인 공고가 없습니다. 위에 공고 주소나 본문을 붙여넣으면 확인한 뒤 여기에 쌓입니다.",
   upcoming: "접수 시작 전인 공고가 없습니다. 공고에 접수 시작일이 적혀 있으면 여기에 모입니다.",
   always: "상시 채용 공고가 없습니다.",
   closed: "마감한 공고가 없습니다. 마감일이 지난 공고는 시기별로 여기에 모입니다.",

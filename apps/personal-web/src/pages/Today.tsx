@@ -233,7 +233,7 @@ export function TodayPage() {
                 ))}
               </Rows>
             ) : !apps.isPending ? (
-              <Quiet>진행 중인 지원이 없습니다. 공고 화면의 "지원 만들기"로 시작합니다.</Quiet>
+              <Quiet>진행 중인 지원이 없습니다. 브레인에 이력서·포트폴리오를 넣은 뒤, 공고 화면의 "지원서 쓰기"로 시작합니다.</Quiet>
             ) : null}
           </Block>
 

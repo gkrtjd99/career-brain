@@ -1,5 +1,5 @@
 import * as TabsPrimitive from "@radix-ui/react-tabs";
-import { type ComponentProps, type ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from "react";
 import { cn } from "./cn";
 
 // shadcn/ui tabs 를 밑줄 탭 모양으로. 보기 바꾸기는 언제나 이 모양 하나다.
@@ -52,9 +52,38 @@ export interface ViewTabsProps<T extends string> {
  * 내용 패널이 따로 없어 aria-controls 는 달지 않는다.
  */
 export function ViewTabs<T extends string>({ value, onChange, items, label, className }: ViewTabsProps<T>) {
+  // 좁은 화면에서 탭 줄이 넘치면: 고른 탭을 보이게 옮기고, 더 있는 쪽 끝을 흐리게 해 밀어 볼 수 있음을 보인다
+  const list = useRef<HTMLDivElement>(null);
+  const [more, setMore] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const update = () =>
+      setMore({ left: el.scrollLeft > 1, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 });
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [items.length]);
+  useEffect(() => {
+    const el = list.current?.querySelector<HTMLElement>('[data-state="active"]');
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [value]);
+  const fade =
+    more.left && more.right
+      ? "[mask-image:linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
+      : more.right
+        ? "[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]"
+        : more.left
+          ? "[mask-image:linear-gradient(to_right,transparent,black_2rem)]"
+          : "";
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as T)} activationMode="automatic">
-      <TabsList aria-label={label} className={className}>
+      <TabsList ref={list} aria-label={label} className={cn(fade, className)}>
         {items.map((it) => (
           <TabsTrigger key={it.value} value={it.value} aria-controls={undefined}>
             {it.label}
