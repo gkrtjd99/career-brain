@@ -802,7 +802,8 @@ class ExportRun(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID]
-    kind: Mapped[str] = mapped_column(Text)  # export | restore | merge (c0018)
+    # export | restore | merge (c0018) | markdown (c0046, 읽기 전용 Markdown 묶음 — 백업으로 세지 않음)
+    kind: Mapped[str] = mapped_column(Text)
     via: Mapped[str] = mapped_column(Text)  # cli | http
     created_by: Mapped[UUID | None] = mapped_column(default=None)
     format_version: Mapped[int] = mapped_column(Integer)

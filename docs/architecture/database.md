@@ -612,3 +612,13 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 지난 제출본 `GET /core/submitted-documents`(`applications.read`): `application_submissions.documents`의 고정본만 (새 표 없음). `…/{submission_id}/{document_id}`는 글·블록·근거 복사본·회사 이름·여기서 시작한 답변. `…/to-answer`는 새 공통 답변(지금도 확인한 근거만), `…/use`는 작성 중인 지원 문서로 복사(블록 출처 유지, 같은 409·경고 규칙).
 - 내보내기: 세 표는 카탈로그로 자동 포함, `@schema_step("c0042")`. 합치기 키: 답변 same_except(제목·본문이 정체), 근거는 DB UNIQUE, 쓴 곳은 `CONTENT_ONLY_TABLES`.
 - 시험: `packages/core/tests/test_brain_me.py` (학력 CRUD·규칙·DB CHECK, 옛 학력 옮기기, 프로필 더하기 규칙과 MCP·모델 경로 0건, 기술 모으기·합치기·나누기, 공통 답변 근거·넣기·409·dry_run·쓴 곳, 다른 회사 경고, 지난 제출본, 다른 공간 0건, 내보내기·복원 왕복, MCP 도구, 블라인드 칸).
+
+## Markdown으로 내보내기 기록 (c0046)
+
+`c0046` (`down_revision = c0042`, 병합 때 사슬 끝으로 옮긴다). 표를 더하지 않는다: `export_runs.kind`의 CHECK에 `markdown`을 더할 뿐이다 (`export`·`restore`·`merge`·`markdown`).
+
+- 노트 앱용 읽기 전용 Markdown 묶음(`usecases.markdown_export`, `GET /core/maintenance/export/markdown`)을 내려받을 때마다 한 줄: `archive_sha256`·`archive_bytes`는 zip, `rows_total`은 노트(.md) 수, `blobs_total`은 넣은 원본 파일 수, `format_version`은 Markdown 묶음 형식(1).
+- "마지막 백업"(`maintenance_info.last_export`)은 `kind = 'export'`만 본다 — Markdown 묶음은 복원할 수 없다.
+- downgrade는 `markdown` 행을 지우고 CHECK를 되돌린다.
+- 내보내기: `no_data_change("c0046")` (표 모양 그대로).
+- 시험: `packages/core/tests/test_markdown_export.py`.

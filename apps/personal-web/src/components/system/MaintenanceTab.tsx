@@ -237,6 +237,8 @@ export function MaintenanceTab() {
             )}
           </Section>
 
+          <MarkdownExport filesAvailable={m.export_available} />
+
           <Section title="복원 (이 공간에 합치기)">
             {m.restore_available ? (
               <RestorePanel m={m} />
@@ -280,6 +282,101 @@ export function MaintenanceTab() {
         </div>
       )}
     </Loaded>
+  );
+}
+
+// ---------------------------------------------------------------- Markdown으로 내보내기
+
+const MARKDOWN_ERROR: Record<string, string> = {
+  too_large: "내보낼 자료가 너무 큽니다. 원본 파일을 빼고 다시 하세요.",
+  files_unavailable: "이 설치에는 원본 저장소가 없어 원본 파일을 넣을 수 없습니다.",
+};
+
+function Check({
+  checked,
+  onChange,
+  label,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint: string;
+}) {
+  return (
+    <label className="flex min-h-9 cursor-pointer items-start gap-2.5 py-2 text-[13px]">
+      <input
+        type="checkbox"
+        className="mt-0.5 size-4 shrink-0 accent-fg"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="min-w-0">
+        {label}
+        <span className="block text-muted">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
+/** 노트 앱에서 여는 읽기 전용 묶음. 백업이 아니므로 "마지막 내보내기"에 세지 않는다 */
+function MarkdownExport({ filesAvailable }: { filesAvailable: boolean }) {
+  const [sensitive, setSensitive] = useState(false);
+  const [candidates, setCandidates] = useState(false);
+  const [files, setFiles] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const download = useMutation({
+    mutationFn: () => api.downloadMarkdown({ sensitive, candidates, files: filesAvailable && files }),
+    onSuccess: (f) => {
+      saveBlob(f.blob, f.filename);
+      setSaved(`${f.filename} (${bytes(f.blob.size)})`);
+    },
+  });
+  const error = download.error;
+  const errorMessage =
+    error instanceof ApiError && error.code && MARKDOWN_ERROR[error.code]
+      ? MARKDOWN_ERROR[error.code]
+      : error
+        ? message(error)
+        : null;
+  return (
+    <Section title="Markdown으로 내보내기">
+      <div className="space-y-2 sm:max-w-md">
+        <p className="text-[13px] text-muted">Obsidian 같은 노트 앱에서 열 수 있습니다. 다시 가져올 수는 없습니다.</p>
+        <div className="divide-y divide-line border-y border-line">
+          <Check
+            checked={sensitive}
+            onChange={setSensitive}
+            label="민감 정보 포함"
+            hint="생년월일·주소·병역·보훈·장애·희망 조건과 자격 번호 전체를 넣습니다."
+          />
+          <Check
+            checked={candidates}
+            onChange={setCandidates}
+            label="확인 전 사실 포함"
+            hint="아직 확인하지 않은 후보를 따로 적습니다."
+          />
+          {filesAvailable ? (
+            <Check
+              checked={files}
+              onChange={setFiles}
+              label="원본 파일 포함"
+              hint="올린 파일을 함께 넣습니다. 증빙 서류는 넣지 않습니다."
+            />
+          ) : null}
+        </div>
+        <Button disabled={download.isPending} onClick={() => download.mutate()}>
+          {download.isPending ? <Spinner /> : <Download size={15} />}
+          Markdown 내려받기
+        </Button>
+        {saved ? <p className="text-[13px] break-all">내려받음: {saved}</p> : null}
+        {errorMessage ? (
+          <p role="alert" className="text-[13px] text-danger">
+            {errorMessage}
+          </p>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 

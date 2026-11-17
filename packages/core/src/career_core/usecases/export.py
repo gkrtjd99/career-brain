@@ -1550,6 +1550,12 @@ def _c0042_answer_assets(arc) -> None:
     arc.ensure_tables("core.answer_assets", "core.answer_asset_claims", "core.answer_asset_uses")
 
 
+no_data_change(
+    "c0046",
+    "export_runs.kind에 markdown (Markdown으로 내보내기 기록, CHECK만 넓힘, 옛 행은 그대로)",
+)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

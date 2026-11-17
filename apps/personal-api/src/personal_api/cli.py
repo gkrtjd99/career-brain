@@ -11,6 +11,7 @@ personal-api usage       # 모델 사용량·비용 (CAREER_API_TOKEN 의 공간
 personal-api ping        # 라우트 하나에 짧은 합성 요청을 보내 설정을 확인 (과금됨)
 personal-api mcp         # MCP stdio 서버 (CAREER_API_TOKEN 의 공간, 도구는 docs/architecture/mcp.md)
 personal-api export --out FILE   # CAREER_API_TOKEN 공간을 묶음 파일(tar.gz)로 (소유자만)
+personal-api export-markdown --out FILE  # 노트 앱용 읽기 전용 Markdown(zip), 복원 불가 (소유자만)
 personal-api restore FILE        # 빈 설치에 묶음을 복원하고 새 토큰 발급 (--dry-run: 검사만)
 personal-api restore FILE --merge  # CAREER_API_TOKEN 공간에 합치기 (--on-duplicate skip|fail)
 personal-api oauth-link --subject SUB   # 외부 인가 서버의 사용자(sub)를 CAREER_API_TOKEN 소유자에 연결
@@ -426,6 +427,35 @@ async def _export(settings: Settings, out: str, recipients: list[str] | None = N
     return 0
 
 
+async def _export_markdown(
+    settings: Settings, out: str, *, sensitive: bool, candidates: bool, files: bool
+) -> int:
+    from career_core.usecases.export import ExportError
+    from career_core.usecases.markdown_export import MarkdownOptions, export_markdown
+
+    db = Database(settings.database_url)
+    try:
+        actor = await _actor(db)
+        try:
+            report = await export_markdown(
+                db,
+                actor,
+                out,
+                blobs=LocalBlobStore(settings.blob_dir),
+                options=MarkdownOptions(sensitive=sensitive, candidates=candidates, files=files),
+            )
+        except ExportError as exc:
+            print(f"export failed: {exc}")
+            return 1
+    finally:
+        await db.dispose()
+    print(
+        f"wrote {report.path} ({report.bytes} bytes, {report.notes} notes, {report.files} file(s))"
+    )
+    print("read-only Markdown for note apps: it cannot be restored (use `export` for backups)")
+    return 0
+
+
 async def _export_deletions(settings: Settings, out: str) -> int:
     from career_core.usecases.export import ExportError, export_deletions
 
@@ -812,6 +842,13 @@ def main(argv: list[str] | None = None) -> None:
     ex.add_argument(
         "--recipient", action="append", help="age public key (age1…); encrypts the archive"
     )
+    em = sub.add_parser(
+        "export-markdown", help="write read-only Markdown notes (.zip) for note apps like Obsidian"
+    )
+    em.add_argument("--out", required=True, help="zip path (e.g. career-notes.zip)")
+    em.add_argument("--sensitive", action="store_true", help="include restricted profile details")
+    em.add_argument("--candidates", action="store_true", help="include unconfirmed candidates")
+    em.add_argument("--files", action="store_true", help="include original files (never proofs)")
     ed = sub.add_parser("export-deletions", help="write the deletion log (small, export often)")
     ed.add_argument("--out", required=True)
     rs = sub.add_parser("restore", help="restore an export archive into an empty install")
@@ -899,6 +936,18 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_mcp(settings))
     elif args.cmd == "export":
         sys.exit(asyncio.run(_export(settings, args.out, args.recipient)))
+    elif args.cmd == "export-markdown":
+        sys.exit(
+            asyncio.run(
+                _export_markdown(
+                    settings,
+                    args.out,
+                    sensitive=args.sensitive,
+                    candidates=args.candidates,
+                    files=args.files,
+                )
+            )
+        )
     elif args.cmd == "export-deletions":
         sys.exit(asyncio.run(_export_deletions(settings, args.out)))
     elif args.cmd == "restore" and args.merge:
