@@ -5,10 +5,8 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Search as SearchIcon, Upload } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
-import { ReferenceEntry } from "../components/companies/ReferenceEntry";
-import { MeEntry } from "../components/credentials/MeEntry";
+import { BrainIndex } from "../components/brain/BrainIndex";
 import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/ExperienceForm";
-import { ProfileEntry } from "../components/profile/ProfileEntry";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
@@ -58,26 +56,11 @@ export function BrainPage() {
   const all = useQuery({ queryKey: ["experiences"], queryFn: () => api.experiences() });
 
   const o = overview.data;
-  const summary = o
-    ? [
-        `경험 ${o.experiences}`,
-        ...EXPERIENCE_KINDS.filter((k) => o.kinds[k]).map((k) => `${EXPERIENCE_KIND_LABEL[k]} ${o.kinds[k]}`),
-        o.pending_claims ? `확인할 주장 ${o.pending_claims}` : null,
-      ].filter(Boolean)
-    : [];
-
   return (
     <div>
       <PageHeader
         title="브레인"
-        subtitle={
-          <>
-            <span className="tabular-nums">{summary.join(" · ")}</span>
-            {summary.length ? <br className="sm:hidden" /> : null}
-            {summary.length ? <span className="max-sm:hidden"> · </span> : null}
-            확인한 주장만 문서와 검색 근거로 씁니다.
-          </>
-        }
+        subtitle="내 기록과 참고 지식을 나눠 둡니다. 확인한 주장만 문서와 검색 근거로 씁니다."
         actions={
           <>
             <InterviewBatchButton experiences={all.data ?? []} />
@@ -93,10 +76,21 @@ export function BrainPage() {
 
       <BrainSearchBox q={search.q ?? ""} onChange={(q) => setSearch({ q: q || undefined })} />
 
-      {o && o.needs_review > 0 && !filtersActive(search) ? (
-        <ReviewBlock overview={o} onShowAll={() => setSearch({ review: true })} />
+      {!filtersActive(search) ? (
+        <>
+          <BrainIndex experiences={o?.experiences ?? 0} pendingExperiences={o?.needs_review ?? 0} />
+          <div className="mt-10">
+            {o && o.needs_review > 0 ? (
+              <ReviewBlock overview={o} onShowAll={() => setSearch({ review: true })} />
+            ) : null}
+            <SourceInbox />
+          </div>
+        </>
       ) : null}
-      {!filtersActive(search) ? <SourceInbox /> : null}
+
+      <h2 id="experiences" className="mt-2 mb-3 scroll-mt-6 text-[15px] font-semibold">
+        경험
+      </h2>
 
       <ErrorText error={overview.error} className="mb-3" />
       {o && o.experiences === 0 ? (
@@ -116,16 +110,6 @@ export function BrainPage() {
           <ExperienceResults search={search} setSearch={setSearch} />
         </>
       ) : null}
-
-      <MeEntry />
-      <ProfileEntry />
-      <ReferenceEntry />
-      <Link
-        to="/brain/sources"
-        className="mt-10 inline-flex min-h-9 items-center gap-0.5 text-[13px] text-muted hover:text-fg"
-      >
-        올린 자료 모두 보기 <ChevronRight size={14} />
-      </Link>
 
       <CreateExperienceSheet open={creating} onClose={() => setCreating(false)} />
       <UploadSheet open={uploading} onClose={() => setUploading(false)} />
