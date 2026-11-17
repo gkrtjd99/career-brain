@@ -116,10 +116,15 @@ class SearchArgs(Args):
     limit: int = Field(default=10, ge=1, le=50)
     # 학습 기록(학습 메모·오답)도 찾기. 기본은 끔: 학습 기록은 경험 근거가 아니다.
     include_study: bool = False
+    # 참고 자료(남의 자기소개서·면접 후기·회사 자료)의 원문도 찾기 (c0032). 기본은 끔: 내 경험이 아니다.
+    # 증빙 서류(자격증·증명서 사본)의 글은 어떤 경우에도 나오지 않는다.
+    include_reference: bool = False
 
 
 # 학습 기록 결과마다 붙이는 표시. 외부 AI가 학습 메모를 경험 근거로 쓰지 않게 한다.
 STUDY_RECORD_NOTE = "study, not experience"
+# 참고 자료 결과마다 붙이는 표시. 남의 글을 사용자의 경험·근거로 쓰지 않게 한다.
+REFERENCE_RECORD_NOTE = "reference material written by others, not the user's experience"
 
 
 async def _search(env: ToolEnv, a: SearchArgs) -> Any:
@@ -127,15 +132,26 @@ async def _search(env: ToolEnv, a: SearchArgs) -> Any:
     if a.include_study:
         kinds = (*kinds, *search_uc.STUDY_KINDS)
     result = await search_uc.search(
-        env.db, env.actor, a.query, gateway=env.deps.models, kinds=kinds, limit=a.limit
+        env.db,
+        env.actor,
+        a.query,
+        gateway=env.deps.models,
+        kinds=kinds,
+        limit=a.limit,
+        include_reference=a.include_reference,
     )
-    if not a.include_study:
+    if not a.include_study and not a.include_reference:
         return result
     out = jsonable(result)
     for hit in out["hits"]:
         if hit.get("record") == "study":
             hit["note"] = STUDY_RECORD_NOTE
-    out["include_study"] = True
+        elif hit.get("record") == "reference":
+            hit["note"] = REFERENCE_RECORD_NOTE
+    if a.include_study:
+        out["include_study"] = True
+    if a.include_reference:
+        out["include_reference"] = True
     return out
 
 
@@ -221,7 +237,11 @@ class EvidenceArgs(Args):
 
 
 async def _get_evidence(env: ToolEnv, a: EvidenceArgs) -> Any:
-    return await brain_uc.get_span(env.db, env.actor, a.source_span_id)
+    view = await brain_uc.get_span(env.db, env.actor, a.source_span_id)
+    if view.source_purpose == "proof":
+        # 증빙 서류(자격증·증명서 사본)의 글은 MCP로 내보내지 않는다 (c0032, 자료 등급 restricted)
+        raise ToolFailed("proof_not_shared")
+    return view
 
 
 class AnswerArgs(Args):
@@ -443,7 +463,10 @@ TOOLS: tuple[Tool, ...] = (
         "Search the user's confirmed career brain (claims, document blocks, interview answers). "
         "Returns snippets with their source. include_study=true also searches study notes and "
         "mistakes; those hits have record='study' and note='study, not experience' and must "
-        "never be used as evidence of experience.",
+        "never be used as evidence of experience. include_reference=true also searches reference "
+        "material (other people's cover letters, interview reviews, company documents); those hits "
+        "have record='reference' and must never be presented as the user's own experience. "
+        "Proof documents (certificates, transcripts) are never searchable.",
         "search.read",
         SearchArgs,
         _search,

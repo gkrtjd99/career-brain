@@ -436,3 +436,24 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - downgrade: trigger·함수·색인·FK·CHECK·칸을 지운다.
 - 시험: `packages/core/tests/test_experience_structure.py` (기간 읽기 표, 채우기·downgrade, 한 단계, 다른 공간 부모, 거름·정렬, 300건 쪽, 색인 수, 추출 후보, HTTP 코드).
 
+## 원본 용도 (c0032, O20 일부)
+
+`c0032` (`down_revision = c0031`). 내 것과 남의 것, 증빙을 올릴 때 나눈다 (plan §19 원칙 1, §20).
+
+| 변경 | 내용 | 앱 role |
+|---|---|---|
+| `sources.purpose` | text NOT NULL DEFAULT `'experience'`, CHECK `ck_sources_purpose` (`experience`·`proof`·`reference`). 기존 행은 서버 기본값으로 `experience` (상수 기본값이라 행을 다시 쓰지 않는다 — RLS 문맥이 필요 없다) | 기존 권한 그대로 |
+| `ck_sources_proof_restricted` | `purpose <> 'proof' OR data_class = 'restricted'`: 증빙은 늘 제한 등급 | – |
+| `ix_sources_purpose` | (`workspace_id`, `purpose`): 받은 자료함·용도 필터 | – |
+
+- 용도마다 처리:
+  - `experience`: 지금까지처럼 경험·주장 후보 추출 (`POST /core/parse-runs/{id}/extractions`).
+  - `proof`(증빙): 추출 요청을 409 `source_not_experience`로 거부하고, worker도 실행 직전에 다시 보고 모델을 부르지 않는다. 등급이 늘 `restricted`라 게이트웨이가 외부 모델·외부 OCR로 보내지 않는다. 색인(`indexing.TARGETS_SQL`)에서 빠진다 — 로컬 임베딩이어도 벡터를 만들지 않는다. 검색·MCP 결과에 글이 나오지 않는다 (`get_evidence`는 `proof_not_shared`).
+  - `reference`(참고): 추출 거부. 색인은 하지만 기본 검색에서 빠지고 `include_reference=true`일 때만 `record = reference`로 나온다.
+  - 증빙·참고 원본의 블록에는 근거 위치(`source_spans`)를 만들거나 주장에 붙일 수 없다 (409 `source_not_experience`).
+- 용도 바꾸기 `PATCH /core/sources/{id}` `{purpose, data_class?}`: → `experience`면 읽기가 끝난 최신 파싱으로 추출을 큐에 넣는다 (`brain.extract` 권한이 있을 때). `experience` → 다른 용도면 이 원본의 추출 실행에서 나온 `extracted` 주장을 `retired`로, 남은 주장·자식이 없는 AI 경험을 `retired`로, 대기 중인 추출을 `failed`(`purpose_changed`)로 닫는다. 이 원본의 원문 위치를 근거로 단 **확인된** 주장(`self_confirmed`·`evidence_supported`)이 있으면 409 `source_has_confirmed_claims`로 바꾸지 않는다. 증빙에서 나와도 등급은 사람이 낮출 때까지 `restricted`.
+- 같은 파일을 다시 올리면 처음 원본의 용도 그대로다 (증빙으로 다시 올리면 등급만 올린다).
+- 내보내기: `@schema_step("c0032")`가 옛 묶음의 `sources` 행에 `purpose = 'experience'`를 넣는다 (`arc.add_columns`, 서버 기본값).
+- downgrade: 색인·CHECK·칸을 지운다.
+- 시험: `packages/core/tests/test_source_purpose.py` (제안 규칙, 증빙 추출·외부 호출 0, 참고 검색 제외·포함, PATCH 규칙과 409, 다른 공간 0건, MCP, 증빙 원본 해시 왕복, migration).
+

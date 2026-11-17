@@ -85,6 +85,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0029 | `schema_step` | `parse_runs.hidden_text = 'keep'` |
 | c0030 | `schema_step` | 옛 묶음에는 빈 `model_connections`·`model_route_overrides`·`model_settings` (키 암호문 표는 내보내지 않음) |
 | c0031 | `schema_step` | `experiences`에 `kind = 'other'`·`parent_id = null`·`ongoing`·`tags = []`, `started_on`/`ended_on`은 migration과 같이 원문 기간이 분명할 때만 |
+| c0032 | `schema_step` | `sources`에 `purpose = 'experience'` (옛 묶음의 원본은 모두 경험 추출 대상이었다). 원본 파일·버전 해시는 그대로 — 증빙 원본도 바이트 그대로 복원된다 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).

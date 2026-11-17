@@ -50,6 +50,7 @@ from career_core.domain.experiences import (
     normalize_tags,
     parse_month,
 )
+from career_core.domain.sources import SourcePurpose
 from career_core.ports import ActorContext
 from career_core.usecases.index_queue import request_index
 
@@ -119,6 +120,23 @@ async def ensure_span(
     return span
 
 
+async def block_purpose(s: AsyncSession, block_id: UUID) -> str | None:
+    """블록이 속한 원본의 용도 (c0032). 블록이 없으면 None."""
+    return await s.scalar(
+        select(Source.purpose)
+        .join(SourceVersion, SourceVersion.source_id == Source.id)
+        .join(ParseRun, ParseRun.source_version_id == SourceVersion.id)
+        .join(DocumentBlock, DocumentBlock.parse_run_id == ParseRun.id)
+        .where(DocumentBlock.id == block_id)
+    )
+
+
+def require_experience_source(purpose: str | None) -> None:
+    """근거(원문 위치)는 내 경험 자료에서만 (plan §19 원칙 1). 증빙·참고는 근거가 되지 않는다."""
+    if purpose is not None and purpose != SourcePurpose.EXPERIENCE:
+        raise ClaimRuleError("source_not_experience")
+
+
 async def create_span(
     db: Database, actor: ActorContext, block_id: UUID, start: int, end: int
 ) -> UUID:
@@ -126,6 +144,7 @@ async def create_span(
         block = await s.get(DocumentBlock, block_id)
         if block is None:
             raise NotFound("block")
+        require_experience_source(await block_purpose(s, block.id))
         return (await ensure_span(s, actor, block, start, end)).id
 
 
@@ -143,6 +162,8 @@ class SpanView:
     source_id: UUID
     source_title: str
     original_filename: str
+    # c0032: 원본 용도. MCP는 증빙 원본의 글을 내보내지 않는다.
+    source_purpose: str = SourcePurpose.EXPERIENCE.value
 
 
 async def get_span(db: Database, actor: ActorContext, span_id: UUID) -> SpanView:
@@ -173,6 +194,7 @@ async def get_span(db: Database, actor: ActorContext, span_id: UUID) -> SpanView
         source_id=source.id,
         source_title=source.title,
         original_filename=version.original_filename,
+        source_purpose=source.purpose,
     )
 
 
@@ -850,8 +872,10 @@ async def add_claim(
 
 
 async def _attach_span(s: AsyncSession, actor: ActorContext, claim: Claim, span_id: UUID) -> None:
-    if await s.get(SourceSpan, span_id) is None:
+    span = await s.get(SourceSpan, span_id)
+    if span is None:
         raise NotFound("span")
+    require_experience_source(await block_purpose(s, span.document_block_id))
     exists = await s.scalar(
         select(ClaimEvidence.id).where(
             ClaimEvidence.claim_id == claim.id, ClaimEvidence.source_span_id == span_id

@@ -30,26 +30,27 @@ function semanticNote(note: string) {
 }
 
 export function SearchPage() {
-  const { q = "", kinds: kindsParam } = route.useSearch();
+  const { q = "", kinds: kindsParam, ref = false } = route.useSearch();
   const navigate = useNavigate();
   const kinds = (kindsParam?.split(",") as SearchKind[] | undefined) ?? ALL;
   const [draft, setDraft] = useState(q);
   useEffect(() => setDraft(q), [q]);
 
   const result = useQuery({
-    queryKey: ["search", q, kinds.join(",")],
-    queryFn: ({ signal }) => api.search(q, { kinds, limit: 30 }, signal),
+    queryKey: ["search", q, kinds.join(","), ref],
+    queryFn: ({ signal }) => api.search(q, { kinds, limit: 30, includeReference: ref }, signal),
     enabled: q.trim().length > 0,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
 
-  const go = (nextQ: string, nextKinds: SearchKind[]) =>
+  const go = (nextQ: string, nextKinds: SearchKind[], nextRef = ref) =>
     navigate({
       to: "/search",
       search: {
         ...(nextQ.trim() ? { q: nextQ.trim() } : {}),
         ...(nextKinds.length && nextKinds.length < ALL.length ? { kinds: nextKinds.join(",") } : {}),
+        ...(nextRef ? { ref: true as const } : {}),
       },
       replace: true,
     });
@@ -61,7 +62,10 @@ export function SearchPage() {
 
   return (
     <div>
-      <PageHeader title="검색" subtitle="확인한 주장, 올린 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다." />
+      <PageHeader
+        title="검색"
+        subtitle="확인한 주장, 내 경험 자료의 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다. 증빙 서류는 찾지 않습니다."
+      />
       <form
         role="search"
         className="mb-3 flex gap-2"
@@ -102,6 +106,18 @@ export function SearchPage() {
             {KIND_INFO[k].label}
           </button>
         ))}
+        <button
+          type="button"
+          aria-pressed={ref}
+          onClick={() => go(q, kinds, !ref)}
+          className={cn(
+            "h-9 rounded-full border px-3.5 text-[13px] transition-colors duration-150",
+            "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+            ref ? "border-fg bg-fg font-medium text-bg" : "border-line text-muted hover:border-fg/40 hover:text-fg",
+          )}
+        >
+          참고 자료 포함
+        </button>
       </div>
 
       {!q ? (
@@ -159,6 +175,11 @@ function Hits({ hits }: { hits: SearchHit[] }) {
                   <span>· {STATUS_LABEL[h.claim_status as VerificationStatus] ?? h.claim_status}</span>
                 ) : null}
                 {h.kind === "block" ? <span>· 원문 그대로</span> : null}
+                {h.record === "reference" ? (
+                  <span>
+                    · <span className="font-medium text-fg">참고 자료 · 내 경험 아님</span>
+                  </span>
+                ) : null}
                 {h.record === "study" ? (
                   <span>
                     · <span className="font-medium text-fg">학습 기록 · 경험 아님</span>

@@ -1395,6 +1395,16 @@ def _c0031_experience_structure(arc) -> None:
     arc.rewrite("core.experiences", change)
 
 
+@schema_step(
+    "c0032",
+    "sources에 purpose('experience'): 옛 묶음의 원본은 모두 경험 추출 대상이었다. "
+    "원본 파일(blob)·버전 해시는 그대로",
+)
+def _c0032_source_purpose(arc) -> None:
+    if arc.has("core.sources"):
+        arc.add_columns("core.sources", "purpose")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

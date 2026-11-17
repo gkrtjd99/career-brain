@@ -133,17 +133,40 @@ export function createClient({
     // 원본
     uploadSource: (
       file: File,
-      opts: { title?: string; dataClass?: string; hiddenText?: T.HiddenTextMode } = {},
+      opts: {
+        title?: string;
+        dataClass?: string;
+        hiddenText?: T.HiddenTextMode;
+        /** 기본 experience (c0032 전과 같음) */
+        purpose?: T.SourcePurpose;
+      } = {},
     ) => {
       const form = new FormData();
       form.set("file", file);
       if (opts.title) form.set("title", opts.title);
       if (opts.dataClass) form.set("data_class", opts.dataClass);
       if (opts.hiddenText) form.set("hidden_text", opts.hiddenText);
+      if (opts.purpose) form.set("purpose", opts.purpose);
       return json<T.UploadOut>("POST", "/core/sources", { form });
     },
-    sources: (limit?: number) => get<T.SourceListItem[]>("/core/sources", { limit }),
+    /** 올리기 전 용도 제안 (모델 없이 파일 이름·형식·앞부분 글). 사람이 확정한다 */
+    suggestPurpose: (body: { filename?: string; mime?: string; text_head?: string }) =>
+      post<T.PurposeSuggestion>("/core/sources/suggest-purpose", body),
+    /** attention = 받은 자료함 (처리 중·실패·일부만·확인할 후보가 있는 원본만) */
+    sources: (opts: number | { limit?: number; purpose?: T.SourcePurpose; attention?: boolean } = {}) => {
+      const o = typeof opts === "number" ? { limit: opts } : opts;
+      return get<T.SourceListItem[]>("/core/sources", {
+        limit: o.limit,
+        purpose: o.purpose,
+        attention: o.attention,
+      });
+    },
     source: (sourceId: string) => get<T.Source>(`/core/sources/${id(sourceId)}`),
+    /** 용도 바꾸기. 409 source_has_confirmed_claims = 확인된 주장이 이 원본을 근거로 씀 */
+    updateSourcePurpose: (
+      sourceId: string,
+      body: { purpose: T.SourcePurpose; data_class?: "public" | "private" | "restricted" },
+    ) => patch<T.PurposeChange>(`/core/sources/${id(sourceId)}`, body),
     blocks: (parseRunId: string) => get<T.Block[]>(`/core/parse-runs/${id(parseRunId)}/blocks`),
     requestExtraction: (parseRunId: string) =>
       post<T.StatusOut>(`/core/parse-runs/${id(parseRunId)}/extractions`),
@@ -210,12 +233,17 @@ export function createClient({
     // 검색
     search: (
       q: string,
-      opts: { kinds?: T.SearchKind[]; limit?: number } = {},
+      opts: { kinds?: T.SearchKind[]; limit?: number; includeReference?: boolean } = {},
       signal?: AbortSignal,
     ) =>
       get<T.SearchResult>(
         "/core/search",
-        { q, kinds: opts.kinds?.join(","), limit: opts.limit },
+        {
+          q,
+          kinds: opts.kinds?.join(","),
+          limit: opts.limit,
+          include_reference: opts.includeReference,
+        },
         signal,
       ),
     reindex: () => post<{ status: string }>("/core/search/reindex"),
