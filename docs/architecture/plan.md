@@ -73,6 +73,8 @@ career-brain/
 
 ## 5. 기본 기술과 실행 구조
 
+> 구현하면서 바뀐 점 (현재 구조는 [overview.md](overview.md)): 작업 큐는 Procrastinate 대신 PostgreSQL 표 `core.jobs` + `claim_job`·lease·`LISTEN/NOTIFY`로 직접 만들었다. 문서 편집은 Tiptap 없이 문단 블록 편집기로 했다. Caddy는 기본 구성에 넣지 않고 설치 문서에 리버스 프록시 예시로만 둔다. 아래 원문은 설계 당시 기록이다.
+
 - 프론트: React·TypeScript·Vite·shadcn/ui, 서버 상태는 TanStack Query, 폼과 검증은 일관된 스키마 기반으로 구성.
 - 서버: FastAPI·Pydantic·SQLAlchemy·Alembic. 라우터는 요청 검증과 유스케이스 호출만 담당.
 - DB: PostgreSQL, 의미 검색은 pgvector, 유사 문자열은 pg_trgm. 별도 OpenSearch·Neo4j·벡터 DB를 필수로 두지 않는다.

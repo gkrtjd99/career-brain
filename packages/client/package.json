@@ -1,6 +1,6 @@
 {
   "name": "@career-brain/client",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "description": "인증·기본 URL을 주입받는 TS API 클라이언트",

@@ -111,7 +111,7 @@ dev = [
 
 [[package]]
 name = "career-core"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "alembic" },
@@ -1389,7 +1389,7 @@ wheels = [
 
 [[package]]
 name = "personal-api"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "apps/personal-api" }
 dependencies = [
     { name = "career-core", extra = ["llm"] },

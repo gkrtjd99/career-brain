@@ -4,4 +4,4 @@
 비공개 레포(career-service)의 어떤 모듈도 import하지 않는다.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

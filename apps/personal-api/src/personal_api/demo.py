@@ -4,9 +4,9 @@
 모든 쓰기는 웹·MCP와 같은 usecase를 거친다 (직접 INSERT 없음: RLS·불변 규칙이 그대로 걸린다).
 
 - 모델 호출 없음: gateway를 만들지 않는다. 공고 항목 추출·AI 질문·AI 수정안은 쓰지 않는다.
-- 네트워크 없음: 공고는 붙여넣은 본문 + 사람이 확인한 항목이다. 공고 주소는 문서용 주소
-  (RFC 5737 TEST-NET-1, ``192.0.2.0/24``)라 다른 worker가 먼저 집어도 내부 주소 차단에서 멈춘다
-  (DNS 조회도 없다). 이 명령 안의 가져오기는 오프라인 fetcher로 "직접 붙여넣기 필요"로 끝낸다.
+- 네트워크 없음: 공고는 붙여넣은 본문 + 사람이 확인한 항목이다. 공고 주소는 예약된 최상위 도메인
+  ``.example``(RFC 2606/6761, 어디로도 풀리지 않는다)이라 다른 worker가 먼저 집어도 이름 풀기에서
+  실패한다. 이 명령 안의 가져오기는 오프라인 fetcher로 "직접 붙여넣기 필요"로 끝낸다.
 - 다시 실행하면 데모 공간이 하나 더 생긴다. 앱 계정은 다른 공간을 볼 수 없어(RLS) "이미 있음"을
   확인할 수 없고, 공간마다 토큰이 따로라 서로 섞이지 않는다.
 
@@ -114,8 +114,8 @@ SOURCES = (
 # ---------------------------------------------------------------- 공고 (붙여넣은 본문)
 
 # RFC 5737 문서용 주소: 실제로 가져오지 않는다 (내부 주소 차단, DNS 조회 없음)
-POSTING_A_URL = "https://192.0.2.10/demo/jobs/backend-settlement"
-POSTING_B_URL = "https://192.0.2.20/demo/jobs/data-platform"
+POSTING_A_URL = "https://careers.gasang-fintech.example/jobs/backend-settlement"
+POSTING_B_URL = "https://careers.gasang-logistics.example/jobs/data-platform"
 
 POSTING_A_TEXT = """\
 [가상핀테크 (가상 회사)] 백엔드 엔지니어 (정산 플랫폼)
@@ -447,7 +447,7 @@ async def _postings(
         await posting_uc.add_manual_text(deps, actor, saved.posting_id, text)
         ids.append(saved.posting_id)
     a, b = ids
-    deadline = (now + timedelta(days=21)).date().isoformat()
+    deadline = (now + timedelta(days=10)).date().isoformat()  # 오늘 화면 "마감 임박"(14일)에 보이게
     await posting_uc.confirm_posting(db, actor, a, overrides=posting_a_fields(deadline))
     return a, b
 

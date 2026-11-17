@@ -1,6 +1,6 @@
 [project]
 name = "career-core"
-version = "0.0.1"
+version = "0.1.0"
 description = "Career brain common engine: domain, usecases, ports, DB, HTTP/MCP interfaces"
 license = "Apache-2.0"
 requires-python = ">=3.12"

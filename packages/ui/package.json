@@ -1,6 +1,6 @@
 {
   "name": "@career-brain/ui",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "license": "Apache-2.0",
   "type": "module",
   "description": "문서 편집·변경 비교·근거 카드 등 공통 UI 부품 (앱 네비게이션·가입 흐름 제외)",
