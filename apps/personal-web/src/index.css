@@ -7,41 +7,41 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * 시각 스타일 (plan §13): 따뜻한 회백색 배경 + 흰 작업 영역 + 청록색 포인트 + 얇은 구분선.
- * 색은 확인됨(ok) / 확인 필요(warn) / 근거 없음(none) 구분에 쓰고, 항상 배지 문구와 함께 쓴다.
+ * 시각 스타일 (plan §13): 검정·흰색만 쓰는 흑백 테마 + 얇은 구분선. 색은 오류(danger) 빨강 하나뿐.
+ * 확인됨(ok) / 확인 필요(warn) / 근거 없음(none)은 배지 모양(채움·테두리·회색)과 문구로 구분한다.
  */
 :root {
-  --app-bg: #f6f5f2;
+  --app-bg: #ffffff;
   --app-surface: #ffffff;
-  --app-subtle: #efeee9;
-  --app-line: #e4e2dc;
-  --app-fg: #1d1c1a;
-  --app-muted: #6b6963;
-  --app-accent: #0f766e;
+  --app-subtle: #f4f4f4;
+  --app-line: #e5e5e5;
+  --app-fg: #0a0a0a;
+  --app-muted: #6b6b6b;
+  --app-accent: #0a0a0a;
   --app-accent-fg: #ffffff;
-  --app-accent-soft: #e0f2ef;
-  --app-ok: #15803d;
-  --app-ok-soft: #e5f4ea;
-  --app-warn: #a15c07;
-  --app-warn-soft: #fbf0dc;
+  --app-accent-soft: #f0f0f0;
+  --app-ok: #0a0a0a;
+  --app-ok-soft: #f0f0f0;
+  --app-warn: #0a0a0a;
+  --app-warn-soft: #e6e6e6;
   --app-danger: #b42318;
   --app-danger-soft: #fdecea;
 }
 
 .dark {
-  --app-bg: #151514;
-  --app-surface: #1e1e1c;
-  --app-subtle: #292926;
-  --app-line: #34332f;
-  --app-fg: #ecebe7;
-  --app-muted: #a3a19a;
-  --app-accent: #2dd4bf;
-  --app-accent-fg: #062b27;
-  --app-accent-soft: #123532;
-  --app-ok: #4ade80;
-  --app-ok-soft: #14301f;
-  --app-warn: #fbbf24;
-  --app-warn-soft: #3a2c0d;
+  --app-bg: #0a0a0a;
+  --app-surface: #121212;
+  --app-subtle: #1c1c1c;
+  --app-line: #2a2a2a;
+  --app-fg: #f5f5f5;
+  --app-muted: #a3a3a3;
+  --app-accent: #f5f5f5;
+  --app-accent-fg: #0a0a0a;
+  --app-accent-soft: #222222;
+  --app-ok: #f5f5f5;
+  --app-ok-soft: #222222;
+  --app-warn: #f5f5f5;
+  --app-warn-soft: #333333;
   --app-danger: #f87171;
   --app-danger-soft: #3d1a17;
   color-scheme: dark;
