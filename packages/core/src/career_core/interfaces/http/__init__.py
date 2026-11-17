@@ -41,6 +41,7 @@ from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.models import add_model_routes
 from career_core.interfaces.http.postings import add_posting_routes
+from career_core.interfaces.http.references import add_reference_routes
 from career_core.interfaces.http.search import add_search_routes
 from career_core.interfaces.http.settings import add_settings_routes
 from career_core.interfaces.http.study import add_study_routes
@@ -269,6 +270,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_search_routes(router, deps, authorize)
     add_posting_routes(router, deps, authorize)
     add_company_routes(router, deps, authorize)  # O13 회사 조사 (참고 지식)
+    add_reference_routes(router, deps, authorize)  # O14 참고 자료 보관함 (다른 사람의 글)
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
     add_settings_routes(router, deps, authorize)  # c0021 공간 공용 설정
@@ -369,7 +371,8 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
         except sources_uc.SourceNotFound as exc:
             raise not_found from exc
         except ClaimRuleError as exc:
-            code = 409 if exc.code == "source_has_confirmed_claims" else 422
+            conflicts = ("source_has_confirmed_claims", "source_has_reference_items")
+            code = 409 if exc.code in conflicts else 422
             raise HTTPException(status_code=code, detail=exc.code) from exc
         return PurposeChangeOut.model_validate(result, from_attributes=True)
 

@@ -28,6 +28,7 @@ from career_core.db.models import (
     ExtractionRun,
     Job,
     ParseRun,
+    ReferenceItem,
     Source,
     SourceSpan,
     SourceVersion,
@@ -490,6 +491,15 @@ async def change_purpose(
         if before == target and new_dc == src.data_class:
             return PurposeChange(src.id, src.purpose, src.data_class, changed=False)
 
+        if before == SourcePurpose.REFERENCE and target != SourcePurpose.REFERENCE:
+            # c0035: 참고 글(reference_items)이 쓰는 원본은 참고로 둔다. 남의 글이 내 경험 추출로 흘러가지 않게
+            used = await s.scalar(
+                select(func.count())
+                .select_from(ReferenceItem)
+                .where(ReferenceItem.source_id == source_id)
+            )
+            if used:
+                raise ClaimRuleError("source_has_reference_items")
         if target != SourcePurpose.EXPERIENCE and before == SourcePurpose.EXPERIENCE:
             if await s.scalar(_confirmed_citing(source_id)):
                 raise ClaimRuleError("source_has_confirmed_claims")

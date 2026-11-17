@@ -1273,3 +1273,56 @@ class CompanyFact(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0035: 참고 자료 보관함 (O14, 참고 지식)
+
+
+class ReferenceItem(Base):
+    """참고 글 하나 (다른 사람의 자기소개서·이력서·면접 후기·직무 글). 내 경험이 아니고 근거가 되지 않는다.
+
+    ``text``는 저장한 글이다 (개인정보를 가리기로 했으면 가린 글). 원본(``source_id``)은 용도 ``reference``."""
+
+    __tablename__ = "reference_items"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    company_id: Mapped[UUID | None] = mapped_column(default=None)
+    role: Mapped[str | None] = mapped_column(Text, default=None)
+    year: Mapped[int | None] = mapped_column(Integer, default=None)
+    source_note: Mapped[str | None] = mapped_column(Text, default=None)
+    source_id: Mapped[UUID | None] = mapped_column(default=None)
+    data_class: Mapped[str] = mapped_column(Text, default="private")
+    text: Mapped[str] = mapped_column(Text)
+    pii_masked: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ReferenceNote(Base):
+    """참고 글의 구조 메모: 문항·문단 구성·소재 종류·강조 역량. 원문 문장은 넣지 않는다."""
+
+    __tablename__ = "reference_notes"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    reference_id: Mapped[UUID]
+    question: Mapped[str | None] = mapped_column(Text, default=None)
+    structure: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    materials: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    competencies: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    status: Mapped[str] = mapped_column(Text, default="candidate")  # candidate | confirmed
+    origin: Mapped[str] = mapped_column(Text)  # model | user
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_by: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

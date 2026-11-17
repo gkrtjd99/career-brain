@@ -76,6 +76,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0033 (O13) 회사 조사: 참고 지식. 항목 후보 확인은 사람만 (usecase가 agent를 막는다)
     "companies.read": "read",
     "companies.write": "draft-write",
+    # c0035 (O14) 참고 자료 보관함: 다른 사람의 글. 구조 메모 후보 확인은 사람만 (usecase가 agent를 막는다)
+    "references.read": "read",
+    "references.write": "draft-write",
 }
 
 
