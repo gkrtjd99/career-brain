@@ -22,7 +22,7 @@ export function InterviewBatchButton({ experiences }: { experiences: ExperienceS
   return (
     <>
       <Button onClick={() => setOpen(true)} disabled={!experiences.length}>
-        <MessagesSquare size={15} /> 일괄 인터뷰
+        <MessagesSquare size={15} /> 질문 받으며 채우기
       </Button>
       {open ? <InterviewBatchSheet experiences={experiences} onClose={() => setOpen(false)} /> : null}
     </>
@@ -70,7 +70,7 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
     });
 
   return (
-    <Sheet open onOpenChange={(o) => (o ? null : onClose())} title="AI 인터뷰 질문 (일괄)" width="lg">
+    <Sheet open onOpenChange={(o) => (o ? null : onClose())} title="질문 받으며 채우기" width="lg">
       {runId ? (
         <div className="space-y-3">
           <RunProgress runId={runId} listKey="experiences" noun="경험" onFinished={onFinished} />
@@ -85,8 +85,8 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
           }}
         >
           <p className="text-[13px] text-muted">
-            고른 경험마다 인터뷰 세션을 만들고 AI에게 보충 질문을 한 번 요청합니다. 경험의 주장을 모델로 보내며 비용이
-            듭니다 (제한 자료 근거의 주장은 보내지 않음). AI는 질문만 만들고, 답과 주장은 직접 씁니다.
+            고른 경험마다 AI가 빈 곳을 묻는 보충 질문을 만듭니다. 경험의 확인한 사실을 모델로 보내며 비용이 듭니다
+            (이 기기 밖으로 보내지 않는 자료의 사실은 보내지 않습니다). AI는 질문만 만들고, 답과 사실은 직접 씁니다.
           </p>
           <fieldset className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">

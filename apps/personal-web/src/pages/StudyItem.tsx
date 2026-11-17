@@ -13,18 +13,34 @@ import {
   TAP,
   useStudyInvalidate,
 } from "../components/study/parts";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
 import { ATTEMPT_RESULT, ITEM_KIND, ITEM_STATUS, KIND_LABEL, REQ_FIELD } from "../lib/labels";
 
 const route = getRouteApi("/study/items/$itemId");
 const STATUSES: StudyItemStatus[] = ["planned", "in_progress", "done", "dropped"];
-const TEXT_LINK = "text-fg underline underline-offset-2 hover:text-muted";
+const TEXT_LINK = "inline-flex min-h-9 items-center text-fg underline underline-offset-2 hover:text-muted sm:min-h-6";
 
 export function StudyItemPage() {
   const { itemId } = route.useParams();
   const q = useQuery({ queryKey: ["study-item", itemId], queryFn: () => api.studyItem(itemId) });
+  if (q.error instanceof ApiError && q.error.status === 404) return <MissingItem />;
   return <Loaded query={q}>{(item) => <ItemView item={item} />}</Loaded>;
+}
+
+/** 지웠거나 다른 공간의 항목: 일반 오류 대신 학습으로 돌아가는 길을 준다 */
+function MissingItem() {
+  return (
+    <div className="pt-6">
+      <h1 className="text-xl leading-8 font-semibold">이 학습 항목을 찾을 수 없습니다</h1>
+      <p className="mt-1 text-sm text-muted">
+        지웠거나 합쳐진 항목일 수 있습니다.{" "}
+        <Link to="/study" search={{ tab: "items" }} className={TEXT_LINK}>
+          학습으로
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 function ItemView({ item }: { item: StudyItem }) {
@@ -52,7 +68,7 @@ function ItemView({ item }: { item: StudyItem }) {
           <Link to="/study/items/$itemId" params={{ itemId: item.merged_into_id }} className={TEXT_LINK}>
             합친 항목
           </Link>
-          에서 이어 갑니다. 응시·경험 후보 기록은 고치지 않는 기록이라 이 항목에 남아 합친 항목에서 함께 보입니다.
+          에서 이어 갑니다. 응시·경험 후보 기록은 바꾸지 않는 기록이라 이 항목에 남아 합친 항목에서 함께 보입니다.
         </p>
       ) : null}
       {item.requirement || item.merged_from?.length ? (
@@ -96,7 +112,7 @@ function ItemView({ item }: { item: StudyItem }) {
                 </Button>
               ))}
             </div>
-            <p className="text-[13px] text-muted">완료해도 경험(주장)은 생기지 않습니다. 학습함과 입증함은 다릅니다.</p>
+            <p className="text-[13px] text-muted">완료해도 경험(확인한 사실)은 생기지 않습니다. 학습함과 입증함은 다릅니다.</p>
             <ErrorText error={status.error} />
           </div>
 
@@ -359,7 +375,7 @@ function CandidateForm({ item }: { item: StudyItem }) {
   return (
     <div className="space-y-3">
       <p className="text-[13px] text-muted">
-        학습 결과를 내 경험으로 옮기고 싶을 때만 씁니다. 문장은 직접 쓰고, 주장은 “확인 필요” 상태로 들어가 브레인에서
+        학습 결과를 내 경험으로 옮기고 싶을 때만 씁니다. 문장은 직접 쓰고, 사실은 “확인 필요” 상태로 들어가 브레인에서
         확인해야 근거가 됩니다.
       </p>
       {item.claim_candidates.length ? (
@@ -438,7 +454,7 @@ function CandidateForm({ item }: { item: StudyItem }) {
             value={form.statement}
             maxLength={4000}
             placeholder="예: 개인 프로젝트에서 Kubernetes로 서비스 2개를 배포·운영해 봤다"
-            aria-label="주장 문장"
+            aria-label="사실 문장"
             onChange={(e) => setForm({ ...form, statement: e.target.value })}
           />
           <ErrorText error={save.error} />
@@ -449,7 +465,7 @@ function CandidateForm({ item }: { item: StudyItem }) {
             className={TAP}
             disabled={!form.experience || !form.statement.trim() || save.isPending}
           >
-            확인 대기 주장으로 올리기
+            확인 대기 사실로 올리기
           </Button>
         </form>
       )}

@@ -74,7 +74,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
                   )}
                 >
                   {formatDate(se.created_at)} · {se.answered}/{se.questions}
-                  {se.run_ids?.length ? " · 일괄" : ""}
+                  {se.run_ids?.length ? " · 질문 받으며 채우기" : ""}
                   {i === 0 ? " (최근)" : ""}
                 </button>
               ))}
@@ -82,7 +82,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
           ) : null}
           <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
             <p className="min-w-0 flex-1 basis-64 text-[13px] text-muted">
-              답변은 인터뷰 근거가 붙은 주장으로 저장됩니다. 기여(본인/팀)를 고르면 바로 “본인 확인” 상태가 됩니다. AI
+              답변은 인터뷰 근거가 붙은 사실로 저장됩니다. 기여(본인/팀)를 고르면 바로 “본인 확인” 상태가 됩니다. AI
               보충 질문은 이 경험의 내용을 모델에 보내며 비용이 듭니다.
             </p>
             <div className="flex gap-1.5">
@@ -142,7 +142,7 @@ function groupByRun(questions: InterviewQuestion[]): QuestionGroup[] {
     if (q.run_id) {
       let g = runs.get(q.run_id);
       if (!g) {
-        g = { key: q.run_id, title: `일괄 실행 ${q.run_id.slice(0, 8)}`, runId: q.run_id, items: [] };
+        g = { key: q.run_id, title: "질문 받으며 채우기에서 만든 질문", runId: q.run_id, items: [] };
         runs.set(q.run_id, g);
       }
       g.items.push(q);
@@ -218,9 +218,9 @@ function QuestionCard({
               to="/system"
               search={{ run: question.run_id }}
               className="underline underline-offset-2 hover:text-fg"
-              title="이 질문을 만든 일괄 실행"
+              title="이 질문을 만든 실행 기록"
             >
-              일괄 {question.run_id.slice(0, 8)}
+              실행 기록
             </Link>
           </span>
         ) : null}
@@ -250,7 +250,7 @@ function QuestionCard({
           {answer.trim() ? (
             <label className="flex min-h-9 items-center gap-2 text-[13px]">
               <input type="checkbox" checked={makeClaim} onChange={(e) => setMakeClaim(e.target.checked)} />
-              주장으로 저장
+              사실로 저장
             </label>
           ) : null}
           {makeClaim && answer.trim() ? (
@@ -258,10 +258,10 @@ function QuestionCard({
               <Textarea
                 value={statement}
                 onChange={(e) => setStatement(e.target.value)}
-                placeholder="주장 문장 (비우면 답변을 그대로 씁니다)"
+                placeholder="사실 문장 (비우면 답변을 그대로 씁니다)"
                 className="min-h-14"
                 maxLength={4000}
-                aria-label="주장 문장"
+                aria-label="사실 문장"
               />
               <div className="grid grid-cols-2 gap-2">
                 <div>

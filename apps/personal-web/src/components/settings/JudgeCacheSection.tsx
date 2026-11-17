@@ -46,7 +46,7 @@ export function JudgeCacheSection() {
       )}
       <p className="text-[13px] leading-5 text-muted">
         같은 요건·같은 글을 다시 물으면 판정 모델을 부르지 않고 이전 응답을 씁니다. 응답에는 문서 인용이 들어 있어 이
-        작업 공간에만 두고, 내보내기에는 넣지 않습니다. 주장이나 지원 문서를 지우면 그 응답도 같이 지워집니다. 보관
+        작업 공간에만 두고, 내보내기에는 넣지 않습니다. 사실이나 지원 문서를 삭제하면 그 응답도 같이 삭제됩니다. 보관
         일수는 <code>CAREER_JUDGE_CACHE_DAYS</code>로 정합니다.
       </p>
       {cleared !== null ? <p className="text-[13px] text-muted">{int(cleared)}개를 지웠습니다.</p> : null}
@@ -58,7 +58,7 @@ export function JudgeCacheSection() {
         open={asking}
         onOpenChange={setAsking}
         title="판정 응답 캐시를 비울까요?"
-        description="다음 판정부터는 판정 모델을 다시 부릅니다 (비용이 다시 듭니다). 주장·문서·판정 기준선은 바뀌지 않습니다."
+        description="다음 판정부터는 판정 모델을 다시 부릅니다 (비용이 다시 듭니다). 확인한 사실·문서·판정 기준선은 바뀌지 않습니다."
         confirmLabel="비우기"
         tone="danger"
         busy={clear.isPending}

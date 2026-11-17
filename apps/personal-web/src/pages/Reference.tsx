@@ -148,7 +148,7 @@ function ReferenceView({ r }: { r: Reference }) {
                   </Link>
                 </Row>
               ) : null}
-              <Row label="자료 등급">{DATA_CLASS_LABEL[r.data_class] ?? r.data_class}</Row>
+              <Row label="보내는 범위">{DATA_CLASS_LABEL[r.data_class] ?? r.data_class}</Row>
               <Row label="추가한 날">{formatDate(r.created_at)}</Row>
             </dl>
           </Section>
@@ -172,7 +172,7 @@ function ReferenceView({ r }: { r: Reference }) {
         open={deleting}
         onOpenChange={setDeleting}
         title={`${r.title} 삭제`}
-        description="참고 글과 구조 메모를 삭제합니다. 올린 자료는 자료 목록에 남습니다. 되돌릴 수 없습니다."
+        description="참고 글과 구조 메모를 삭제합니다. 넣은 원본은 받은 자료에 남습니다. 되돌릴 수 없습니다."
         confirmLabel={remove.isPending ? "삭제하는 중" : "삭제"}
         busy={remove.isPending}
         tone="danger"
@@ -218,7 +218,7 @@ function OriginalText({ r }: { r: Reference }) {
             type="button"
             onClick={() => check.mutate()}
             disabled={check.isPending}
-            className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-0"
+            className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-6"
           >
             개인정보 찾기
           </button>

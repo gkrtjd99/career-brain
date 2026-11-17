@@ -88,14 +88,28 @@ function Header({
       <div className="text-sm font-semibold tabular-nums">{label}</div>
       <div className="ml-auto flex items-center">
         {onToday ? (
-          <button type="button" onClick={onToday} className="rounded px-2 py-1 text-xs text-muted hover:text-fg">
+          <button
+            type="button"
+            onClick={onToday}
+            className="inline-flex h-9 items-center rounded-md px-2 text-xs text-muted hover:bg-subtle/60 hover:text-fg md:h-7"
+          >
             오늘로
           </button>
         ) : null}
-        <button type="button" aria-label="이전" onClick={onPrev} className="rounded p-1 text-muted hover:text-fg">
+        <button
+          type="button"
+          aria-label="이전"
+          onClick={onPrev}
+          className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
+        >
           <ChevronLeft size={16} />
         </button>
-        <button type="button" aria-label="다음" onClick={onNext} className="rounded p-1 text-muted hover:text-fg">
+        <button
+          type="button"
+          aria-label="다음"
+          onClick={onNext}
+          className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
+        >
           <ChevronRight size={16} />
         </button>
       </div>
@@ -127,7 +141,8 @@ function DayButton({
       aria-pressed={isSelected}
       aria-label={`${Number(day.slice(5, 7))}월 ${Number(day.slice(8))}일${kinds.length ? ", 일정 있음" : ""}`}
       className={cn(
-        "flex flex-col items-center gap-1 rounded-md py-1 transition-colors duration-150",
+        "flex w-full flex-col items-center gap-1 rounded-md py-1 transition-colors duration-150",
+        size === "md" && "min-h-11",
         isSelected ? "bg-subtle" : "hover:bg-subtle/60",
       )}
     >

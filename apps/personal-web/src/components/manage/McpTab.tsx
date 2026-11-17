@@ -19,10 +19,10 @@ export function mcpUrl() {
 
 /** 할 수 있는 일을 묶음으로. 도구 이름 대신 사람이 읽는 말로 */
 const SCOPES: { name: string; text: string }[] = [
-  { name: "읽기", text: "브레인 검색, 경험·주장·근거, 공고, 지원 서류 검사, 학습 충족도, 작업·승인 상태" },
+  { name: "읽기", text: "브레인 검색, 경험·확인한 사실·근거, 공고, 지원 서류 검사, 학습 충족도, 작업·승인 상태" },
   { name: "쓰기", text: "인터뷰 시작·답변, 공고 링크 저장, 학습 기록, 작업 시작·중단, 승인 요청" },
   { name: "외부 모델 사용", text: "문서 수정안 제안. 모델 연결에서 허용한 자료만 보냅니다" },
-  { name: "할 수 없는 것", text: "승인 결정, 주장 확정, 제출, 모델 연결·키 보기. 에이전트가 만든 주장은 확인 대기로 갑니다" },
+  { name: "할 수 없는 것", text: "승인 결정, 사실 확정, 제출, 모델 연결·키 보기. 에이전트가 만든 사실은 확인 대기로 갑니다" },
 ];
 
 /** MCP 탭: 주소 → 토큰 → 클라이언트별 설정 → 권한. working.cv/mcp처럼 한 줄로 읽히게 */
@@ -107,7 +107,7 @@ export function McpTab({ isAdmin }: { isAdmin: boolean }) {
           ))}
         </dl>
         <p className="text-[13px] text-muted">
-          에이전트는 토큰이 속한 공간만 봅니다. 토큰을 폐기하면 바로 끊기고, 호출 기록은{" "}
+          에이전트는 토큰이 속한 공간만 봅니다. 토큰을 폐기하면 바로 연결이 해제되고, 호출 기록은{" "}
           <Link to="/manage" search={{ tab: "runs" }} className="underline underline-offset-2 hover:text-fg">
             작업·승인
           </Link>
@@ -129,7 +129,7 @@ export function McpTab({ isAdmin }: { isAdmin: boolean }) {
 
 function Summary({ children }: { children: ReactNode }) {
   return (
-    <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 text-[13px] text-muted hover:text-fg sm:min-h-0 [&::-webkit-details-marker]:hidden">
+    <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 text-[13px] text-muted hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
       <ChevronRight size={14} aria-hidden className="transition-transform duration-150 group-open:rotate-90" />
       {children}
     </summary>

@@ -188,7 +188,7 @@ function ClaimEditor({ claim, onDone, onCancel }: { claim: Claim; onDone: () => 
       <Textarea
         value={statement}
         onChange={(e) => setStatement(e.target.value)}
-        aria-label="주장 문장"
+        aria-label="사실 문장"
         maxLength={4000}
         autoFocus
       />
@@ -232,7 +232,7 @@ function ClaimEditor({ claim, onDone, onCancel }: { claim: Claim; onDone: () => 
         </Button>
       </div>
       <p className="text-[13px] text-muted">
-        확정된 주장을 고치면, 확정 권한이 있는 토큰에서는 다시 확정 상태로 남습니다.
+        확정한 사실을 수정해도, 확정 권한이 있는 토큰이면 확정 상태로 남습니다.
       </p>
     </form>
   );

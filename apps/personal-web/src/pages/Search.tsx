@@ -11,7 +11,7 @@ import { api } from "../lib/api";
 const route = getRouteApi("/search");
 
 const KIND_INFO: Record<SearchKind, { label: string; icon: typeof Quote }> = {
-  claim: { label: "주장", icon: Quote },
+  claim: { label: "사실", icon: Quote },
   block: { label: "원문", icon: FileText },
   answer: { label: "인터뷰 답변", icon: MessageSquareQuote },
   study_note: { label: "학습 메모", icon: NotebookPen },
@@ -63,8 +63,8 @@ export function SearchPage() {
   return (
     <div>
       <PageHeader
-        title="검색"
-        subtitle="확인한 주장, 내 경험 자료의 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다. 증빙 서류는 찾지 않습니다."
+        title="근거 검색"
+        subtitle="확인한 사실, 내 경험 자료의 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다. 증빙 서류는 찾지 않습니다."
       />
       <form
         role="search"

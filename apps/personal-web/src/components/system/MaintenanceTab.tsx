@@ -67,7 +67,7 @@ const RESTORE_ERROR: Record<string, string> = {
 };
 
 const PHASE: Record<string, string> = {
-  queued: "작업 큐에서 차례를 기다리는 중 (worker)",
+  queued: "차례를 기다리는 중. 오래 걸리면 연결·관리 › 작업에서 상태를 보세요",
   read: "묶음 읽는 중",
   decrypt: "암호 푸는 중",
   match: "겹치는 자료 찾는 중",
@@ -82,7 +82,7 @@ const SKIP_REASON: Record<string, string> = {
   still_referenced: "다른 자료가 아직 가리킴",
   not_permitted: "지울 수 없는 표",
   rejected: "규칙이 거부함",
-  kept_existing: "원래 있던 자료라 지우지 않음",
+  kept_existing: "원래 있던 자료라 남겨 둠",
   error: "DB 오류",
 };
 
@@ -417,7 +417,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
     <div className="space-y-4">
       <p className="text-[13px] text-muted">
         내보내기 묶음(.tar.gz, 암호화했다면 .age)을 올려 <span className="text-fg">지금 공간에 합칩니다</span>. 이미
-        있는 자료는 고치지 않고, 없는 행만 새 ID로 더합니다. 먼저 확인(아무것도 쓰지 않음)으로 무엇이 들어갈지 보고
+        있는 자료는 바꾸지 않고, 없는 행만 새 ID로 더합니다. 먼저 확인(아무것도 쓰지 않음)으로 무엇이 들어갈지 보고
         합칩니다.
       </p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -472,7 +472,7 @@ function RestorePanel({ m }: { m: Maintenance }) {
               className="font-mono text-xs"
             />
             <p className="text-[13px] text-muted">
-              확인·합치기 요청에만 실어 보내고, 서버는 worker가 쓸 때까지 작업 폴더에 본인만 읽는 파일로 둔 뒤 지웁니다.
+              확인·합치기 요청에만 실어 보내고, 서버는 작업이 쓸 때까지 작업 폴더에 본인만 읽는 파일로 둔 뒤 삭제합니다.
             </p>
           </div>
         ) : null}

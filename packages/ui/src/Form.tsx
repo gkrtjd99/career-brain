@@ -8,7 +8,7 @@ import {
 import { cn } from "./cn";
 
 const FIELD =
-  "w-full rounded-md border border-line bg-surface px-3 text-sm text-fg placeholder:text-muted " +
+  "w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-fg placeholder:text-muted " +
   "focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-accent/30 disabled:opacity-60";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(

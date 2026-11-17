@@ -1,5 +1,5 @@
 import type { Credential, CredentialKind } from "@career-brain/client";
-import { Button, cn } from "@career-brain/ui";
+import { Button, cn, FilterChips } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
@@ -20,9 +20,6 @@ import { formatDate } from "../lib/dates";
 const route = getRouteApi("/brain/credentials");
 
 const ROW = "-mx-2 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const CHIP =
-  "inline-flex h-9 items-center rounded-full px-3.5 text-[13px] tabular-nums transition-colors duration-150 " +
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 const COLS = "sm:grid-cols-[4.5rem_minmax(0,1.6fr)_6rem_6.5rem_7.5rem_5rem]";
 
 type SheetState = { credential: Credential | null } | null;
@@ -63,23 +60,20 @@ export function CredentialsPage() {
               {records.length ? (
                 <section>
                   {kinds.length > 1 ? (
-                    <div className="mb-3 flex flex-wrap items-center gap-1" role="radiogroup" aria-label="종류 필터">
-                      {[{ value: undefined as CredentialKind | undefined, label: "전체" }, ...kinds].map((o) => (
-                        <button
-                          key={o.value ?? "all"}
-                          type="button"
-                          role="radio"
-                          aria-checked={kind === o.value}
-                          onClick={() => setKind(o.value)}
-                          className={cn(
-                            CHIP,
-                            kind === o.value ? "bg-fg font-medium text-bg" : "text-muted hover:bg-subtle hover:text-fg",
-                          )}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
-                    </div>
+                    <FilterChips<CredentialKind | undefined>
+                      label="종류 필터"
+                      value={kind}
+                      onChange={setKind}
+                      items={[
+                        { value: undefined, label: "전체", count: records.length },
+                        ...kinds.map((o) => ({
+                          value: o.value,
+                          label: o.label,
+                          count: records.filter((c) => c.kind === o.value).length,
+                        })),
+                      ]}
+                      className="mb-3"
+                    />
                   ) : null}
                   {shown.length ? (
                     <CredentialTable rows={shown} onOpen={(c) => setSheet({ credential: c })} />
@@ -138,7 +132,7 @@ function Candidates({ rows, onOpen }: { rows: Credential[]; onOpen: (c: Credenti
           <li key={c.id} className="flex items-center gap-2">
             <button type="button" onClick={() => onOpen(c)} className={cn(ROW, "min-w-0 flex-1 text-left")}>
               <div className="truncate text-sm font-medium">{c.name}</div>
-              <div className="truncate text-[13px] text-muted tabular-nums">
+              <div className="line-clamp-2 text-[13px] text-muted tabular-nums">
                 {[
                   CREDENTIAL_KIND_LABEL[c.kind],
                   c.issuer,
@@ -199,7 +193,7 @@ function CredentialRow({ c, onOpen }: { c: Credential; onOpen: () => void }) {
           {c.issuer ? <span className="block truncate text-muted">{c.issuer}</span> : null}
         </span>
         {/* 좁은 화면: 종류·점수·날짜·만료·상태를 한 줄로 */}
-        <span className="truncate text-muted tabular-nums sm:hidden">
+        <span className="line-clamp-2 text-muted tabular-nums sm:hidden">
           {[
             CREDENTIAL_KIND_LABEL[c.kind],
             score,

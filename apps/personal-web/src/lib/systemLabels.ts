@@ -78,7 +78,7 @@ export const RUN_CODE: Record<string, string> = {
   model_not_found: "없는 모델 이름",
   bad_request: "모델 요청이 거부됨",
   sdk_not_installed: "제공자 SDK가 설치되지 않음",
-  worker_error: "worker 처리 오류",
+  worker_error: "작업 처리 오류",
 };
 
 export const INVALID_REASON: Record<string, string> = {

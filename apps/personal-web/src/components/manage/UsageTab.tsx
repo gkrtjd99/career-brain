@@ -246,7 +246,7 @@ function BudgetRow({ canEdit }: { canEdit: boolean }) {
             <button
               type="button"
               onClick={() => setDraft(b.monthly_usd ?? "")}
-              className="ml-2 inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-0"
+              className="ml-2 inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-6"
             >
               수정
             </button>

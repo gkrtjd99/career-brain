@@ -50,6 +50,9 @@ const todayRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: requireToken,
+  // day: 그날 일정만 펼쳐 보인다 (명령 팔레트의 "오늘 마감 보기")
+  validateSearch: (s: Record<string, unknown>): { day?: string } =>
+    typeof s.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.day) ? { day: s.day } : {},
   component: TodayPage,
 });
 
@@ -89,7 +92,7 @@ const brainRoute = createRoute({
 
 const PURPOSES: SourcePurpose[] = ["experience", "proof", "reference"];
 
-/** 올린 자료 전체 (받은 자료함의 "모든 자료"). purpose = 용도 필터 */
+/** 받은 자료 전체 (브레인 받은 자료함의 "모두 보기"). purpose = 용도 필터 */
 export const sourcesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/brain/sources",
@@ -347,6 +350,14 @@ export const systemRoute = createRoute({
   },
 });
 
+// 도구 › 숨김 글 검사: 제출할 DOCX·PDF를 서버가 읽어 보고 저장하지 않는다
+const hiddenTextToolRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tools/hidden-text",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/HiddenTextTool"), "HiddenTextToolPage"),
+});
+
 // 사진 변환: 브라우저 안에서만 처리하고 API를 부르지 않아 토큰 없이도 연다
 const photoToolRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -383,6 +394,7 @@ const routeTree = rootRoute.addChildren([
   studyItemRoute,
   systemRoute,
   photoToolRoute,
+  hiddenTextToolRoute,
 ]);
 
 export const router = createRouter({

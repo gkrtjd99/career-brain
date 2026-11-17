@@ -200,7 +200,7 @@ export function OAuthTab() {
             <ConfirmDialog
               open={pending !== null}
               onOpenChange={(open) => (open ? null : setPending(null))}
-              title={pending?.kind === "link" ? "연결을 끊을까요?" : "토큰을 폐기할까요?"}
+              title={pending?.kind === "link" ? "연결을 해제할까요?" : "토큰을 폐기할까요?"}
               description={
                 pending?.kind === "link"
                   ? "이 사용자의 모든 토큰이 다음 요청부터 거부됩니다. 다시 쓰려면 새로 연결해야 하고, 그 전에 받은 토큰은 계속 거부됩니다."

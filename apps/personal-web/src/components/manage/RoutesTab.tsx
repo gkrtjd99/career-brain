@@ -223,7 +223,7 @@ function RouteEditor({
             모델 이름을 직접 적거나{" "}
             <button
               type="button"
-              className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-0"
+              className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-6"
               onClick={() => void test.refetch()}
               disabled={!conn}
             >
