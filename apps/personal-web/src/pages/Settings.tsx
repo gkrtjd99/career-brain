@@ -42,9 +42,16 @@ export function SettingsPage() {
       <PageHeader title="설정" subtitle="API 연결과 화면 테마" />
 
       {reason === "missing" && !token ? (
-        <p className="mb-4 rounded-lg border border-line bg-accent-soft px-3 py-2 text-[13px]">
-          처음이라면 <code>uv run personal-api bootstrap</code> 이 출력한 API 토큰을 넣어 주세요.
-        </p>
+        <div className="mb-4 space-y-1 rounded-lg border border-line bg-accent-soft px-3 py-2 text-[13px]">
+          <p>
+            처음이라면 <code>uv run personal-api bootstrap</code> (Docker:{" "}
+            <code>docker compose run --rm app bootstrap</code>) 이 출력한 API 토큰을 넣어 주세요.
+          </p>
+          <p className="text-muted">
+            먼저 둘러보려면 <code>bootstrap</code> 대신 <code>demo</code>를 실행하세요. 가상 자료로 채운
+            데모 공간과 그 토큰을 만듭니다 (모델 키 필요 없음).
+          </p>
+        </div>
       ) : null}
       {reason === "invalid" ? (
         <p className="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-[13px] text-danger">
@@ -91,7 +98,7 @@ export function SettingsPage() {
                 spellCheck={false}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="personal-api bootstrap 이 출력한 토큰"
+                placeholder="personal-api bootstrap (또는 demo) 이 출력한 토큰"
               />
               <ErrorText error={check.error} />
               <div className="flex flex-wrap gap-2">

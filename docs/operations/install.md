@@ -39,6 +39,7 @@ uv sync --package personal-api --no-dev            # 실행에 필요한 것만 
 docker compose -f deploy/compose/compose.yaml up -d db   # 127.0.0.1:5432, 개발용 비밀번호
 uv run --no-sync personal-api migrate
 uv run --no-sync personal-api bootstrap            # API 토큰을 한 번만 출력한다. 안전한 곳에 보관
+uv run --no-sync personal-api demo                 # 선택: 가상 자료로 채운 데모 공간 + 그 토큰 (아래 "데모 공간")
 npm ci && npm run build                            # 선택: apps/personal-web/dist
 uv run --no-sync personal-api serve                # http://127.0.0.1:8000 (API + worker + 웹)
 ```
@@ -58,6 +59,7 @@ cp app.env.example app.env        # 모델 키 등 (선택)
 mkdir -p config && cp ../../models.example.toml config/models.toml   # 선택: 모델 설정
 docker compose up -d --build      # db → migrate(한 번) → app
 docker compose run --rm app bootstrap   # 첫 설치 때 한 번: API 토큰 출력
+docker compose run --rm app demo        # 선택: 데모 공간 + 그 토큰 (모델 키 없이 둘러보기)
 curl -H "Authorization: Bearer <token>" http://127.0.0.1:8000/api/core/me
 ```
 
@@ -103,6 +105,16 @@ career.example.com {
 - 프록시를 컨테이너로 같은 compose 네트워크에 두면 `CAREER_BIND`는 그대로 두고 프록시에서 `app:8000`으로 보낸다.
 - 공개 주소에서 쓰는 API 토큰은 비밀번호처럼 다룬다. 새 토큰 발급·폐기는 `personal-api token` (아래 "API 토큰"). 세션 로그인·CSRF는 웹 로그인 작업에서 다룬다 (plan §14).
 - 방화벽에서 80/443만 연다.
+
+### 데모 공간 (모델 키 없이 둘러보기)
+
+`personal-api demo` (Docker: `docker compose run --rm app demo`)는 **새 공간 하나**를 만들어 가상의 한국어 자료로 채우고, 그 공간의 API 토큰을 한 번만 출력한다. 웹 설정(설정 → API 토큰)에 넣으면 데모 공간이 열린다. 원래 공간으로 돌아가려면 그 토큰을 다시 넣는다.
+
+- 채우는 것: 원본 3개(이력서·프로젝트 회고·사이드 프로젝트 노트, 파싱 완료) · 경험 3개와 원문 인용 근거가 붙은 주장(확인됨 + 확인 대기) · 템플릿 인터뷰 질문과 답 2개 · 공고 2개(하나는 항목을 확인해 저장, 하나는 붙여넣은 본문만 있는 확인 대기) · 지원 1개(문항 문서에 근거 연결 문단, 검사 탭의 글자 수·요건 가시성·경고) · 공용 이력서 1개 · 공고 요건에서 만든 학습 항목·코딩테스트 준비·모의 응시 1회·오답 2개(다음 날 첫 복습).
+- 모델·네트워크를 부르지 않는다. 공고는 붙여넣은 본문이고 주소는 문서용 주소(`192.0.2.x`, 가져오지 않음)다. AI 추출 후보·AI 질문·AI 수정안·실행 기록은 만들지 않는다 (모델 출력을 지어내지 않는다).
+- 모든 쓰기는 웹·MCP와 같은 usecase를 거친다. 이름·회사·수치는 모두 지어낸 것이다.
+- `--name 이름`으로 공간 이름을 바꾼다 (기본 `데모`). 다시 실행하면 **데모 공간이 하나 더** 생긴다 (앱 계정은 다른 공간을 볼 수 없어 "이미 있음"을 확인하지 않는다). 기존 공간은 건드리지 않는다.
+- 확인 대기 공고는 다른 미확정 공고처럼 7일 뒤 주기 정리에서 지워진다. 색인 작업이 예약되므로 worker(또는 `serve`)가 돌면 검색 색인이 채워진다 (임베딩을 설정했다면 그 설정대로).
 
 ## 3. 모델 설정
 
