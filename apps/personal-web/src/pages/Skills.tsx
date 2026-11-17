@@ -1,5 +1,5 @@
 import type { Skill } from "@career-brain/client";
-import { Button, cn, Input, Select } from "@career-brain/ui";
+import { Button, cn, Input, Select, SelectItem } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
@@ -37,7 +37,7 @@ export function SkillsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="기술"
-        subtitle="경험 태그·확인한 사실·자격증에서 모았습니다. 고치려면 해당 경험이나 기록을 고칩니다."
+        subtitle="경험 태그·확인한 사실·자격증에서 모았습니다."
       />
       <Loaded query={q}>
         {(skills) => (
@@ -272,14 +272,14 @@ function SkillDetail({ s, all }: { s: Skill; all: Skill[] }) {
             <Select
               aria-label={`${s.name}에 합칠 기술`}
               value={pick}
-              onChange={(e) => setPick(e.target.value)}
+              onValueChange={(v) => setPick(v)}
               className="w-full sm:w-56"
             >
-              <option value="">같은 기술의 다른 표기 고르기</option>
+              <SelectItem value="">같은 기술의 다른 표기 고르기</SelectItem>
               {candidates.map((x) => (
-                <option key={x.key} value={x.key}>
+                <SelectItem key={x.key} value={x.key}>
                   {x.name}
-                </option>
+                </SelectItem>
               ))}
             </Select>
             <Button type="submit" size="sm" className="max-sm:h-9" disabled={!pick || merge.isPending}>

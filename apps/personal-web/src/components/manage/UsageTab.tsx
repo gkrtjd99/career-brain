@@ -1,5 +1,5 @@
 import type { UsageGroup, UsageRow } from "@career-brain/client";
-import { Badge, Button, cn, Input, Select } from "@career-brain/ui";
+import { Badge, Button, cn, Input, Select, SelectItem } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { ErrorText, Loaded } from "../common";
@@ -44,22 +44,22 @@ export function UsageTab({ canEdit }: { canEdit: boolean }) {
     <div className="max-w-4xl">
       <p className="mb-4 text-[13px] text-muted">모델 호출마다 토큰과 비용을 기록합니다.</p>
       <div className="mb-6 flex flex-wrap gap-2">
-        <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-auto" aria-label="기간">
-          <option value={7}>최근 7일</option>
-          <option value={30}>최근 30일</option>
-          <option value={90}>최근 90일</option>
-          <option value={365}>최근 1년</option>
+        <Select value={days} onValueChange={(v) => setDays(Number(v))} className="w-auto" aria-label="기간">
+          <SelectItem value={7}>최근 7일</SelectItem>
+          <SelectItem value={30}>최근 30일</SelectItem>
+          <SelectItem value={90}>최근 90일</SelectItem>
+          <SelectItem value={365}>최근 1년</SelectItem>
         </Select>
         <Select
           value={groupBy}
-          onChange={(e) => setGroupBy(e.target.value as UsageGroup)}
+          onValueChange={(v) => setGroupBy(v as UsageGroup)}
           className="w-auto"
           aria-label="묶는 기준"
         >
           {GROUPS.map(([v, l]) => (
-            <option key={v} value={v}>
+            <SelectItem key={v} value={v}>
               {l}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>

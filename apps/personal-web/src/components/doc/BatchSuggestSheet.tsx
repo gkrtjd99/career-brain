@@ -1,5 +1,5 @@
 import type { AppDocument, Run } from "@career-brain/client";
-import { Button, Label, Sheet, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, Label, Sheet, Textarea } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ListChecks } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
@@ -132,9 +132,8 @@ function BatchSuggestSheet({
           }}
         >
           <p className="text-[13px] text-muted">
-            고른 문단마다 한 번씩 AI에게 수정안을 요청합니다. 문단 글을 모델로 보내며 비용이 듭니다 (제한 자료 근거는
-            보내지 않음). 수정안은 초안이고 문서는 바뀌지 않습니다. 실행 중에 문서를 저장하면 남은 문단은 하지 않고
-            멈춥니다.
+            고른 문단마다 수정안을 받습니다. 문단 글을 모델로 보내며 비용이 듭니다. 문서는 바뀌지 않습니다. 실행 중에
+            저장하면 남은 문단은 멈춥니다.
           </p>
           {dirty ? (
             <p role="alert" className="text-[13px] font-medium">
@@ -165,11 +164,10 @@ function BatchSuggestSheet({
               {blocks.map((b, i) => (
                 <li key={b.id}>
                   <label className="flex cursor-pointer items-start gap-2 px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       className="mt-1"
                       checked={picked.has(b.id)}
-                      onChange={() => toggle(b.id)}
+                      onCheckedChange={() => toggle(b.id)}
                       aria-label={`문단 ${i + 1}`}
                     />
                     <span className="w-6 shrink-0 text-muted tabular-nums">{i + 1}</span>

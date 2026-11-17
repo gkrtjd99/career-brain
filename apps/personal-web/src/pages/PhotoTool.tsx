@@ -1,5 +1,5 @@
 import type { PhotoSpec } from "@career-brain/client";
-import { Button, cn, Input, Label, Section } from "@career-brain/ui";
+import { Button, Checkbox, cn, Input, Label, Section, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { Download, ImagePlus, Lock, RotateCcw, RotateCw, Undo2 } from "lucide-react";
 import {
   useCallback,
@@ -489,7 +489,7 @@ export function PhotoToolPage() {
     <div>
       <PageHeader
         title="사진 변환"
-        subtitle="지원서 사진을 양식이 정한 픽셀 크기·파일 형식·용량에 맞춥니다."
+        subtitle="양식이 정한 크기·형식·용량에 맞춥니다."
         actions={
           src ? (
             <Button size="sm" onClick={() => fileRef.current?.click()}>
@@ -652,7 +652,7 @@ export function PhotoToolPage() {
                     <Undo2 size={15} /> 처음대로
                   </Button>
                   <label className="ml-auto flex items-center gap-1.5 text-[13px]">
-                    <input type="checkbox" checked={guides} onChange={(e) => setGuides(e.target.checked)} />
+                    <Checkbox checked={guides} onCheckedChange={(checked) => setGuides(checked)} />
                     얼굴 안내선
                   </label>
                 </div>
@@ -798,19 +798,22 @@ export function PhotoToolPage() {
                     <Label>배경색</Label>
                     <div className="flex items-center gap-1.5">
                       {BACKGROUNDS.map(([c, name]) => (
-                        <button
-                          key={c}
-                          type="button"
-                          title={name}
-                          aria-label={`배경 ${name}`}
-                          aria-pressed={bg === c}
-                          onClick={() => setBg(c)}
-                          className={cn(
-                            "h-9 w-9 rounded-md border",
-                            bg === c ? "border-fg ring-2 ring-fg/30" : "border-line",
-                          )}
-                          style={{ background: c }}
-                        />
+                        <Tooltip key={c}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              aria-label={`배경 ${name}`}
+                              aria-pressed={bg === c}
+                              onClick={() => setBg(c)}
+                              className={cn(
+                                "h-9 w-9 rounded-md border",
+                                bg === c ? "border-fg ring-2 ring-fg/30" : "border-line",
+                              )}
+                              style={{ background: c }}
+                            />
+                          </TooltipTrigger>
+                          <TooltipContent>{name}</TooltipContent>
+                        </Tooltip>
                       ))}
                       <input
                         type="color"
@@ -830,7 +833,7 @@ export function PhotoToolPage() {
                 ) : null}
                 {format !== "jpeg" ? (
                   <label className="flex items-center gap-1.5 text-[13px]">
-                    <input type="checkbox" checked={keepAlpha} onChange={(e) => setKeepAlpha(e.target.checked)} />
+                    <Checkbox checked={keepAlpha} onCheckedChange={(checked) => setKeepAlpha(checked)} />
                     투명한 부분은 투명하게 두기 (끄면 배경색으로 채움)
                   </label>
                 ) : (

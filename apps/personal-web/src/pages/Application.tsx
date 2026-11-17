@@ -10,20 +10,7 @@ import type {
   Submission,
   TextCounts,
 } from "@career-brain/client";
-import {
-  Button,
-  cn,
-  ConfirmDialog,
-  EmptyState,
-  Input,
-  Label,
-  Section,
-  Select,
-  Sheet,
-  StatusBadge,
-  Textarea,
-  type BadgeTone,
-} from "@career-brain/ui";
+import { Button, Checkbox, cn, ConfirmDialog, DateTimeField, Disclosure, EmptyState, Input, Label, Section, Select, SelectItem, Sheet, StatusBadge, Textarea, type BadgeTone } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Copy, Download, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
@@ -48,7 +35,7 @@ export function countLine(c: TextCounts | null | undefined) {
   if (!c) return "아직 안 씀";
   const parts = [
     `${int(c.chars)}${c.char_limit ? ` / ${int(c.char_limit)}` : ""}자`,
-    `${int(c.bytes)}${c.byte_limit ? ` / ${int(c.byte_limit)}` : ""}B`,
+    `${int(c.bytes)}${c.byte_limit ? ` / ${int(c.byte_limit)}` : ""}바이트`,
   ];
   return parts.join(" · ");
 }
@@ -287,12 +274,12 @@ export function AddDocumentSheet({ appId, open, onClose }: { appId: string; open
             <Select
               id="doc-kind"
               value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as DocumentKind })}
+              onValueChange={(v) => setForm({ ...form, kind: v as DocumentKind })}
             >
               {KINDS.map((k) => (
-                <option key={k} value={k}>
+                <SelectItem key={k} value={k}>
                   {DOC_KIND[k]}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -461,7 +448,7 @@ export function SubmitDialog({
             두면 경고하지 않습니다.
           </p>
           <label className="mt-2 flex min-h-9 items-start gap-2 py-1">
-            <input type="checkbox" className="mt-1" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+            <Checkbox className="mt-1" checked={ack} onCheckedChange={(checked) => setAck(checked)} />
             <span>위 내용을 확인했고 이대로 제출본에 넣습니다.</span>
           </label>
         </div>
@@ -510,11 +497,11 @@ export function StatusSheet({ app, open, onClose }: { app: Application; open: bo
       <div className="space-y-3">
         <div>
           <Label htmlFor="st">상태</Label>
-          <Select id="st" value={value} onChange={(e) => setValue(e.target.value as typeof value)}>
+          <Select id="st" value={value} onValueChange={(v) => setValue(v as typeof value)}>
             {options.map((o) => (
-              <option key={o} value={o}>
+              <SelectItem key={o} value={o}>
                 {APP_STATUS[o].label}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -705,12 +692,12 @@ function StageSheet({
             <Select
               id="stg-kind"
               value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as StageKind })}
+              onValueChange={(v) => setForm({ ...form, kind: v as StageKind })}
             >
               {STAGE_KINDS.map((k) => (
-                <option key={k} value={k}>
+                <SelectItem key={k} value={k}>
                   {STAGE_KIND[k]}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -719,12 +706,12 @@ function StageSheet({
             <Select
               id="stg-outcome"
               value={form.outcome}
-              onChange={(e) => setForm({ ...form, outcome: e.target.value as StageOutcome })}
+              onValueChange={(v) => setForm({ ...form, outcome: v as StageOutcome })}
             >
               {STAGE_OUTCOMES.map((o) => (
-                <option key={o} value={o}>
+                <SelectItem key={o} value={o}>
                   {STAGE_OUTCOME[o].label}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -741,11 +728,10 @@ function StageSheet({
         </div>
         <div>
           <Label htmlFor="stg-at">일정 (선택)</Label>
-          <Input
+          <DateTimeField
             id="stg-at"
-            type="datetime-local"
             value={form.scheduled}
-            onChange={(e) => setForm({ ...form, scheduled: e.target.value })}
+            onChange={(value) => setForm({ ...form, scheduled: value })}
           />
         </div>
         <div>
@@ -780,7 +766,6 @@ function SubmissionBody({ sub }: { sub: Submission }) {
         <p className="flex flex-wrap items-center gap-1.5 font-medium text-fg tabular-nums">
           <Lock size={14} /> {formatDateTime(sub.submitted_at)} 고정
         </p>
-        <p className="text-xs break-all">내용 해시 {sub.content_hash}</p>
         {sub.note ? <p className="text-fg">메모: {sub.note}</p> : null}
         {sub.posting.pending_changes?.length ? (
           <p className="font-medium text-fg">
@@ -794,16 +779,13 @@ function SubmissionBody({ sub }: { sub: Submission }) {
           <div>
             <h3 className="text-sm font-semibold">{d.title}</h3>
             <p className="text-[13px] text-muted tabular-nums">
-              r{d.revision_no} · {countLine(d.counts)}
+              {d.revision_no}번째 저장 · {countLine(d.counts)}
             </p>
             {d.question_prompt ? <p className="mt-1 text-[13px] text-muted">{d.question_prompt}</p> : null}
           </div>
           <article className="text-base leading-8 whitespace-pre-wrap">{d.text}</article>
           {d.evidence.length ? (
-            <details className="text-[13px]">
-              <summary className="cursor-pointer py-1 text-muted hover:text-fg">
-                제출 당시 근거 {d.evidence.length}개
-              </summary>
+            <Disclosure title={<>제출 당시 근거 {d.evidence.length}개</>} className="text-[13px]">
               <ul className="mt-2 divide-y divide-line border-t border-line">
                 {d.evidence.map((e) => (
                   <li key={e.claim_id} className="flex items-start gap-3 py-2">
@@ -815,7 +797,7 @@ function SubmissionBody({ sub }: { sub: Submission }) {
                   </li>
                 ))}
               </ul>
-            </details>
+            </Disclosure>
           ) : null}
         </section>
       ))}

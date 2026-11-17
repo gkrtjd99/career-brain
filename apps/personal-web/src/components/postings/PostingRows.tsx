@@ -1,7 +1,6 @@
 import type { PostingSummary } from "@career-brain/client";
-import { cn, Spinner } from "@career-brain/ui";
+import { Checkbox, cn, Disclosure, Spinner } from "@career-brain/ui";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { hostOf } from "../../lib/format";
 import { FETCH_ERROR, FIELD_LABEL } from "../../lib/labels";
@@ -98,11 +97,9 @@ export function PostingRow({
     return (
       <li>
         <label className={cn(ROW, "cursor-pointer hover:bg-subtle/60", selected && "bg-subtle/60")}>
-          <input
-            type="checkbox"
-            className="h-4 w-4 shrink-0 accent-fg"
+          <Checkbox
             checked={selected}
-            onChange={onToggle}
+            onCheckedChange={onToggle}
             aria-label={`${title} 고르기`}
           />
           {body}
@@ -157,13 +154,19 @@ export function SeasonGroup({
   children: ReactNode;
 }) {
   return (
-    <details open={defaultOpen} className="group border-b border-line">
-      <summary className="-mx-2 flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-md px-2 text-sm font-medium transition-colors duration-150 hover:bg-subtle/60 [&::-webkit-details-marker]:hidden">
-        <ChevronRight size={14} className="text-muted transition-transform duration-150 group-open:rotate-90" />
-        {label}
-        <span className="font-normal text-muted tabular-nums">{count}</span>
-      </summary>
+    <Disclosure
+      title={
+        <>
+          {label}
+          <span className="font-normal text-muted tabular-nums">{count}</span>
+        </>
+      }
+      defaultOpen={defaultOpen}
+      tone="row"
+      className="border-b border-line"
+      contentClassName="pt-0"
+    >
       <div className="pb-3 [&>ul]:border-b-0">{children}</div>
-    </details>
+    </Disclosure>
   );
 }

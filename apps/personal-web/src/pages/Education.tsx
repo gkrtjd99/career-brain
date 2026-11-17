@@ -21,7 +21,6 @@ export function EducationPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="학력"
-        subtitle="학교·전공·학점·기간입니다. 이력서의 학력 구역에 씁니다."
         actions={
           <Button variant="primary" onClick={() => setSheet({ education: null })}>
             <Plus size={15} /> 학력 추가

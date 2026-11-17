@@ -1,5 +1,5 @@
 import type { SourceListItem, SourcePurpose } from "@career-brain/client";
-import { Button, cn, FilterChips, Label, Select, type BadgeTone } from "@career-brain/ui";
+import { Button, cn, Disclosure, FilterChips, Label, Select, SelectItem, toast, type BadgeTone } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
@@ -35,9 +35,8 @@ export const TONE_TEXT: Record<BadgeTone, string> = {
 
 export function fileSize(n: number | null) {
   if (n === null) return null;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
 }
 
 const pending = (rows: SourceListItem[] | undefined) =>
@@ -85,7 +84,6 @@ export function SourceInbox() {
           모두 보기 <ChevronRight size={14} />
         </Link>
       </div>
-      <p className="mt-0.5 text-[13px] text-muted">처리가 끝나지 않았거나 확인할 것이 남은 자료입니다.</p>
       <ErrorText error={q.error ?? extract.error} className="mt-2" />
       <ul className="mt-3 divide-y divide-line border-y border-line">
         {rows.map((src) => {
@@ -202,7 +200,7 @@ export function SourcesPage() {
       <PageHeader
         title="받은 자료"
         back={{ to: "/brain", label: "브레인" }}
-        subtitle="브레인에 넣은 파일과 붙여넣은 글입니다. 경험을 뽑은 자료는 경험 화면의 원문 근거에서도 열 수 있습니다."
+        subtitle="브레인에 넣은 파일과 붙여넣은 글입니다."
       />
       <FilterChips<SourcePurpose | undefined>
         label="용도 필터"
@@ -448,7 +446,17 @@ function PurposeSection({
         purpose,
         data_class: purpose === "proof" ? "restricted" : (dataClass as "public" | "private" | "restricted"),
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
+      if (r.changed)
+        toast(`${PURPOSE_LABEL[r.purpose]}로 저장했습니다.`, {
+          description:
+            [
+              r.discarded_claims ? `확인 전 사실 ${r.discarded_claims}개를 닫았습니다.` : "",
+              r.extraction_run_id ? "경험 추출을 요청했습니다." : "",
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined,
+        });
       void qc.invalidateQueries({ queryKey: ["source", src.id] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
       void qc.invalidateQueries({ queryKey: ["experiences"] });
@@ -469,7 +477,6 @@ function PurposeSection({
   });
   const changed = purpose !== src.purpose || (purpose !== "proof" && dataClass !== src.data_class);
   const blocked = changed && purpose !== "experience" && src.purpose === "experience" && src.confirmed_claims > 0;
-  const result = save.data;
 
   let consequence: string | null = null;
   if (blocked)
@@ -510,10 +517,10 @@ function PurposeSection({
       {purpose !== "proof" ? (
         <div className="max-w-sm">
           <Label htmlFor="src-class">보내는 범위</Label>
-          <Select id="src-class" value={dataClass} onChange={(e) => setDataClass(e.target.value)}>
-            <option value="private">내 연결에만 보냄</option>
-            <option value="restricted">이 기기 밖으로 보내지 않음</option>
-            <option value="public">공개 자료</option>
+          <Select id="src-class" value={dataClass} onValueChange={(v) => setDataClass(v)}>
+            <SelectItem value="private">내 연결에만 보냄</SelectItem>
+            <SelectItem value="restricted">이 기기 밖으로 보내지 않음</SelectItem>
+            <SelectItem value="public">공개 자료</SelectItem>
           </Select>
         </div>
       ) : null}
@@ -538,12 +545,6 @@ function PurposeSection({
             </Button>
           </div>
         </div>
-      ) : result?.changed ? (
-        <p className="text-[13px] text-muted" role="status">
-          {PURPOSE_LABEL[result.purpose]}로 저장했습니다.
-          {result.discarded_claims ? ` 확인 전 사실 ${result.discarded_claims}개를 닫았습니다.` : ""}
-          {result.extraction_run_id ? " 경험 추출을 요청했습니다." : ""}
-        </p>
       ) : null}
       <ErrorText error={save.error} />
     </Block>
@@ -559,11 +560,7 @@ function BlocksSection({ parseRunId }: { parseRunId: string }) {
     staleTime: Infinity,
   });
   return (
-    <details className="group" onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 text-[13px] text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
-        <ChevronRight size={14} aria-hidden className="transition-transform duration-150 group-open:rotate-90" />
-        읽은 글 보기
-      </summary>
+    <Disclosure title="읽은 글 보기" open={open} onOpenChange={setOpen}>
       {open ? (
         <div className="mt-3">
           <Loaded query={q}>
@@ -587,7 +584,7 @@ function BlocksSection({ parseRunId }: { parseRunId: string }) {
           </Loaded>
         </div>
       ) : null}
-    </details>
+    </Disclosure>
   );
 }
 

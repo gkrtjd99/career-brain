@@ -36,7 +36,9 @@ career-brain은 Apache-2.0이다. 직접 의존하는 패키지와 라이선스�
 |---|---|
 | react, react-dom | MIT |
 | @tanstack/react-query, @tanstack/react-router | MIT |
-| @radix-ui/react-dialog | MIT |
+| @radix-ui/react-dialog, react-alert-dialog, react-select, react-checkbox, react-radio-group, react-switch, react-tabs, react-tooltip, react-popover, react-dropdown-menu, react-collapsible | MIT |
+| sonner (알림) | MIT |
+| class-variance-authority (부품 변형 클래스) | Apache-2.0 |
 | clsx, tailwind-merge | MIT |
 | lucide-react | ISC |
 | pretendard (글꼴) | SIL OFL 1.1 — 글꼴 CSS 머리말에 고지 |
@@ -46,3 +48,11 @@ career-brain은 Apache-2.0이다. 직접 의존하는 패키지와 라이선스�
 | turndown 7.2.5 (본문 HTML → Markdown, `/capture`에서만) | MIT |
 
 빌드 도구(Vite, TypeScript, Tailwind CSS 등)는 번들에 들어가지 않는다.
+
+## 옮겨 쓴 소스
+
+| 출처 | 라이선스 | 쓴 곳 |
+|---|---|---|
+| shadcn/ui (https://github.com/shadcn-ui/ui, © 2023 shadcn) | MIT | `packages/ui/src`의 Button·Select·Checkbox·RadioGroup·Switch·Tabs·Tooltip·Popover·DropdownMenu·Collapsible·Dialog(AlertDialog)·Toaster 부품 구조. 패키지로 받지 않고 소스를 옮겨 이 앱 토큰으로 다시 칠했다 |
+
+MIT 고지: Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

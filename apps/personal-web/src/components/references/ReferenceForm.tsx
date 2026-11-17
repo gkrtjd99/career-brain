@@ -1,5 +1,5 @@
 import type { PiiReport, Reference, ReferenceIn, ReferenceKind, ReferenceNote, ReferenceNoteIn } from "@career-brain/client";
-import { Button, Input, Label, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
@@ -51,22 +51,22 @@ function MetaFields({ v, set }: { v: ReferenceValues; set: (k: keyof ReferenceVa
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="ref-kind">종류</Label>
-          <Select id="ref-kind" value={v.kind} onChange={(e) => set("kind", e.target.value)}>
+          <Select id="ref-kind" value={v.kind} onValueChange={(v) => set("kind", v)}>
             {REFERENCE_KIND_ORDER.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {REFERENCE_KIND_LABEL[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="ref-company">회사 (선택)</Label>
-          <Select id="ref-company" value={v.company_id} onChange={(e) => set("company_id", e.target.value)}>
-            <option value="">없음</option>
+          <Select id="ref-company" value={v.company_id} onValueChange={(v) => set("company_id", v)}>
+            <SelectItem value="">없음</SelectItem>
             {(companies.data ?? []).map((c) => (
-              <option key={c.id} value={c.id}>
+              <SelectItem key={c.id} value={c.id}>
                 {c.name}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>

@@ -1,7 +1,7 @@
 import type { Finding, ValidateResult } from "@career-brain/client";
-import { cn, EmptyState } from "@career-brain/ui";
+import { cn, Disclosure, EmptyState } from "@career-brain/ui";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, ShieldAlert } from "lucide-react";
+import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { FINDING, FINDING_GROUP, type FindingGroup } from "../../lib/labels";
 import { toneText, VisibilityTable } from "../../pages/Application";
 
@@ -121,13 +121,9 @@ export function ChecksPanel({
         // 경고만 펼쳐 둔다. 참고는 접어 둔다.
         if (g === "info")
           return (
-            <details key={g} className="group text-[13px]">
-              <summary className="flex min-h-9 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden gap-1 text-muted hover:text-fg sm:min-h-6">
-                <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
-                {info.label} <span className="tabular-nums">{list.length}</span>
-              </summary>
+            <Disclosure title={<>{info.label} <span className="tabular-nums">{list.length}</span></>} className="text-[13px]">
               <div className="mt-2">{items}</div>
-            </details>
+            </Disclosure>
           );
         return (
           <section key={g}>
@@ -150,17 +146,20 @@ export function RequirementsLine({ rows }: { rows: ValidateResult["requirements"
   if (!rows.length) return null;
   const visible = rows.filter((r) => r.verdict === "met_visible").length;
   return (
-    <details className="group text-[13px]">
-      <summary className="flex min-h-9 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden gap-1 hover:text-fg sm:min-h-6">
-        <ChevronRight size={14} className="text-muted transition-transform group-open:rotate-90" />
-        <span className="font-medium">공고 요건이 글에 보이나요</span>
-        <span className="text-muted tabular-nums">
-          · 요건 {rows.length}개 중 글에 보임 {visible}
-        </span>
-      </summary>
+    <Disclosure
+      tone="strong"
+      title={
+        <>
+          공고 요건이 글에 보이나요
+          <span className="ml-1 font-normal text-muted tabular-nums">
+            · 요건 {rows.length}개 중 글에 보임 {visible}
+          </span>
+        </>
+      }
+    >
       <div className="mt-2">
         <VisibilityTable rows={rows} />
       </div>
-    </details>
+    </Disclosure>
   );
 }

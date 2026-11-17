@@ -1,5 +1,5 @@
 import type { ResumeItem, ResumeOperation, ResumePicker, ResumeSectionKind } from "@career-brain/client";
-import { Button, FilterChips, Input, Label, Sheet, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, FilterChips, Input, Label, Sheet, Textarea } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -152,7 +152,7 @@ export function ItemPicker({
               ) : null}
               {source === "experience" ? (
                 <label className="flex min-h-9 items-center gap-2 text-[13px]">
-                  <input type="checkbox" checked={withClaims} onChange={(e) => setWithClaims(e.target.checked)} />
+                  <Checkbox checked={withClaims} onCheckedChange={(checked) => setWithClaims(checked)} />
                   확인한 사실을 성과 줄로 같이 넣기
                 </label>
               ) : null}

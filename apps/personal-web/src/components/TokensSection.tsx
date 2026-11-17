@@ -1,5 +1,5 @@
 import type { ApiToken, ApiTokenStatus, IssuedApiToken } from "@career-brain/client";
-import { Button, ConfirmDialog, Input, Label, Section, Select } from "@career-brain/ui";
+import { Button, ConfirmDialog, Input, Label, Section, Select, SelectItem, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { ApiError, api } from "../lib/api";
@@ -79,13 +79,13 @@ function TokenEditor({ token, onDone }: { token: ApiToken; onDone: () => void })
           id={`token-extend-${token.id}`}
           value={extend}
           disabled={!choices.length}
-          onChange={(e) => setExtend(e.target.value)}
+          onValueChange={(v) => setExtend(v)}
         >
-          <option value="">{expiresAt === null ? "만료 없음 (연장할 것 없음)" : "그대로"}</option>
+          <SelectItem value="">{expiresAt === null ? "만료 없음 (연장할 것 없음)" : "그대로"}</SelectItem>
           {choices.map(([v, text]) => (
-            <option key={v} value={String(v)}>
+            <SelectItem key={v} value={String(v)}>
               {text}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>
@@ -127,8 +127,7 @@ export function TokensSection() {
     <Section title="토큰 관리">
       <div className="space-y-6">
         <p className="text-[13px] leading-5 text-muted">
-          이 작업 공간의 API 토큰입니다. 서버에는 토큰 원문이 없고(해시만), 이 목록에도 나오지 않습니다. 마지막 사용
-          시각은 최대 5분 늦게 바뀝니다.
+          토큰은 만들 때 한 번만 보입니다. 마지막 사용 시각은 몇 분 늦게 바뀔 수 있습니다.
         </p>
         {soon.length ? (
           <div role="status" className="space-y-1 text-[13px]">
@@ -228,13 +227,11 @@ export function NewTokenForm({
   const [label, setLabel] = useState(defaultLabel);
   const [expires, setExpires] = useState<string>(defaultExpires);
   const [issued, setIssued] = useState<IssuedApiToken | null>(null);
-  const [copied, setCopied] = useState(false);
   const fid = useId();
   const issue = useMutation({
     mutationFn: () => api.issueApiToken({ label: label.trim(), expires_days: expires ? Number(expires) : null }),
     onSuccess: (res) => {
       setIssued(res);
-      setCopied(false);
       setLabel(defaultLabel);
       void qc.invalidateQueries({ queryKey: ["api-tokens"] });
     },
@@ -262,11 +259,11 @@ export function NewTokenForm({
           </div>
           <div>
             <Label htmlFor={`${fid}-expiry`}>만료</Label>
-            <Select id={`${fid}-expiry`} value={expires} onChange={(e) => setExpires(e.target.value)}>
+            <Select id={`${fid}-expiry`} value={expires} onValueChange={(v) => setExpires(v)}>
               {EXPIRY_CHOICES.map(([v, text]) => (
-                <option key={v} value={v}>
+                <SelectItem key={v} value={v}>
                   {text}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -287,10 +284,10 @@ export function NewTokenForm({
             <Button
               size="sm"
               onClick={() => {
-                void navigator.clipboard?.writeText(issued.secret).then(() => setCopied(true));
+                void navigator.clipboard?.writeText(issued.secret).then(() => toast("복사했습니다."));
               }}
             >
-              {copied ? "복사함" : "복사"}
+복사
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setIssued(null)}>
               닫기 (다시 볼 수 없음)

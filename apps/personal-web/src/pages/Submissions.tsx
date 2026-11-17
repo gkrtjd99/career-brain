@@ -1,5 +1,5 @@
 import { ANSWER_ASSET_KINDS, type AnswerAssetKind, type SubmittedDocument } from "@career-brain/client";
-import { Button, Input, Label, Select } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -21,7 +21,7 @@ export function SubmissionsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="지난 제출본"
-        subtitle="제출할 때 고정한 글입니다. 고칠 수 없고, 이 글로 새 답변이나 다른 지원의 글을 시작할 수 있습니다."
+        subtitle="제출할 때 고정한 글입니다. 고칠 수 없습니다."
       />
       <Loaded query={q}>
         {(rows) =>
@@ -201,11 +201,11 @@ function StartAnswer({
         <Label htmlFor="sa-kind" className="mb-1">
           종류
         </Label>
-        <Select id="sa-kind" value={kind} onChange={(e) => setKind(e.target.value as AnswerAssetKind)}>
+        <Select id="sa-kind" value={kind} onValueChange={(v) => setKind(v as AnswerAssetKind)}>
           {ANSWER_ASSET_KINDS.map((k) => (
-            <option key={k} value={k}>
+            <SelectItem key={k} value={k}>
               {ANSWER_KIND_LABEL[k]}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>

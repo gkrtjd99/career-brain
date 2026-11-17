@@ -1,5 +1,5 @@
 import type { PortfolioImport } from "@career-brain/client";
-import { Button, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Checkbox, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -65,22 +65,21 @@ export function GitHubImportSheet({ itemId, onClose }: { itemId?: string; onClos
           <Label htmlFor="gh-item" className="mb-1">
             링크를 넣을 항목
           </Label>
-          <Select id="gh-item" value={target} onChange={(e) => setTarget(e.target.value)}>
-            <option value="">넣지 않음</option>
+          <Select id="gh-item" value={target} onValueChange={(v) => setTarget(v)}>
+            <SelectItem value="">넣지 않음</SelectItem>
             {(items.data ?? []).map((it) => (
-              <option key={it.id} value={it.id}>
+              <SelectItem key={it.id} value={it.id}>
                 {it.title}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
         <label className="flex min-h-9 items-start gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             className="mt-1"
             checked={priv}
             disabled={!token.data?.set}
-            onChange={(e) => setPriv(e.target.checked)}
+            onCheckedChange={(checked) => setPriv(checked)}
           />
           <span>
             비공개 저장소
@@ -151,8 +150,7 @@ function TokenSection({ set, last4, available }: { set: boolean; last4: string |
     <section aria-label="GitHub 토큰" className="mt-8">
       <h3 className="text-[15px] font-semibold">GitHub 토큰</h3>
       <p className="text-[13px] text-muted">
-        비공개 저장소를 읽을 때만 씁니다. 읽기 권한만 있는 토큰을 넣습니다. 암호화해 이 기기에 두고, 백업 파일에 넣지 않습니다. 공간
-        관리자만 넣을 수 있습니다.
+        비공개 저장소를 읽을 때만 씁니다. 읽기 권한만 있는 토큰을 넣습니다. 암호화해 이 기기에만 둡니다.
       </p>
       {set ? (
         <div className="mt-3 flex flex-wrap items-center gap-3 border-y border-line py-3 text-sm">

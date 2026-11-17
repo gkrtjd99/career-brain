@@ -6,7 +6,7 @@ import type {
   ModelConnectionTest,
   ModelsStatus,
 } from "@career-brain/client";
-import { Button, ConfirmDialog, cn, Input, Label, Select, Sheet, Spinner } from "@career-brain/ui";
+import { Button, Checkbox, cn, ConfirmDialog, Input, Label, Select, SelectItem, Sheet, Spinner } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
@@ -481,16 +481,16 @@ function DraftFields({
           <Select
             id={`${fid}-preset`}
             value={d.preset}
-            onChange={(e) => {
-              const preset = e.target.value;
+            onValueChange={(v) => {
+              const preset = v;
               // 이름을 손대지 않았으면 제공자 이름을 따라간다
               set({ preset, ...(OFFICIAL_PRESETS.some(([p]) => p === d.name) ? { name: preset } : {}) });
             }}
           >
             {OFFICIAL_PRESETS.map(([v, label]) => (
-              <option key={v} value={v}>
+              <SelectItem key={v} value={v}>
                 {label}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
@@ -528,10 +528,10 @@ function DraftFields({
 
       {d.kind === "litellm" || d.kind === "custom" ? (
         <Field label="과금 방식" id={`${fid}-billing`}>
-          <Select id={`${fid}-billing`} value={d.billing} onChange={(e) => set({ billing: e.target.value as ModelBilling })}>
-            <option value="metered">종량제 (단가표로 계산, 월 예산에 듦)</option>
-            <option value="subscription">구독 (실지출 0, 환산만)</option>
-            {d.kind === "custom" ? <option value="free">무료</option> : null}
+          <Select id={`${fid}-billing`} value={d.billing} onValueChange={(v) => set({ billing: v as ModelBilling })}>
+            <SelectItem value="metered">종량제 (단가표로 계산, 월 예산에 듦)</SelectItem>
+            <SelectItem value="subscription">구독 (실지출 0, 환산만)</SelectItem>
+            {d.kind === "custom" ? <SelectItem value="free">무료</SelectItem> : null}
           </Select>
         </Field>
       ) : null}
@@ -546,12 +546,12 @@ function DraftFields({
               : "이 제공자의 단가표로 비용을 셉니다."
           }
         >
-          <Select id={`${fid}-price`} value={d.priceAs} onChange={(e) => set({ priceAs: e.target.value })}>
-            <option value="">{d.kind === "subscription" ? "환산 안 함" : "정하지 않음"}</option>
+          <Select id={`${fid}-price`} value={d.priceAs} onValueChange={(v) => set({ priceAs: v })}>
+            <SelectItem value="">{d.kind === "subscription" ? "환산 안 함" : "정하지 않음"}</SelectItem>
             {priceOptions.map((p) => (
-              <option key={p} value={p}>
+              <SelectItem key={p} value={p}>
                 {p}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
@@ -559,10 +559,10 @@ function DraftFields({
 
       {d.kind === "custom" ? (
         <Field label="토큰 파라미터" id={`${fid}-tp`} hint="최대 출력 토큰을 어떤 이름으로 보낼지. 서버가 max_tokens를 거부할 때만 바꿉니다.">
-          <Select id={`${fid}-tp`} value={d.tokenParam} onChange={(e) => set({ tokenParam: e.target.value })}>
-            <option value="">기본</option>
-            <option value="max_tokens">max_tokens</option>
-            <option value="max_completion_tokens">max_completion_tokens</option>
+          <Select id={`${fid}-tp`} value={d.tokenParam} onValueChange={(v) => set({ tokenParam: v })}>
+            <SelectItem value="">기본</SelectItem>
+            <SelectItem value="max_tokens">max_tokens</SelectItem>
+            <SelectItem value="max_completion_tokens">max_completion_tokens</SelectItem>
           </Select>
         </Field>
       ) : null}
@@ -614,10 +614,9 @@ function KeyField({
       />
       {editing && editing.key === "set" ? (
         <label className="mt-1.5 flex min-h-9 items-center gap-2 text-[13px] sm:min-h-6">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={d.clearKey}
-            onChange={(e) => set({ clearKey: e.target.checked, apiKey: "" })}
+            onCheckedChange={(checked) => set({ clearKey: checked, apiKey: "" })}
           />
           저장된 키 삭제
         </label>
@@ -638,14 +637,14 @@ function DataClassField({ value, onChange }: { value: string[]; onChange: (v: st
       <legend className="text-[13px] font-medium text-muted">보낼 수 있는 자료</legend>
       {DATA_CLASSES.map((c) => (
         <label key={c.value} className="flex min-h-9 items-center gap-2 text-sm">
-          <input type="checkbox" checked={value.includes(c.value)} onChange={(e) => toggle(c.value, e.target.checked)} />
+          <Checkbox checked={value.includes(c.value)} onCheckedChange={(checked) => toggle(c.value, checked)} />
           <span>
             {c.label} <span className="text-[13px] text-muted">— {c.hint}</span>
           </span>
         </label>
       ))}
       <label className="flex min-h-9 items-center gap-2 text-sm text-muted">
-        <input type="checkbox" checked={false} disabled />
+        <Checkbox checked={false} disabled />
         <span>
           민감 <span className="text-[13px]">— 고를 수 없음. 증빙·식별 정보는 어떤 모델 연결로도 보내지 않습니다.</span>
         </span>

@@ -1,5 +1,5 @@
 import type { BrainOverview, ExperienceKind, ExperienceSummary } from "@career-brain/client";
-import { Button, Chip, cn, FilterChips, Input, Select, ViewTabs } from "@career-brain/ui";
+import { Button, Chip, cn, FilterChips, IconButton, Input, Select, SelectItem, ViewTabs } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Search as SearchIcon, Upload } from "lucide-react";
@@ -54,7 +54,6 @@ export function BrainPage() {
     <IngestDropTarget onFiles={(f) => ingest.open(undefined, f)}>
       <PageHeader
         title="브레인"
-        subtitle="내 기록과 참고 지식을 나눠 둡니다. 확인한 사실만 문서와 검색 근거로 씁니다."
         actions={
           <>
             <InterviewBatchButton experiences={all.data ?? []} />
@@ -154,9 +153,9 @@ function BrainSearchBox({ q, onChange }: { q: string; onChange: (q: string) => v
           aria-label="브레인에서 경험 찾기"
           maxLength={200}
         />
-        <Button type="submit" aria-label="찾기">
+        <IconButton type="submit" variant="secondary" label="찾기">
           <SearchIcon size={16} />
-        </Button>
+        </IconButton>
       </form>
       <Link
         to="/search"
@@ -180,7 +179,6 @@ function ReviewBlock({ overview, onShowAll }: { overview: BrainOverview; onShowA
       <h2 className="text-[15px] font-semibold">
         확인할 것 <span className="font-normal text-muted tabular-nums">{overview.pending_claims}</span>
       </h2>
-      <p className="mt-0.5 text-[13px] text-muted">AI가 원문에서 뽑은 사실 후보입니다. 확인하기 전에는 근거로 쓰지 않습니다.</p>
       <ul className="mt-3 divide-y divide-line border-t border-line">
         {(q.data ?? []).map((e) => (
           <li key={e.id}>
@@ -264,14 +262,14 @@ function Filters({
           <Select
             aria-label="연도"
             value={search.year ?? ""}
-            onChange={(e) => setSearch({ year: e.target.value ? Number(e.target.value) : undefined })}
+            onValueChange={(v) => setSearch({ year: v ? Number(v) : undefined })}
             className="w-auto tabular-nums"
           >
-            <option value="">모든 연도</option>
+            <SelectItem value="">모든 연도</SelectItem>
             {years.map((y) => (
-              <option key={y} value={y}>
+              <SelectItem key={y} value={y}>
                 {y}년
-              </option>
+              </SelectItem>
             ))}
           </Select>
         ) : null}
@@ -506,12 +504,12 @@ function ExperienceTable({
         <Select
           id="brain-sort"
           value={sort ?? ""}
-          onChange={(e) => onSort((e.target.value || undefined) as BrainSearch["sort"])}
+          onValueChange={(v) => onSort((v || undefined) as BrainSearch["sort"])}
           className="w-auto"
         >
-          <option value="">시작 달</option>
-          <option value="updated">최근 수정순</option>
-          <option value="title">제목</option>
+          <SelectItem value="">시작 달</SelectItem>
+          <SelectItem value="updated">최근 수정순</SelectItem>
+          <SelectItem value="title">제목</SelectItem>
         </Select>
       </div>
       <div className="overflow-x-auto overscroll-x-contain border-t border-line">

@@ -38,7 +38,7 @@ export function CredentialsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="자격·이수"
-        subtitle="자격증·어학 성적·수료·수상입니다. 만료일을 적으면 오늘 화면 일정에 나옵니다."
+        subtitle="만료일을 적으면 오늘 일정에 나옵니다."
         actions={
           <Button variant="primary" onClick={() => setSheet({ credential: null })}>
             <Plus size={15} /> 기록 추가
@@ -124,7 +124,7 @@ function Candidates({ rows, onOpen }: { rows: Credential[]; onOpen: (c: Credenti
         확인할 것 <span className="font-normal text-muted tabular-nums">{rows.length}</span>
       </h2>
       <p className="mt-0.5 text-[13px] text-muted">
-        증빙 서류에서 뽑은 항목입니다. 원문에 적힌 값만 채웠습니다. 맞으면 확인합니다.
+        증빙 서류에서 뽑았습니다. 맞으면 확인합니다.
       </p>
       <ErrorText error={confirm.error} className="mt-2" />
       <ul className="mt-3 divide-y divide-line border-y border-line">

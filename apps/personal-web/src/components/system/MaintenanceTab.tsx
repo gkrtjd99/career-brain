@@ -8,7 +8,7 @@ import type {
   NearDuplicate,
   RestoreJob,
 } from "@career-brain/client";
-import { Badge, Button, ConfirmDialog, Input, Label, Section, Select, Spinner, Textarea } from "@career-brain/ui";
+import { Badge, Button, Checkbox, ConfirmDialog, Disclosure, Input, Label, RadioGroup, RadioGroupItem, Section, Select, SelectItem, Spinner, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Upload } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -156,8 +156,9 @@ export function MaintenanceTab() {
   });
   const purge = useMutation({
     mutationFn: api.purgeDrafts,
-    onSuccess: () => {
+    onSuccess: (r) => {
       setConfirmPurge(false);
+      toast(`공고 초안 ${r.deleted}개를 삭제했습니다.`);
       void qc.invalidateQueries({ queryKey: ["maintenance"] });
       void qc.invalidateQueries({ queryKey: ["postings"] });
     },
@@ -184,8 +185,7 @@ export function MaintenanceTab() {
                 </Field>
               ) : null}
             </Fields>
-            <details className="text-[13px]">
-              <summary className="cursor-pointer py-1 text-muted hover:text-fg">표별 행 수</summary>
+            <Disclosure title="표별 행 수" className="text-[13px]">
               <ul className={HAIRLINE_LIST}>
                 {Object.entries(m.tables)
                   .filter(([, n]) => n > 0)
@@ -200,7 +200,7 @@ export function MaintenanceTab() {
               <p className="mt-2 text-[13px] text-muted">
                 묶음에 넣지 않는 것: {Object.keys(m.excluded).map(short).join(", ")} (복원 뒤 다시 만듦)
               </p>
-            </details>
+            </Disclosure>
           </Section>
 
           <Section title="내보내기">
@@ -264,7 +264,6 @@ export function MaintenanceTab() {
                 지금 정리
               </Button>
             </div>
-            {purge.data ? <p className="text-[13px]">{purge.data.deleted}개를 삭제했습니다.</p> : null}
             <Problem error={purge.error} />
             {m.auto ? <AutoMaintenanceLine auto={m.auto} /> : null}
           </Section>
@@ -305,11 +304,10 @@ function Check({
 }) {
   return (
     <label className="flex min-h-9 cursor-pointer items-start gap-2.5 py-2 text-[13px]">
-      <input
-        type="checkbox"
-        className="mt-0.5 size-4 shrink-0 accent-fg"
+      <Checkbox
+        className="mt-0.5"
         checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
+        onCheckedChange={(checked) => onChange(checked)}
       />
       <span className="min-w-0">
         {label}
@@ -536,10 +534,10 @@ function RestorePanel({ m }: { m: Maintenance }) {
             id="restore-policy"
             value={policy}
             disabled={locked || busy}
-            onChange={(e) => setPolicy(e.target.value as DuplicatePolicy)}
+            onValueChange={(v) => setPolicy(v as DuplicatePolicy)}
           >
-            <option value="skip">건너뛰기 (있는 것 그대로)</option>
-            <option value="fail">멈추기 (하나라도 겹치면 안 함)</option>
+            <SelectItem value="skip">건너뛰기 (있는 것 그대로)</SelectItem>
+            <SelectItem value="fail">멈추기 (하나라도 겹치면 안 함)</SelectItem>
           </Select>
         </div>
         <div className="space-y-1 md:col-span-2">
@@ -663,10 +661,7 @@ function NearDuplicates({
   const pairs: NearDuplicate[] = report.near_duplicates ?? [];
   const total = report.near_duplicates_total ?? pairs.length;
   return (
-    <details className="text-[13px]" open>
-      <summary className="cursor-pointer py-1 font-medium">
-        비슷한 행 {int(total)}쌍 {report.dry_run ? "— 합치기 전에 고르세요" : "— 고른 처리"}
-      </summary>
+    <Disclosure title={<>비슷한 행 {int(total)}쌍 {report.dry_run ? "— 합치기 전에 고르세요" : "— 고른 처리"}</>} defaultOpen tone="strong" className="text-[13px]">
       <p className="mt-1 text-muted">
         만든 시각·만든 사람이 같고 제목·문장 같은 칸만 다른 행입니다. 기본은 둘 다 둡니다 (들어오는 행을 새 행으로).
         같은 자료를 수정한 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
@@ -698,29 +693,25 @@ function NearDuplicates({
                   </div>
                 ))}
               </dl>
-              <div
+              <RadioGroup
                 className="flex flex-wrap gap-x-4 text-[13px]"
-                role="radiogroup"
+                value={decision}
+                disabled={!editable}
+                onValueChange={(d) => onChange(key, d as typeof decision)}
                 aria-label={`${short(p.table)} 처리`}
               >
                 {(["keep_both", "skip_incoming"] as const).map((d) => (
-                  <label key={d} className="flex min-h-9 items-center gap-1.5">
-                    <input
-                      type="radio"
-                      name={`near-${key}`}
-                      checked={decision === d}
-                      disabled={!editable}
-                      onChange={() => onChange(key, d)}
-                    />
+                  <label key={d} className="flex min-h-9 items-center gap-2">
+                    <RadioGroupItem value={d} />
                     {d === "keep_both" ? "둘 다 두기" : "들어오는 행 건너뛰기"}
                   </label>
                 ))}
-              </div>
+              </RadioGroup>
             </li>
           );
         })}
       </ul>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -854,10 +845,7 @@ function ReportView({ report }: { report: MergeReportMore }) {
         </p>
       ))}
       {report.skipped_deletions.length ? (
-        <details className="text-[13px]" open>
-          <summary className="cursor-pointer py-1 text-muted hover:text-fg">
-            적용하지 않은 삭제 기록 {report.skipped_deletions.length}건
-          </summary>
+        <Disclosure title={<>적용하지 않은 삭제 기록 {report.skipped_deletions.length}건</>} defaultOpen className="text-[13px]">
           <ul className={HAIRLINE_LIST}>
             {report.skipped_deletions.map((d) => (
               <li key={`${d.target_table}:${d.target_id}`} className="py-2">
@@ -872,10 +860,9 @@ function ReportView({ report }: { report: MergeReportMore }) {
               </li>
             ))}
           </ul>
-        </details>
+        </Disclosure>
       ) : null}
-      <details className="text-[13px]">
-        <summary className="cursor-pointer py-1 text-muted hover:text-fg">표별 결과</summary>
+      <Disclosure title="표별 결과" className="text-[13px]">
         <ul className={HAIRLINE_LIST}>
           {tables.map((t) => (
             <li key={t.name} className="py-1.5">
@@ -900,7 +887,7 @@ function ReportView({ report }: { report: MergeReportMore }) {
           넣지 않는 표: {Object.keys(report.not_merged).map(short).join(", ")} (공간·구성원은 지금 그대로, 백업·삭제
           기록은 이 공간 것만)
         </p>
-      </details>
+      </Disclosure>
     </div>
   );
 }

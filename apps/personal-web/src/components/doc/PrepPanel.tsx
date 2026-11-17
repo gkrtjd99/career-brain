@@ -10,10 +10,10 @@ import type {
   PrepQuestion,
   PrepStaleReason,
 } from "@career-brain/client";
-import { Button, cn, EmptyState } from "@career-brain/ui";
+import { Button, cn, Disclosure, EmptyState } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Check, ChevronRight, RefreshCw } from "lucide-react";
+import { Check, RefreshCw } from "lucide-react";
 import { ErrorText } from "../common";
 import { api } from "../../lib/api";
 import { FACT_KIND_LABEL } from "../../lib/companies";
@@ -110,8 +110,7 @@ export function PrepPanel({
     return (
       <div className="space-y-3">
         <p className="text-[13px] leading-6">
-          문항마다 쓸 경험을 내 브레인에서 2~3개 찾습니다. 확인한 사실과 그 원문 근거가 있는 경험만 후보가 됩니다. 글은
-          쓰지 않습니다.
+          문항마다 쓸 경험을 2~3개 찾습니다. 글은 쓰지 않습니다.
         </p>
         {editable ? (
           <Button variant="primary" onClick={() => generate.mutate(true)} disabled={generate.isPending}>
@@ -181,16 +180,12 @@ export function PrepPanel({
 
 function SendNote() {
   return (
-    <details className="group text-xs text-muted">
-      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-        <ChevronRight size={13} className="transition-transform group-open:rotate-90" />
-        무엇을 보내나요
-      </summary>
+    <Disclosure title="무엇을 보내나요" className="text-xs text-muted">
       <p className="mt-1 leading-5">
         먼저 내 브레인을 검색해 후보를 좁힙니다. 모델을 연결했으면 문항·공고 요건·후보 경험의 확인한 사실을 보내 그 안에서만
         고르고 이유를 쓰게 합니다. 이 기기 밖으로 보내지 않는 사실은 보내지 않습니다. 모델이 없으면 검색 순위로 보입니다.
       </p>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -245,11 +240,7 @@ function QuestionCandidates({
         </EmptyState>
       )}
       {q.references.length ? (
-        <details className="group text-[13px]">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 text-muted hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-            <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
-            참고 구성 <span className="tabular-nums">{q.references.length}</span>
-          </summary>
+        <Disclosure title={<>참고 구성 <span className="tabular-nums">{q.references.length}</span></>} className="text-[13px]">
           <ul className="mt-2 space-y-3">
             {q.references.map((r) => (
               <li key={r.note_id} className="border-l border-line pl-3">
@@ -267,7 +258,7 @@ function QuestionCandidates({
             ))}
           </ul>
           <p className="mt-2 text-xs text-muted">참고 글의 짜임만 보입니다. 그 글의 문장은 싣지 않습니다.</p>
-        </details>
+        </Disclosure>
       ) : null}
     </section>
   );
@@ -422,14 +413,17 @@ export function CoverageList({ rows, postingId }: { rows: PrepCoverage[]; postin
   if (!rows.length) return null;
   const n = (l: PrepCoverage["level"]) => rows.filter((r) => r.level === l).length;
   return (
-    <details className="group text-[13px]">
-      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-        <ChevronRight size={14} className="text-muted transition-transform group-open:rotate-90" />
-        <span className="font-medium">요건별 근거</span>
-        <span className="text-muted tabular-nums">
-          · 있음 {n("strong")} · 약함 {n("weak")} · 없음 {n("none")}
-        </span>
-      </summary>
+    <Disclosure
+      tone="strong"
+      title={
+        <>
+          요건별 근거
+          <span className="ml-1 font-normal text-muted tabular-nums">
+            · 있음 {n("strong")} · 약함 {n("weak")} · 없음 {n("none")}
+          </span>
+        </>
+      }
+    >
       <ul className="mt-2 divide-y divide-line border-y border-line">
         {rows.map((r, i) => {
           const lv = COVERAGE[r.level];
@@ -468,6 +462,6 @@ export function CoverageList({ rows, postingId }: { rows: PrepCoverage[]; postin
         })}
       </ul>
       <p className="mt-2 text-xs text-muted">낱말로 본 것입니다. 근거 있음은 원문 근거가 있는 확인한 사실이 요건 낱말을 덮을 때입니다.</p>
-    </details>
+    </Disclosure>
   );
 }

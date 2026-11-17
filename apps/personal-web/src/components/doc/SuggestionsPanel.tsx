@@ -1,7 +1,7 @@
 import type { Suggestion, SuggestionRequest, SuggestOut } from "@career-brain/client";
-import { Button, cn, EmptyState, Label, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, cn, Disclosure, EmptyState, Label, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Check, Sparkles, X } from "lucide-react";
+import { Ban, Check, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { api } from "../../lib/api";
 import { wordDiff } from "../../lib/diff";
@@ -126,8 +126,8 @@ export function SuggestionsPanel({
           }}
         >
           <p className="text-xs text-muted">
-            AI는 사용자가 쓴 문단을 최소한으로 다듬는 제안만 합니다. 사실(수치·역할·조직·기술명)을 바꾸는 제안은 코드가
-            거부합니다. 고른 문단, 연결한 확인된 근거, 공고 요건과 문항을 모델로 보내며 비용이 듭니다.
+            수치·역할·조직·기술명을 바꾸는 제안은 받지 않습니다. 고른 문단과 근거, 공고 요건을 모델로 보내며 비용이
+            듭니다.
           </p>
           <div>
             <Label htmlFor="sg-ins">요청 (선택)</Label>
@@ -141,11 +141,10 @@ export function SuggestionsPanel({
             />
           </div>
           <label className="flex min-h-9 items-center gap-2 text-[13px]">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={onlyActive}
               disabled={!activeBlockId}
-              onChange={(e) => setOnlyActive(e.target.checked)}
+              onCheckedChange={(checked) => setOnlyActive(checked)}
             />
             {activeBlockId && blockNo(activeBlockId) !== null
               ? `선택한 문단(${blockNo(activeBlockId)! + 1})만`
@@ -154,7 +153,7 @@ export function SuggestionsPanel({
           {blocked ? <p className="text-xs font-medium">{blocked}</p> : null}
           <ErrorText error={ask.error} />
           <Button type="submit" size="sm" disabled={!!blocked || ask.isPending}>
-            <Sparkles size={14} /> {ask.isPending ? "요청하는 중" : "수정안 요청"}
+            {ask.isPending ? "요청하는 중" : "수정안 요청"}
           </Button>
         </form>
       ) : null}
@@ -208,16 +207,13 @@ export function SuggestionsPanel({
                 ))}
               </ul>
               {past.length ? (
-                <details className="text-[13px]">
-                  <summary className="cursor-pointer py-1 text-muted hover:text-fg">
-                    지난 수정안 {past.length}개
-                  </summary>
+                <Disclosure title={<>지난 수정안 {past.length}개</>} className="text-[13px]">
                   <ul className="mt-2 divide-y divide-line border-t border-line">
                     {past.map((s) => (
                       <SuggestionCard key={s.id} s={s} no={blockNo(s.block_id)} canApply={false} busy />
                     ))}
                   </ul>
-                </details>
+                </Disclosure>
               ) : null}
             </div>
           );
@@ -232,8 +228,7 @@ function PastQuestions({ rows }: { rows: SuggestionRequest[] }) {
   if (!rows.length) return null;
   const total = rows.reduce((n, r) => n + r.questions.length, 0);
   return (
-    <details className="text-[13px]">
-      <summary className="cursor-pointer py-1 text-muted hover:text-fg">지난 요청에서 AI가 물어본 것 {total}개</summary>
+    <Disclosure title={<>지난 요청에서 AI가 물어본 것 {total}개</>} className="text-[13px]">
       <ul className="mt-2 divide-y divide-line border-t border-line">
         {rows.map((r) => (
           <li key={r.id} className="py-2.5">
@@ -249,7 +244,7 @@ function PastQuestions({ rows }: { rows: SuggestionRequest[] }) {
           </li>
         ))}
       </ul>
-    </details>
+    </Disclosure>
   );
 }
 

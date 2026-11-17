@@ -1,5 +1,5 @@
 import type { SourcePurpose } from "@career-brain/client";
-import { Button, cn, Sheet, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, cn, Sheet, Textarea } from "@career-brain/ui";
 import { FileUp } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { ACCEPT, addFiles, addPaste, clearFinished, useAutoExtract, useIngestQueue } from "../lib/ingest";
@@ -160,11 +160,10 @@ export function UploadSheet({
         ) : null}
 
         <label className="flex cursor-pointer items-start gap-2.5 py-1 text-[13px]">
-          <input
-            type="checkbox"
-            className="mt-0.5 size-4 shrink-0 accent-fg"
+          <Checkbox
+            className="mt-0.5"
             checked={autoExtract}
-            onChange={(e) => setAutoExtract(e.target.checked)}
+            onCheckedChange={(checked) => setAutoExtract(checked)}
           />
           <span>
             내 경험 자료는 읽은 뒤 바로 경험 후보를 뽑기

@@ -1,5 +1,5 @@
 import type { ReferenceKind, ReferenceSummary } from "@career-brain/client";
-import { Button, cn, FilterChips, Input, Select } from "@career-brain/ui";
+import { Button, cn, FilterChips, Input, Select, SelectItem } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
@@ -58,7 +58,7 @@ export function ReferencesPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="참고 글"
-        subtitle="다른 사람의 자기소개서·이력서·면접 후기·직무 글을 모읍니다. 내 경험이 아니라서 문서 근거로 쓰지 않습니다."
+        subtitle="남의 글이라 문서 근거로 쓰지 않습니다."
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
             <Plus size={15} /> 참고 글 추가
@@ -88,26 +88,26 @@ export function ReferencesPage() {
             <Select
               aria-label="회사 필터"
               value={search.company ?? ""}
-              onChange={(e) => setSearch({ company: e.target.value || undefined })}
+              onValueChange={(v) => setSearch({ company: v || undefined })}
             >
-              <option value="">모든 회사</option>
+              <SelectItem value="">모든 회사</SelectItem>
               {companies.map(([id, name]) => (
-                <option key={id} value={id}>
+                <SelectItem key={id} value={id}>
                   {name}
-                </option>
+                </SelectItem>
               ))}
             </Select>
             <Select
               aria-label="연도 필터"
               value={search.year ? String(search.year) : ""}
-              onChange={(e) => setSearch({ year: e.target.value ? Number(e.target.value) : undefined })}
+              onValueChange={(v) => setSearch({ year: v ? Number(v) : undefined })}
               className="tabular-nums"
             >
-              <option value="">모든 연도</option>
+              <SelectItem value="">모든 연도</SelectItem>
               {years.map((y) => (
-                <option key={y} value={y}>
+                <SelectItem key={y} value={y}>
                   {y}년
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>

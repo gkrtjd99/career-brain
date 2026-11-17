@@ -54,15 +54,10 @@ export function ApplicationsPage() {
   const process = list.filter(inProcess);
   const done = list.filter((a) => ["passed", "rejected", "withdrawn"].includes(a.status));
   const loading = apps.isPending;
-  const summary = loading
-    ? null
-    : [`준비 중 ${draft.length}`, `제출 ${submitted.length}`, `전형 중 ${process.length}`, `결과 ${done.length}`].join(
-        " · ",
-      );
 
   return (
     <div>
-      <PageHeader title="지원" subtitle={summary} />
+      <PageHeader title="지원" />
       {loading ? (
         <div className="mb-6 flex items-center gap-2 text-sm text-muted">
           <Spinner /> 불러오는 중

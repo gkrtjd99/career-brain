@@ -1,5 +1,5 @@
 import type { CapturePostingOut, UploadOut } from "@career-brain/client";
-import { Button, cn, Input, Label, Spinner } from "@career-brain/ui";
+import { Button, Checkbox, cn, Input, Label, RadioGroup, RadioGroupItem, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -247,11 +247,10 @@ function Preview({ page }: { page: CapturedPage }) {
         )}
         {page.selection ? (
           <label className="flex min-h-9 cursor-pointer items-start gap-2.5 py-1 text-[13px]">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 shrink-0 accent-fg"
+            <Checkbox
+              className="mt-0.5"
               checked={onlySelection}
-              onChange={(e) => setOnlySelection(e.target.checked)}
+              onCheckedChange={(checked) => setOnlySelection(checked)}
             />
             <span>
               선택한 부분만 보내기
@@ -261,9 +260,16 @@ function Preview({ page }: { page: CapturedPage }) {
         ) : null}
       </div>
 
-      <fieldset>
-        <legend className="mb-1.5 text-sm font-medium">넣을 곳</legend>
-        <div className="divide-y divide-line border-y border-line">
+      <div>
+        <div id="capture-target" className="mb-1.5 text-sm font-medium">
+          넣을 곳
+        </div>
+        <RadioGroup
+          value={chosen}
+          onValueChange={(v) => setTarget(v as typeof chosen)}
+          aria-labelledby="capture-target"
+          className="gap-0 divide-y divide-line border-y border-line"
+        >
           {options.map((o) => (
             <div key={o.value} className="py-0.5">
               <label
@@ -273,15 +279,7 @@ function Preview({ page }: { page: CapturedPage }) {
                   o.disabled && "cursor-default opacity-50 hover:bg-transparent",
                 )}
               >
-                <input
-                  type="radio"
-                  name="capture-target"
-                  value={o.value}
-                  checked={chosen === o.value}
-                  disabled={o.disabled}
-                  onChange={() => setTarget(o.value)}
-                  className="mt-1 size-4 shrink-0 accent-fg focus-visible:outline-none"
-                />
+                <RadioGroupItem value={o.value} disabled={o.disabled} className="mt-0.5 focus-visible:outline-none" />
                 <span className="min-w-0">
                   <span className={cn("text-sm", chosen === o.value ? "font-semibold" : "font-medium")}>{o.label}</span>
                   <span className="block text-[13px] text-muted">{o.text}</span>
@@ -289,8 +287,8 @@ function Preview({ page }: { page: CapturedPage }) {
               </label>
             </div>
           ))}
-        </div>
-      </fieldset>
+        </RadioGroup>
+      </div>
 
       <div className="space-y-2">
         <ErrorText error={save.error} />

@@ -1,5 +1,5 @@
 import { PHOTO_SPECS, type Profile, type ProfileIn, type ProfilePhoto } from "@career-brain/client";
-import { Button, ConfirmDialog, cn, Input, Label, Section } from "@career-brain/ui";
+import { Button, cn, ConfirmDialog, DateField, IconButton, Input, Label, Section, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, Plus, X } from "lucide-react";
@@ -26,7 +26,7 @@ export function ProfilePage() {
       <PageHeader
         title="프로필"
         back={{ to: "/brain", label: "브레인" }}
-        subtitle="이력서의 프로필 구역에 씁니다. 연결한 AI 에이전트에는 이름·한 줄 소개·링크만 보입니다."
+        subtitle="연결한 AI 에이전트에는 이름·한 줄 소개·링크만 보입니다."
       />
       <div className="space-y-12">
         <Loaded query={profile}>{(p) => <ProfileForm initial={p} />}</Loaded>
@@ -84,7 +84,6 @@ function toBody(v: Values): ProfileIn {
 function ProfileForm({ initial }: { initial: Profile }) {
   const qc = useQueryClient();
   const [v, setV] = useState(() => toValues(initial));
-  const [saved, setSaved] = useState(false);
   const base = JSON.stringify(toBody(toValues(initial)));
   const dirty = JSON.stringify(toBody(v)) !== base;
   const save = useMutation({
@@ -92,11 +91,10 @@ function ProfileForm({ initial }: { initial: Profile }) {
     onSuccess: (p) => {
       qc.setQueryData(["profile"], p);
       setV(toValues(p)); // 서버가 다듬은 값 (공백·https:// 붙이기)
-      setSaved(true);
+      toast("저장했습니다.");
     },
   });
   const set = <K extends keyof Values>(key: K, value: Values[K]) => {
-    setSaved(false);
     setV((prev) => ({ ...prev, [key]: value }));
   };
   const setLink = (key: number, patch: Partial<{ label: string; url: string }>) =>
@@ -130,14 +128,13 @@ function ProfileForm({ initial }: { initial: Profile }) {
           {field("name_en", "영문 이름", { maxLength: 100, placeholder: "예: Gildong Hong" })}
           <div>
             <Label htmlFor="profile-birth">생년월일 (선택)</Label>
-            <Input
+            <DateField
               id="profile-birth"
-              type="date"
               value={v.birth_date}
               min="1900-01-01"
               max={new Date().toISOString().slice(0, 10)}
-              onChange={(e) => set("birth_date", e.target.value)}
-              className="tabular-nums"
+              onChange={(value) => set("birth_date", value)}
+              calendar={false}
             />
           </div>
         </div>
@@ -191,10 +188,10 @@ function ProfileForm({ initial }: { initial: Profile }) {
                   onChange={(e) => setLink(l.key, { url: e.target.value })}
                   className="min-w-0 flex-1"
                 />
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label={`링크 ${i + 1} 삭제`}
+                <IconButton
+                 
+                 
+                  label={`링크 ${i + 1} 삭제`}
                   onClick={() =>
                     set(
                       "links",
@@ -203,7 +200,7 @@ function ProfileForm({ initial }: { initial: Profile }) {
                   }
                 >
                   <X size={16} />
-                </Button>
+                </IconButton>
               </li>
             ))}
           </ul>
@@ -227,11 +224,7 @@ function ProfileForm({ initial }: { initial: Profile }) {
           <p role="alert" className="text-[13px] text-danger">
             {message(save.error)}
           </p>
-        ) : saved && !dirty ? (
-          <p role="status" className="text-[13px] text-muted">
-            저장했습니다.
-          </p>
-        ) : null}
+) : null}
       </div>
     </form>
   );

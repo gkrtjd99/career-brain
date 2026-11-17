@@ -1,5 +1,16 @@
 import type { Attempt, AttemptResult, Mistake, MistakeReason, ReviewGrade } from "@career-brain/client";
-import { Button, cn, Input, Label, Select, Textarea } from "@career-brain/ui";
+import {
+  Button,
+  cn,
+  Input,
+  Label,
+  Select,
+  SelectItem,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
@@ -109,12 +120,12 @@ export function AttemptForm({
           <Select
             id={`ar-${pid}`}
             value={form.result}
-            onChange={(e) => setForm({ ...form, result: e.target.value as AttemptResult })}
+            onValueChange={(v) => setForm({ ...form, result: v as AttemptResult })}
           >
             {(Object.keys(ATTEMPT_RESULT) as AttemptResult[]).map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {ATTEMPT_RESULT[k].label}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -232,12 +243,12 @@ export function MistakeForm({
           <Select
             id={`mr-${pid}`}
             value={form.reason}
-            onChange={(e) => setForm({ ...form, reason: e.target.value as MistakeReason })}
+            onValueChange={(v) => setForm({ ...form, reason: v as MistakeReason })}
           >
             {(Object.keys(MISTAKE_REASON) as MistakeReason[]).map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {MISTAKE_REASON[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -337,17 +348,20 @@ export function ReviewCard({
         {showGrade && !resolved ? (
           reveal ? (
             (Object.keys(GRADE) as ReviewGrade[]).map((g) => (
-              <Button
-                key={g}
-                size="sm"
-                variant={g === "good" ? "primary" : "secondary"}
-                className={TAP}
-                disabled={review.isPending}
-                onClick={() => review.mutate(g)}
-                title={GRADE[g].hint}
-              >
-                {GRADE[g].label}
-              </Button>
+              <Tooltip key={g}>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant={g === "good" ? "primary" : "secondary"}
+                    className={TAP}
+                    disabled={review.isPending}
+                    onClick={() => review.mutate(g)}
+                  >
+                    {GRADE[g].label}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{GRADE[g].hint}</TooltipContent>
+              </Tooltip>
             ))
           ) : (
             <Button size="sm" className={TAP} onClick={() => setReveal(true)}>

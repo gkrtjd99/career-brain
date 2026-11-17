@@ -1,5 +1,5 @@
 import type { ApplicationSummary, ResumeKind, ResumeSummary } from "@career-brain/client";
-import { Button, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus } from "lucide-react";
@@ -54,7 +54,7 @@ export function ResumesPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="이력서"
-        subtitle="브레인 기록과 확인한 사실로 채우는 이력서입니다. 마스터 하나에서 직무별·공고별 판본을 만듭니다."
+        subtitle="마스터 하나에서 직무별·공고별 판본을 만듭니다."
         actions={
           q.data?.some((r) => r.kind === "master") ? (
             <Button variant="primary" onClick={() => setMaking({ kind: application ? "posting" : "role" })}>
@@ -226,20 +226,20 @@ function NewVersionSheet({
           <Label htmlFor="nv-kind" className="mb-1">
             종류
           </Label>
-          <Select id="nv-kind" value={kind} onChange={(e) => setKind(e.target.value as ResumeKind)}>
-            <option value="role">직무별 (마스터에서)</option>
-            <option value="posting">공고별 (마스터나 직무별에서)</option>
+          <Select id="nv-kind" value={kind} onValueChange={(v) => setKind(v as ResumeKind)}>
+            <SelectItem value="role">직무별 (마스터에서)</SelectItem>
+            <SelectItem value="posting">공고별 (마스터나 직무별에서)</SelectItem>
           </Select>
         </div>
         <div>
           <Label htmlFor="nv-parent" className="mb-1">
             시작할 판본
           </Label>
-          <Select id="nv-parent" value={parent} onChange={(e) => setParent(e.target.value)}>
+          <Select id="nv-parent" value={parent} onValueChange={(v) => setParent(v)}>
             {parents.map((p) => (
-              <option key={p.id} value={p.id}>
+              <SelectItem key={p.id} value={p.id}>
                 {RESUME_KIND_LABEL[p.kind]} · {p.title}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -248,12 +248,12 @@ function NewVersionSheet({
             <Label htmlFor="nv-app" className="mb-1">
               지원
             </Label>
-            <Select id="nv-app" value={appId} onChange={(e) => setAppId(e.target.value)}>
-              <option value="">잇지 않음</option>
+            <Select id="nv-app" value={appId} onValueChange={(v) => setAppId(v)}>
+              <SelectItem value="">잇지 않음</SelectItem>
               {applications.map((a) => (
-                <option key={a.id} value={a.id}>
+                <SelectItem key={a.id} value={a.id}>
                   {a.title}
-                </option>
+                </SelectItem>
               ))}
             </Select>
             <p className="mt-1 text-[13px] text-muted">

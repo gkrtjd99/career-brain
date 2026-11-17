@@ -42,8 +42,8 @@ export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId:
       <div>
         <h2 className="mb-1 text-[15px] font-semibold">스캔 PDF를 AI로 읽기 전에 비용을 확인해 주세요</h2>
         <p className="text-muted">
-          글자가 없는 PDF라 쪽 이미지를 이미지 읽기 모델({c.model})로 보내고, 읽은 글에서 항목을 추출합니다. 예상 비용이
-          확인 기준({usd(c.threshold_usd, 2)})을 넘었습니다. 토큰 수와 금액은 추정값입니다.
+          글자가 없는 PDF라 쪽 이미지를 모델로 보내 읽습니다. 예상 비용이 확인 기준({usd(c.threshold_usd, 2)})을
+          넘었습니다. 금액은 추정값입니다.
         </p>
       </div>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 border-t border-line pt-3 tabular-nums">

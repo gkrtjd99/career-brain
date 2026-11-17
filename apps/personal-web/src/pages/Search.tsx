@@ -20,15 +20,6 @@ const KIND_INFO: Record<SearchKind, { label: string; icon: typeof Quote }> = {
 // 학습 메모·오답은 학습 기록이다. 경험이 아니므로 결과에 "경험 아님"을 붙인다.
 const ALL: SearchKind[] = ["claim", "block", "answer", "study_note", "study_mistake"];
 
-function semanticNote(note: string) {
-  if (note === "no_embedding_route") return "임베딩 모델 미설정";
-  if (note === "embedding_api_key_missing") return "임베딩 API 키 없음";
-  if (note === "egress_scope_required") return "외부 전송 권한 없음";
-  if (note === "index_empty") return "색인이 비어 있음";
-  if (note === "empty_query") return "빈 검색어";
-  return note;
-}
-
 export function SearchPage() {
   const { q = "", kinds: kindsParam, ref = false } = route.useSearch();
   const navigate = useNavigate();
@@ -64,7 +55,7 @@ export function SearchPage() {
     <div>
       <PageHeader
         title="근거 검색"
-        subtitle="확인한 사실, 내 경험 자료의 원문, 인터뷰 답변, 학습 메모·오답에서 찾습니다. 증빙 서류는 찾지 않습니다."
+        subtitle="증빙 서류는 찾지 않습니다."
       />
       <form
         role="search"
@@ -121,15 +112,13 @@ export function SearchPage() {
       </div>
 
       {!q ? (
-        <p className="text-sm text-muted">검색어를 넣어 주세요. 키워드와 의미 검색을 함께 씁니다.</p>
+        <p className="text-sm text-muted">찾을 말을 넣으세요.</p>
       ) : (
         <Loaded query={result}>
           {(r) => (
             <div className={result.isFetching ? "opacity-60" : undefined}>
               <p className="mb-2 text-[13px] text-muted tabular-nums">
-                {r.hits.length}건 · {r.mode === "hybrid" ? "키워드 + 의미" : r.mode === "keyword" ? "키워드" : r.mode}
-                {r.semantic_note ? ` · 의미 검색 안 함: ${semanticNote(r.semantic_note)}` : ""}
-                {r.reranked ? " · 앞 결과 다시 정렬" : ""}
+                {r.hits.length}건
               </p>
               {r.expanded_terms?.length ? (
                 <p className="mb-2 text-[13px] text-muted">

@@ -20,8 +20,8 @@ export function CaptureSection() {
     <Section title="브라우저에서 보내기">
       <div className="space-y-4 border-t border-line pt-4">
         <p className="text-[13px] leading-6 text-muted">
-          로그인해야 보이는 공고나 읽고 있는 글을 이 브레인으로 보냅니다. 아래 버튼을 북마크 막대로 끌어다 두고, 보낼
-          페이지에서 누릅니다.
+          로그인해야 보이는 공고를 이 브레인으로 보냅니다. 아래 버튼을 북마크 막대로 끌어다 두고, 보낼 페이지에서
+          누릅니다.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <a

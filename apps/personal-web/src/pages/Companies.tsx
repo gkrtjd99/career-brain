@@ -32,7 +32,7 @@ export function CompaniesPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="회사"
-        subtitle="지원할 회사의 공개 정보를 원문 인용과 함께 모읍니다. 참고 자료라 문서 근거로 쓰지 않습니다."
+        subtitle="참고 자료라 문서 근거로 쓰지 않습니다."
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
             <Plus size={15} /> 회사 추가

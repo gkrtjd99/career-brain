@@ -1,5 +1,5 @@
 import type { Claim, ClaimKind, Contribution } from "@career-brain/client";
-import { Button, cn, Label, Select, STATUS_LABEL, Textarea, type VerificationStatus } from "@career-brain/ui";
+import { Button, cn, Label, Select, SelectItem, STATUS_LABEL, Textarea, type VerificationStatus } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, FileText, MessageSquareQuote, Pencil, ThumbsDown, Archive } from "lucide-react";
 import { useState } from "react";
@@ -195,11 +195,11 @@ function ClaimEditor({ claim, onDone, onCancel }: { claim: Claim; onDone: () => 
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label htmlFor={`kind-${claim.id}`}>종류</Label>
-          <Select id={`kind-${claim.id}`} value={kind} onChange={(e) => setKind(e.target.value as ClaimKind)}>
+          <Select id={`kind-${claim.id}`} value={kind} onValueChange={(v) => setKind(v as ClaimKind)}>
             {KINDS.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {KIND_LABEL[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -208,11 +208,11 @@ function ClaimEditor({ claim, onDone, onCancel }: { claim: Claim; onDone: () => 
           <Select
             id={`contrib-${claim.id}`}
             value={contribution}
-            onChange={(e) => setContribution(e.target.value as Contribution)}
+            onValueChange={(v) => setContribution(v as Contribution)}
           >
-            <option value="personal">본인</option>
-            <option value="team">팀</option>
-            <option value="unknown">모름</option>
+            <SelectItem value="personal">본인</SelectItem>
+            <SelectItem value="team">팀</SelectItem>
+            <SelectItem value="unknown">모름</SelectItem>
           </Select>
         </div>
       </div>

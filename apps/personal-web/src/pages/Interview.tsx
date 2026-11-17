@@ -9,13 +9,12 @@ import type {
   InterviewPrepQuestion,
   InterviewSourceKind,
 } from "@career-brain/client";
-import { Button, cn, EmptyState, FilterChips, Input, Sheet, Textarea } from "@career-brain/ui";
+import { Button, cn, ConfirmDialog, EmptyState, FilterChips, Input, MoreMenu, Sheet, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useBlocker, useNavigate } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, RefreshCw, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
-import { MoreMenu } from "../components/doc/MoreMenu";
 import { api } from "../lib/api";
 import { ANSWER_KIND_LABEL } from "../lib/brainMe";
 import { formatDateTime } from "../lib/dates";
@@ -142,11 +141,7 @@ function InterviewPrepView({ app, prep }: { app: Application; prep: InterviewPre
       <div>
         {header}
         <EmptyState className="space-y-3">
-          <p>
-            이 지원의 공고, 제출한 글, 회사 항목, 참고 면접 후기에서 예상 질문을 만듭니다. 질문마다 어디서 나왔는지 함께
-            보입니다.
-          </p>
-          <p>답은 직접 씁니다. 쓸 경험은 원문 근거가 있는 확인한 사실에서만 고릅니다.</p>
+          <p>공고, 제출한 글, 회사 정보, 면접 후기에서 예상 질문을 만듭니다. 답은 직접 씁니다.</p>
           <Button variant="primary" onClick={() => generate.mutate()} disabled={generate.isPending}>
             {generate.isPending ? "만드는 중" : "예상 질문 만들기"}
           </Button>
@@ -226,7 +221,7 @@ function PrepNotice({ prep }: { prep: InterviewPrep }) {
   return (
     <div className="mb-4 space-y-1 text-xs leading-5 text-muted">
       <p className="tabular-nums">
-        {formatDateTime(prep.generated_at)} 만듦 · {prep.mode === "model" ? "모델이 질문을 다듬음" : "정해진 질문과 검색 순위"}
+        {formatDateTime(prep.generated_at)}에 만들었습니다.
       </p>
       {prep.stale ? (
         <p className="font-medium text-fg">
@@ -469,10 +464,13 @@ function QuestionPane({
     mutationFn: () => api.interviewAnswerFeedback(appId, q.id),
     onSuccess: setFeedback,
   });
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const remove = useMutation({
     mutationFn: () => api.deleteInterviewQuestion(appId, q.id),
     onSuccess: async () => {
+      setConfirmDelete(false);
       await refresh();
+      toast("질문을 삭제했습니다.");
       onDeleted();
     },
   });
@@ -512,9 +510,7 @@ function QuestionPane({
                 label: "질문 삭제",
                 danger: true,
                 disabled: remove.isPending,
-                onSelect: () => {
-                  if (window.confirm("이 질문과 답 메모를 삭제할까요? 이은 공통 답변은 그대로 둡니다.")) remove.mutate();
-                },
+                onSelect: () => setConfirmDelete(true),
               },
             ]}
           />
@@ -524,8 +520,19 @@ function QuestionPane({
         {q.stale ? (
           <p className="text-xs font-medium">출처가 바뀌었습니다: {q.stale_reasons.map((r) => STALE_TEXT[r]).join(" · ")}</p>
         ) : null}
-        <ErrorText error={remove.error} />
       </header>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="질문을 삭제할까요?"
+        description="답 메모도 함께 삭제합니다. 이은 공통 답변은 그대로 둡니다."
+        confirmLabel="삭제"
+        tone="danger"
+        busy={remove.isPending}
+        onConfirm={() => remove.mutate()}
+      >
+        <ErrorText error={remove.error} />
+      </ConfirmDialog>
 
       <section aria-labelledby="answer-heading" className="space-y-3">
         <h3 id="answer-heading" className="text-sm font-semibold">
@@ -648,7 +655,6 @@ function Suggestions({ q }: { q: InterviewPrepQuestion }) {
         <ul className="divide-y divide-line border-y border-line">
           {q.suggestions.map((c) => {
             const meta = [c.organization, c.role, c.period].filter(Boolean).join(" · ");
-            const terms = [...new Set(c.matched.flatMap((m) => m.terms))];
             return (
               <li key={c.experience_id} className="space-y-2 py-3">
                 <div>
@@ -659,11 +665,7 @@ function Suggestions({ q }: { q: InterviewPrepQuestion }) {
                   >
                     {c.title}
                   </Link>
-                  <p className="text-xs text-muted">
-                    {meta ? `${meta} · ` : ""}
-                    {c.picked_by === "model" ? "모델이 후보 안에서 고름" : "검색 순위"}
-                    {terms.length ? ` · 겹치는 낱말 ${terms.slice(0, 4).join(", ")}` : ""}
-                  </p>
+                  {meta ? <p className="text-xs text-muted">{meta}</p> : null}
                 </div>
                 <ul className="space-y-2">
                   {c.evidence.map((e) => (

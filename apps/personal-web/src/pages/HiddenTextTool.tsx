@@ -22,7 +22,7 @@ export function HiddenTextToolPage() {
     <div className="max-w-3xl">
       <PageHeader
         title="숨김 글 검사"
-        subtitle="제출할 DOCX·PDF에 보이지 않는 글이나 심사 프로그램에 지시하는 문장이 있는지 봅니다. 파일은 저장하지 않고 바꾸지도 않습니다."
+        subtitle="파일은 저장하지 않습니다."
       />
       <form
         className="flex flex-wrap items-center gap-2"

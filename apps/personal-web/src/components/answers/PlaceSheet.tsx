@@ -1,5 +1,5 @@
 import type { PlaceIn, PlaceResult } from "@career-brain/client";
-import { Button, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -119,16 +119,16 @@ function PlaceForm({
               <Select
                 id="place-app"
                 value={appId}
-                onChange={(e) => {
-                  setAppId(e.target.value);
+                onValueChange={(v) => {
+                  setAppId(v);
                   setDocId("");
                 }}
               >
-                <option value="">고르기</option>
+                <SelectItem value="">고르기</SelectItem>
                 {drafts.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <SelectItem key={a.id} value={a.id}>
                     {a.title}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>
@@ -137,15 +137,15 @@ function PlaceForm({
                 <Label htmlFor="place-doc" className="mb-1">
                   문서
                 </Label>
-                <Select id="place-doc" value={docId} onChange={(e) => setDocId(e.target.value)}>
-                  <option value="">고르기</option>
+                <Select id="place-doc" value={docId} onValueChange={(v) => setDocId(v)}>
+                  <SelectItem value="">고르기</SelectItem>
                   {(app.data?.documents ?? []).map((d) => (
-                    <option key={d.id} value={d.id}>
+                    <SelectItem key={d.id} value={d.id}>
                       {d.title}
                       {d.current_revision === 0 ? " (비어 있음)" : ""}
-                    </option>
+                    </SelectItem>
                   ))}
-                  <option value={NEW}>새 문서로 넣기</option>
+                  <SelectItem value={NEW}>새 문서로 넣기</SelectItem>
                 </Select>
               </div>
             ) : null}

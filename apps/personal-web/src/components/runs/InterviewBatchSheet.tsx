@@ -1,5 +1,5 @@
 import type { ExperienceSummary, Run } from "@career-brain/client";
-import { Button, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Checkbox, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, MessagesSquare } from "lucide-react";
@@ -85,8 +85,8 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
           }}
         >
           <p className="text-[13px] text-muted">
-            고른 경험마다 AI가 빈 곳을 묻는 보충 질문을 만듭니다. 경험의 확인한 사실을 모델로 보내며 비용이 듭니다
-            (이 기기 밖으로 보내지 않는 자료의 사실은 보내지 않습니다). AI는 질문만 만들고, 답과 사실은 직접 씁니다.
+            고른 경험마다 보충 질문을 만듭니다. 확인한 사실을 모델로 보내며 비용이 듭니다. 이 기기 밖으로 보내지 않는
+            자료는 뺍니다. 답은 직접 씁니다.
           </p>
           <fieldset className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -112,7 +112,7 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
               {experiences.map((e) => (
                 <li key={e.id}>
                   <label className="flex cursor-pointer items-start gap-2 px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
-                    <input type="checkbox" className="mt-1" checked={picked.has(e.id)} onChange={() => toggle(e.id)} />
+                    <Checkbox className="mt-1" checked={picked.has(e.id)} onCheckedChange={() => toggle(e.id)} />
                     <span className="min-w-0 flex-1">
                       <span className="block break-words font-medium">{e.title}</span>
                       <span className="block text-muted">
@@ -129,11 +129,11 @@ function InterviewBatchSheet({ experiences, onClose }: { experiences: Experience
           </fieldset>
           <div className="max-w-40">
             <Label htmlFor="batch-count">경험마다 질문 수</Label>
-            <Select id="batch-count" value={count} onChange={(e) => setCount(Number(e.target.value))}>
+            <Select id="batch-count" value={count} onValueChange={(v) => setCount(Number(v))}>
               {Array.from({ length: MAX_COUNT }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
+                <SelectItem key={n} value={n}>
                   {n}개
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>

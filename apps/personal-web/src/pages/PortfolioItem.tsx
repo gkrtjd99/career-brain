@@ -10,7 +10,7 @@ import type {
   PortfolioVisibility,
 } from "@career-brain/client";
 import { PORTFOLIO_LINK_KINDS, PORTFOLIO_VISIBILITIES } from "@career-brain/client";
-import { Button, cn, ConfirmDialog, FilterChips, Input, Label, Select, Sheet, Textarea } from "@career-brain/ui";
+import { Button, cn, ConfirmDialog, FilterChips, IconButton, Input, Label, Select, SelectItem, Sheet, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp, ImagePlus, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -507,16 +507,16 @@ function Links({
                   </p>
                   {info ? <p className="text-[13px] text-muted tabular-nums">{info} · 참고 정보</p> : null}
                 </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="링크 빼기"
-                  title="링크 빼기"
+                <IconButton
+                 
+                 
+                  label="링크 빼기"
+                 
                   disabled={busy}
                   onClick={() => onPatch(links.filter((x) => x.id !== lk.id).map(plain))}
                 >
                   <Trash2 size={15} />
-                </Button>
+                </IconButton>
               </li>
             );
           })}
@@ -535,11 +535,11 @@ function Links({
           <Label htmlFor="lk-kind" className="mb-1">
             종류
           </Label>
-          <Select id="lk-kind" value={kind} onChange={(e) => setKind(e.target.value as PortfolioLinkKind)}>
+          <Select id="lk-kind" value={kind} onValueChange={(v) => setKind(v as PortfolioLinkKind)}>
             {PORTFOLIO_LINK_KINDS.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {LINK_KIND_LABEL[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -616,15 +616,15 @@ function Images({ v }: { v: PortfolioItem }) {
       aside={<span className="text-[13px] text-muted tabular-nums">{v.images.length}/12</span>}
     >
       <p className="pt-3 text-[13px] text-muted">
-        스크린샷·구성도는 이 브라우저에서 긴 변 1600px·1MB 안으로 줄여 올립니다. 올린 이미지는 '나만'으로 시작합니다. 회사 내부 화면이 섞이지
-        않았는지 보고 공개 범위를 바꿉니다. 이미지는 모델로 보내지 않습니다.
+        올린 이미지는 '나만'으로 시작합니다. 회사 내부 화면이 섞이지 않았는지 보고 공개 범위를 바꿉니다. 이미지는
+        모델로 보내지 않습니다.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Select aria-label="이미지 종류" value={kind} onChange={(e) => setKind(e.target.value as PortfolioImageKind)} className="w-auto">
+        <Select aria-label="이미지 종류" value={kind} onValueChange={(v) => setKind(v as PortfolioImageKind)} className="w-auto">
           {(Object.keys(IMAGE_KIND_LABEL) as PortfolioImageKind[]).map((k) => (
-            <option key={k} value={k}>
+            <SelectItem key={k} value={k}>
               {IMAGE_KIND_LABEL[k]}
-            </option>
+            </SelectItem>
           ))}
         </Select>
         <Button disabled={upload.isPending || v.images.length >= 12} onClick={() => input.current?.click()}>

@@ -1,5 +1,5 @@
 import type { SharedDocumentKind, SharedDocumentSummary } from "@career-brain/client";
-import { Button, EmptyState, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, EmptyState, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
@@ -26,7 +26,7 @@ export function SharedDocumentsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="기본 문서"
-        subtitle="지원마다 복사해 쓰는 기본 이력서·포트폴리오입니다. 편집·근거·검사 규칙은 지원 문서와 같습니다."
+        subtitle="지원마다 복사해 씁니다."
         actions={
           <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
             <Plus size={14} /> 기본 문서
@@ -63,7 +63,6 @@ function SharedRow({ d }: { d: SharedDocumentSummary }) {
   const meta = [
     DOC_KIND[d.kind] ?? d.kind,
     countLine(d.counts),
-    d.current_revision ? `r${d.current_revision}` : null,
     d.copies ? `지원 ${d.copies}곳에 복사` : null,
     formatDateTime(d.updated_at),
   ].filter(Boolean);
@@ -116,12 +115,12 @@ function AddSharedSheet({ open, onClose }: { open: boolean; onClose: () => void 
           <Select
             id="sd-kind"
             value={form.kind}
-            onChange={(e) => setForm({ ...form, kind: e.target.value as SharedDocumentKind })}
+            onValueChange={(v) => setForm({ ...form, kind: v as SharedDocumentKind })}
           >
             {KINDS.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {DOC_KIND[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>

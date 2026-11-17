@@ -1,5 +1,5 @@
 import type { Claim, ClaimKind, Contribution, Experience } from "@career-brain/client";
-import { Button, cn, Label, MarkdownView, Select, Sheet, Textarea } from "@career-brain/ui";
+import { Button, cn, Label, MarkdownView, Select, SelectItem, Sheet, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Pencil, Plus } from "lucide-react";
@@ -381,11 +381,11 @@ function AddClaim({ experienceId }: { experienceId: string }) {
         <div className="grid grid-cols-2 gap-2">
           <div>
             <Label htmlFor="new-kind">종류</Label>
-            <Select id="new-kind" value={kind} onChange={(e) => setKind(e.target.value as ClaimKind)}>
+            <Select id="new-kind" value={kind} onValueChange={(v) => setKind(v as ClaimKind)}>
               {(Object.keys(KIND_LABEL) as ClaimKind[]).map((k) => (
-                <option key={k} value={k}>
+                <SelectItem key={k} value={k}>
                   {KIND_LABEL[k]}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -394,11 +394,11 @@ function AddClaim({ experienceId }: { experienceId: string }) {
             <Select
               id="new-contrib"
               value={contribution}
-              onChange={(e) => setContribution(e.target.value as Contribution)}
+              onValueChange={(v) => setContribution(v as Contribution)}
             >
-              <option value="personal">본인</option>
-              <option value="team">팀</option>
-              <option value="unknown">모름</option>
+              <SelectItem value="personal">본인</SelectItem>
+              <SelectItem value="team">팀</SelectItem>
+              <SelectItem value="unknown">모름</SelectItem>
             </Select>
           </div>
         </div>
@@ -422,7 +422,6 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
     queryKey: ["wiki-md", experienceId],
     queryFn: () => api.wikiMarkdown(experienceId),
   });
-  const [copied, setCopied] = useState(false);
   return (
     <Loaded query={q}>
       {(md) => (
@@ -435,11 +434,10 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
                 className="max-sm:h-9"
                 onClick={async () => {
                   await navigator.clipboard.writeText(md);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
+                  toast("복사했습니다.");
                 }}
               >
-                <Copy size={14} /> {copied ? "복사함" : "Markdown 복사"}
+                <Copy size={14} /> Markdown 복사
               </Button>
               <Button
                 size="sm"

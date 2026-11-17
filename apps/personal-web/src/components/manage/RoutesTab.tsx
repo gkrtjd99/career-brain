@@ -1,5 +1,5 @@
 import type { ModelRoute, ModelsStatus } from "@career-brain/client";
-import { Button, Input, Label, Select, Spinner } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem, Spinner } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { api } from "../../lib/api";
@@ -181,11 +181,11 @@ function RouteEditor({
       <div className="grid gap-3 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-1">
           <Label htmlFor={`${fid}-conn`}>연결</Label>
-          <Select id={`${fid}-conn`} value={conn} onChange={(e) => setConn(e.target.value)}>
+          <Select id={`${fid}-conn`} value={conn} onValueChange={(v) => setConn(v)}>
             {status.connections.map((c) => (
-              <option key={c.name} value={c.name}>
+              <SelectItem key={c.name} value={c.name}>
                 {c.name} · {connectionKindLabel(c)}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -202,7 +202,7 @@ function RouteEditor({
           />
           <datalist id={`${fid}-models`}>
             {models.map((m) => (
-              <option key={m} value={m} />
+              <SelectItem key={m} value={m} />
             ))}
           </datalist>
         </div>

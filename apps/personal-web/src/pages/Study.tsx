@@ -8,10 +8,10 @@ import type {
   StudyItemKind,
   StudyItemStatus,
 } from "@career-brain/client";
-import { Button, cn, FilterChips, Input, Label, Section, Select, Sheet, StatusBadge } from "@career-brain/ui";
+import { Button, Checkbox, cn, DateTimeField, FilterChips, Input, Label, Section, Select, SelectItem, Sheet, StatusBadge, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { Link2, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Link2, Plus, Search, Trash2, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
@@ -51,7 +51,7 @@ export function StudyPage() {
     });
   return (
     <div>
-      <PageHeader title="학습" subtitle="공고 요건 → 학습·시험 준비 → 오답 복습. 학습은 계획이지 경험이 아닙니다." />
+      <PageHeader title="학습" subtitle="학습 기록은 경험 근거로 쓰지 않습니다." />
       <Tabs<StudyTab>
         value={tab}
         onChange={(t) => go(t, posting)}
@@ -115,11 +115,11 @@ function CoverageTab({ postingId, onPosting }: { postingId?: string; onPosting: 
           saved.length ? (
             <div className="max-w-md">
               <Label htmlFor="cov-posting">저장한 공고</Label>
-              <Select id="cov-posting" value={selected} onChange={(e) => onPosting(e.target.value)}>
+              <Select id="cov-posting" value={selected ?? ""} onValueChange={(v) => onPosting(v)}>
                 {saved.map((p) => (
-                  <option key={p.id} value={p.id}>
+                  <SelectItem key={p.id} value={p.id}>
                     {[p.company, p.title ?? hostOf(p.canonical_url)].filter(Boolean).join(" · ")}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>
@@ -201,7 +201,7 @@ function CoverageView({ postingId }: { postingId: string }) {
                   disabled={plan.isPending}
                   onClick={() => plan.mutate(undefined)}
                 >
-                  <Sparkles size={14} /> 준비 항목 만들기
+                  준비 항목 만들기
                 </Button>
               </div>
               {planMsg ? <p className="text-[13px] font-medium">{planMsg}</p> : null}
@@ -348,15 +348,20 @@ function RequirementRow({
             <li key={cl.id} className="flex items-start gap-2 text-[13px]">
               <StatusBadge status={cl.status} />
               <span className="min-w-0 flex-1 pt-0.5">{cl.statement}</span>
-              <button
-                type="button"
-                className="-my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle hover:text-danger disabled:opacity-50 max-sm:h-9 max-sm:w-9"
-                aria-label="연결 해제"
-                onClick={() => onUnlink(cl.id)}
-                disabled={busy}
-              >
-                <X size={14} />
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="-my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle hover:text-danger disabled:opacity-50 max-sm:h-9 max-sm:w-9"
+                    aria-label="연결 해제"
+                    onClick={() => onUnlink(cl.id)}
+                    disabled={busy}
+                  >
+                    <X size={14} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>연결 해제</TooltipContent>
+              </Tooltip>
             </li>
           ))}
         </ul>
@@ -417,8 +422,7 @@ function SuggestionPanel({
           return (
             <div className="space-y-2">
               <p className="text-[13px] text-muted">
-                검색 제안 ({res.mode === "hybrid" ? "키워드 + 의미" : "키워드"}, 검색어 “{line?.query}”). 맞는 사실만
-                직접 연결하세요. 제안만으로는 연결되거나 충족으로 바뀌지 않습니다.
+                “{line?.query}”로 찾은 사실입니다. 맞는 것만 연결하세요.
               </p>
               {line?.candidates.length ? (
                 <ul className="space-y-1">
@@ -430,11 +434,11 @@ function SuggestionPanel({
                         {c.experience_title ? <span className="text-muted"> · {c.experience_title}</span> : null}
                         {c.judge ? (
                           <span className="block text-muted">
-                            판정 모델(참고): {JUDGE_VERDICT[c.judge.verdict]}
+                            AI 의견: {JUDGE_VERDICT[c.judge.verdict]}
                             {c.judge.reason ? ` — ${c.judge.reason}` : ""}
                           </span>
                         ) : c.judge_note === "restricted_not_sent" ? (
-                          <span className="block text-muted">제한 등급이라 판정 모델에 보내지 않았습니다.</span>
+                          <span className="block text-muted">이 기기 밖으로 보내지 않는 자료라 AI에 보내지 않았습니다.</span>
                         ) : null}
                       </span>
                       <Button
@@ -454,13 +458,11 @@ function SuggestionPanel({
               )}
               {res.judge ? (
                 <p className="text-[13px] text-muted">
-                  판정 모델: {JUDGE_STATUS[res.judge.status] ?? res.judge.status}
-                  {res.judge.note ? ` (${res.judge.note})` : ""}
-                  {res.judge.model ? ` · ${res.judge.model}` : ""}. 참고 의견일 뿐 연결·충족을 바꾸지 않습니다.
+                  AI 의견: {JUDGE_STATUS[res.judge.status] ?? res.judge.status}. 참고 의견이라 연결은 바뀌지 않습니다.
                 </p>
               ) : line?.candidates.length ? (
                 <Button size="sm" variant="ghost" className={cn(TAP, "-ml-2.5")} onClick={() => setJudge(true)}>
-                  <Sparkles size={13} /> 판정 모델로 확인
+                  AI로 확인
                 </Button>
               ) : null}
             </div>
@@ -499,7 +501,7 @@ function FrequencyTab() {
               있습니다).
             </p>
             <label className="inline-flex min-h-9 items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> 보관한 공고도
+              <Checkbox checked={archived} onCheckedChange={(checked) => setArchived(checked)} /> 보관한 공고도
               세기
             </label>
           </div>
@@ -572,13 +574,13 @@ function TimezoneLine() {
           className="w-auto text-[13px]"
           value={q.data.timezone}
           disabled={save.isPending}
-          onChange={(e) => save.mutate(e.target.value)}
+          onValueChange={(v) => save.mutate(v)}
         >
           {zones.map((z) => (
-            <option key={z} value={z}>
+            <SelectItem key={z} value={z}>
               {z}
               {z === browser ? " (이 브라우저)" : ""}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       ) : (
@@ -698,11 +700,11 @@ function CreateItemSheet({ open, onClose }: { open: boolean; onClose: () => void
         </div>
         <div>
           <Label htmlFor="ni-kind">종류</Label>
-          <Select id="ni-kind" value={kind} onChange={(e) => setKind(e.target.value as StudyItemKind)}>
+          <Select id="ni-kind" value={kind} onValueChange={(v) => setKind(v as StudyItemKind)}>
             {(Object.keys(ITEM_KIND) as StudyItemKind[]).map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {ITEM_KIND[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -823,22 +825,21 @@ function CreateAssessmentSheet({ open, onClose }: { open: boolean; onClose: () =
             <Select
               id="na-kind"
               value={form.kind}
-              onChange={(e) => setForm({ ...form, kind: e.target.value as AssessmentKind })}
+              onValueChange={(v) => setForm({ ...form, kind: v as AssessmentKind })}
             >
               {(Object.keys(ASSESSMENT_KIND) as AssessmentKind[]).map((k) => (
-                <option key={k} value={k}>
+                <SelectItem key={k} value={k}>
                   {ASSESSMENT_KIND[k]}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
           <div>
             <Label htmlFor="na-when">일정 (선택)</Label>
-            <Input
+            <DateTimeField
               id="na-when"
-              type="datetime-local"
               value={form.when}
-              onChange={(e) => setForm({ ...form, when: e.target.value })}
+              onChange={(value) => setForm({ ...form, when: value })}
             />
           </div>
         </div>

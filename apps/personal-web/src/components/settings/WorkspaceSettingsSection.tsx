@@ -1,6 +1,6 @@
 // 공간 공용 설정 (c0021 workspace-settings): 표시 시간대와 기술명 별칭 사전.
 import type { TechAliasEntry, WorkspaceSettings } from "@career-brain/client";
-import { Button, Label, Section, Select, Textarea } from "@career-brain/ui";
+import { Button, Disclosure, Label, Section, Select, SelectItem, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../../lib/api";
@@ -75,13 +75,13 @@ export function WorkspaceSettingsSection() {
               className="w-auto"
               value={d?.timezone ?? ""}
               disabled={!d || saveZone.isPending}
-              onChange={(e) => saveZone.mutate(e.target.value)}
+              onValueChange={(v) => saveZone.mutate(v)}
             >
               {zones.map((z) => (
-                <option key={z} value={z}>
+                <SelectItem key={z} value={z}>
                   {z}
                   {z === browser ? " (이 브라우저)" : ""}
-                </option>
+                </SelectItem>
               ))}
             </Select>
             {d && !d.timezone_is_default ? (
@@ -123,14 +123,11 @@ export function WorkspaceSettingsSection() {
             </Button>
           </div>
           {d?.builtin_aliases.length ? (
-            <details className="text-[13px] text-muted">
-              <summary className="cursor-pointer py-1 hover:text-fg">
-                기본 표 ({d.builtin_aliases.length}개, 읽기 전용)
-              </summary>
+            <Disclosure title={<>기본 표 ({d.builtin_aliases.length}개, 읽기 전용)</>} className="text-[13px] text-muted">
               <pre className="mt-2 max-h-60 overflow-auto border-t border-line pt-2 font-mono text-xs whitespace-pre-wrap">
                 {aliasLines(d.builtin_aliases)}
               </pre>
-            </details>
+            </Disclosure>
           ) : null}
         </div>
       </div>
