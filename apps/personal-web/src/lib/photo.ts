@@ -53,6 +53,24 @@ export const SIZE_PRESETS: SizePreset[] = [
   { id: "px-150x200", label: "150 × 200 px", widthPx: 150, heightPx: 200, dpi: PRESET_DPI },
 ];
 
+/**
+ * "프로필에 저장"의 규격 (서버 `domain.profiles.PhotoSpec`): 미리 정한 크기면 그 id,
+ * cm로 넣은 크기가 미리 정한 cm와 같으면 그 id (dpi는 자유), px로 150×200이면 그 id, 나머지는 custom.
+ */
+export function photoSpecFor(
+  mode: "preset" | "px" | "cm",
+  presetId: string,
+  size: { w: number; h: number; cmW?: number; cmH?: number },
+): string {
+  if (mode === "preset" && SIZE_PRESETS.some((p) => p.id === presetId)) return presetId;
+  if (mode === "cm" && size.cmW !== undefined && size.cmH !== undefined) {
+    const id = `cm-${size.cmW}x${size.cmH}`;
+    if (SIZE_PRESETS.some((p) => p.id === id)) return id;
+  }
+  if (mode === "px" && size.w === 150 && size.h === 200) return "px-150x200";
+  return "custom";
+}
+
 // ---------------------------------------------------------------- 형식
 
 export type PhotoFormat = "jpeg" | "png" | "webp";

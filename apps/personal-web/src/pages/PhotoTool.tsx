@@ -1,3 +1,4 @@
+import type { PhotoSpec } from "@career-brain/client";
 import { Button, cn, Input, Label, Section } from "@career-brain/ui";
 import { Download, ImagePlus, Lock, RotateCcw, RotateCw, Undo2 } from "lucide-react";
 import {
@@ -12,10 +13,12 @@ import {
   type ReactNode,
 } from "react";
 import { PageHeader } from "../components/common";
+import { SaveToProfile } from "../components/profile/SaveToProfile";
 import * as P from "../lib/photo";
 
 /**
- * 지원서 사진 변환. 모든 처리는 이 브라우저의 canvas로 한다 — 사진을 서버로 보내지 않는다.
+ * 지원서 사진 변환. 모든 처리는 이 브라우저의 canvas로 한다 — 원본은 서버로 보내지 않는다.
+ * "프로필에 저장"(O21)만 변환한 파일을 보낸다 (`components/profile/SaveToProfile.tsx`).
  * 계산·파일 머리 고치기는 `lib/photo.ts`.
  */
 
@@ -47,6 +50,8 @@ interface Target {
 
 interface Output {
   url: string;
+  /** "프로필에 저장"이 보내는 파일 (내려받기와 같은 바이트) */
+  blob: Blob;
   bytes: number;
   quality: number | null;
   /** 용량 제한이 없으면 null */
@@ -105,7 +110,7 @@ async function renderOutput(
   target: Target,
   t: P.PhotoTransform,
   o: { format: P.PhotoFormat; quality: number; maxBytes: number | null; bg: string; keepAlpha: boolean },
-): Promise<Omit<Output, "url"> & { blob: Blob }> {
+): Promise<Omit<Output, "url">> {
   const { w, h, dpi } = target;
   const canvas = document.createElement("canvas");
   canvas.width = w;
@@ -463,8 +468,7 @@ export function PhotoToolPage() {
         const url = URL.createObjectURL(r.blob);
         setOut((prev) => {
           if (prev) URL.revokeObjectURL(prev.url);
-          const { blob: _blob, ...rest } = r;
-          return { ...rest, url };
+          return { ...r, url };
         });
         setOutError(null);
       } catch (e) {
@@ -491,6 +495,14 @@ export function PhotoToolPage() {
     },
     [],
   );
+
+  // "프로필에 저장"의 규격: 결과 크기가 지금 고른 크기와 같을 때만 그 규격 (만드는 중이면 저장을 막는다)
+  const spec = P.photoSpecFor(mode, presetId, {
+    w: target.w,
+    h: target.h,
+    cmW: num(cmW),
+    cmH: num(cmH),
+  }) as PhotoSpec;
 
   const zoomSlider = Math.round((Math.log(t.zoom) / Math.log(P.MAX_ZOOM)) * 1000);
   const printCm = `${P.pxToCm(target.w, target.dpi).toFixed(2)} × ${P.pxToCm(target.h, target.dpi).toFixed(2)} cm`;
@@ -536,8 +548,8 @@ export function PhotoToolPage() {
       <p className="mb-8 flex items-start gap-2 text-[13px] text-muted">
         <Lock size={14} className="mt-0.5 shrink-0" aria-hidden />
         <span>
-          사진은 이 브라우저 안에서만 처리합니다. 서버로 보내거나 저장하지 않습니다. 새로 인코딩하므로 원본의 EXIF(촬영
-          기기·시각·GPS 위치)는 결과 파일에 들어가지 않습니다.
+          사진은 이 브라우저 안에서 변환합니다. 원본은 서버로 보내지 않고, '프로필에 저장'을 누를 때만 변환한 파일을
+          저장합니다. 새로 인코딩하므로 원본의 EXIF(촬영 기기·시각·GPS 위치)는 결과 파일에 들어가지 않습니다.
         </span>
       </p>
 
@@ -769,18 +781,27 @@ export function PhotoToolPage() {
                           : `가장 낮은 품질(${Math.round((out.quality ?? 0) * 100)}%)로도 ${P.formatKB(out.bytes)}라 ${maxKBText.trim()}KB 이하로 줄이지 못합니다. 픽셀 크기를 줄여 보세요.`}
                       </p>
                     ) : null}
-                    <a
-                      href={outError ? undefined : out.url}
-                      download={P.photoFilename(out.w, out.h, out.format)}
-                      aria-disabled={!!outError}
-                      data-testid="photo-download"
-                      className={cn(
-                        "inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-sm font-medium text-accent-fg hover:bg-accent/90",
-                        outError && "pointer-events-none opacity-50",
-                      )}
-                    >
-                      <Download size={16} /> 내려받기 ({P.photoFilename(out.w, out.h, out.format)})
-                    </a>
+                    <SaveToProfile
+                      key={out.url}
+                      blob={out.blob}
+                      filename={P.photoFilename(out.w, out.h, out.format)}
+                      spec={spec}
+                      disabled={busy || !!outError}
+                      download={
+                        <a
+                          href={outError ? undefined : out.url}
+                          download={P.photoFilename(out.w, out.h, out.format)}
+                          aria-disabled={!!outError}
+                          data-testid="photo-download"
+                          className={cn(
+                            "inline-flex h-9 items-center gap-1.5 rounded-md bg-accent px-3.5 text-sm font-medium text-accent-fg hover:bg-accent/90",
+                            outError && "pointer-events-none opacity-50",
+                          )}
+                        >
+                          <Download size={16} /> 내려받기 ({P.photoFilename(out.w, out.h, out.format)})
+                        </a>
+                      }
+                    />
                   </div>
                 ) : null}
               </Section>

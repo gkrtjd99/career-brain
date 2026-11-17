@@ -83,6 +83,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0035 (O14) 참고 자료 보관함: 다른 사람의 글. 구조 메모 후보 확인은 사람만 (usecase가 agent를 막는다)
     "references.read": "read",
     "references.write": "draft-write",
+    # c0036 (O21) 프로필·증명사진. 개인 식별 정보(restricted): MCP에는 profile_summary(이름·소개·링크)만
+    "profile.read": "read",
+    "profile.write": "draft-write",
 }
 
 

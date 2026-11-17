@@ -195,7 +195,8 @@ async def test_initialize_and_curated_tool_list(env):
     } <= names
     # 업무 도구만: 승인 결정·주장 확정·shell·SQL·임의 URL 조회는 없다
     banned = ("approve", "confirm", "shell", "exec", "sql", "fetch", "http", "file", "delete")
-    assert not [n for n in names if any(b in n for b in banned)]
+    # "profile"(O21 profile_summary)의 "file"은 파일 도구가 아니다
+    assert not [n for n in names if any(b in n.replace("profile", "") for b in banned)]
     for t in tools:
         schema = t["inputSchema"]
         assert schema["type"] == "object" and schema.get("additionalProperties") is False

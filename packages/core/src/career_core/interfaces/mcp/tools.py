@@ -29,6 +29,7 @@ from career_core.usecases import companies as company_uc
 from career_core.usecases import credentials as credential_uc
 from career_core.usecases import interviews as interview_uc
 from career_core.usecases import postings as posting_uc
+from career_core.usecases import profiles as profile_uc
 from career_core.usecases import references as reference_uc
 from career_core.usecases import runs as run_uc
 from career_core.usecases import search as search_uc
@@ -590,6 +591,21 @@ async def _reference_get(env: ToolEnv, a: ReferenceGetArgs) -> Any:
     }
 
 
+# ---------------------------------------------------------------- 프로필 (O21)
+
+# 프로필에서 MCP로 나가는 것은 이름·한 줄 소개·링크뿐이다. 생년월일·연락처·주소·증명사진은
+# 개인 식별 정보(restricted)라 어떤 도구로도 주지 않는다 (docs/architecture/mcp.md).
+PROFILE_NOTE = (
+    "Only name, headline and links are shared over MCP. Birth date, email, phone, address and "
+    "photos are never returned; ask the user to fill those in themselves."
+)
+
+
+async def _profile_summary(env: ToolEnv, a: NoArgs) -> Any:
+    summary = await profile_uc.profile_summary(env.db, env.actor)
+    return {"record": "profile", "note": PROFILE_NOTE, **jsonable(summary)}
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -675,6 +691,15 @@ TOOLS: tuple[Tool, ...] = (
         "brain.read",
         GetInterviewArgs,
         _get_interview,
+        untrusted=True,
+    ),
+    Tool(
+        "profile_summary",
+        "Get the user's profile summary: name, one-line headline and links (portfolio, GitHub, "
+        "blog). Birth date, contact details, address and ID photos are never returned.",
+        "profile.read",
+        NoArgs,
+        _profile_summary,
         untrusted=True,
     ),
     Tool(

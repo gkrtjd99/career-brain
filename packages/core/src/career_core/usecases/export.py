@@ -1478,6 +1478,15 @@ def _c0035_references(arc) -> None:
     arc.ensure_tables("core.reference_items", "core.reference_notes")
 
 
+@schema_step(
+    "c0036",
+    "프로필·증명사진 표 profiles·profile_photos (옛 묶음에는 빈 표). "
+    "사진 바이트는 blob_key로 다른 원본처럼 blobs/에 들어간다",
+)
+def _c0036_profiles(arc) -> None:
+    arc.ensure_tables("core.profile_photos", "core.profiles")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

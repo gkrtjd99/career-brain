@@ -8,6 +8,7 @@ import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { ReferenceEntry } from "../components/companies/ReferenceEntry";
 import { MeEntry } from "../components/credentials/MeEntry";
 import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/ExperienceForm";
+import { ProfileEntry } from "../components/profile/ProfileEntry";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
@@ -117,6 +118,7 @@ export function BrainPage() {
       ) : null}
 
       <MeEntry />
+      <ProfileEntry />
       <ReferenceEntry />
       <Link
         to="/brain/sources"
