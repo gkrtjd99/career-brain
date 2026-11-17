@@ -165,6 +165,13 @@ export const systemRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/System"), "SystemPage"),
 });
 
+// 사진 변환: 브라우저 안에서만 처리하고 API를 부르지 않아 토큰 없이도 연다
+const photoToolRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/tools/photo",
+  component: lazyRouteComponent(() => import("./pages/PhotoTool"), "PhotoToolPage"),
+});
+
 const routeTree = rootRoute.addChildren([
   todayRoute,
   brainRoute,
@@ -182,6 +189,7 @@ const routeTree = rootRoute.addChildren([
   studyRoute,
   studyItemRoute,
   systemRoute,
+  photoToolRoute,
 ]);
 
 export const router = createRouter({
