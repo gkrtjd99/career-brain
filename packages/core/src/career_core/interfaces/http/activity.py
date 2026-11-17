@@ -46,6 +46,10 @@ class SourceListOut(BaseModel):
     purpose: str = "experience"
     pending_claims: int = 0
     attention: str | None = None
+    # c0039: 용도 확인 대기·제안의 이유·읽은 길
+    purpose_pending: bool = False
+    purpose_hint: str | None = None
+    read_by: str | None = None
 
 
 class ActivityOut(BaseModel):

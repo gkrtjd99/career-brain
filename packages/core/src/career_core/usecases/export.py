@@ -1487,6 +1487,20 @@ def _c0036_profiles(arc) -> None:
     arc.ensure_tables("core.profile_photos", "core.profiles")
 
 
+@schema_step(
+    "c0039",
+    "브레인에 넣기: sources.purpose_pending(false: 옛 원본은 사람이 골라 올렸다)·purpose_hint(null), "
+    "parse_runs.text_layer(null), document_blocks.bbox(null: 옛 블록에는 위치가 없다)",
+)
+def _c0039_ingest(arc) -> None:
+    if arc.has("core.sources"):
+        arc.add_columns("core.sources", "purpose_pending", purpose_hint=None)
+    if arc.has("core.parse_runs"):
+        arc.add_columns("core.parse_runs", text_layer=None)
+    if arc.has("core.document_blocks"):
+        arc.add_columns("core.document_blocks", bbox=None)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
