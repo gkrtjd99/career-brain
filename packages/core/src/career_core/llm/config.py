@@ -15,6 +15,8 @@ BILLING_METERED = "metered"  # 토큰당 과금 (공식 API)
 BILLING_SUBSCRIPTION = "subscription"  # 구독 계정을 프록시로 쓰는 경우 (CLIProxyAPI 등)
 BILLING_FREE = "free"  # 로컬 모델 (Ollama 등)
 _BILLINGS = {BILLING_METERED, BILLING_SUBSCRIPTION, BILLING_FREE}
+BILLINGS = frozenset(_BILLINGS)
+TOKEN_PARAMS = frozenset({"max_tokens", "max_completion_tokens"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +80,8 @@ class EndpointConfig:
     refusal_fallback: bool = True
     # 로컬 모델 파일을 둘 곳 (preset = "local"). 없으면 fastembed 기본 캐시.
     model_dir: str | None = None
+    # preset 이름 (화면 표시용, O22). 직접 만든 EndpointConfig는 None일 수 있다.
+    preset: str | None = None
 
     @property
     def leaves_host(self) -> bool:
@@ -168,6 +172,7 @@ def parse_models_config(text: str, *, base_dir: Path | None = None) -> ModelsCon
             timeout_seconds=float(raw.get("timeout_seconds", 120)),
             refusal_fallback=bool(raw.get("refusal_fallback", True)),
             model_dir=raw.get("model_dir"),
+            preset=preset_name,
         )
     routes = {purpose: parse_route(v) for purpose, v in data.get("routes", {}).items()}
     for purpose, route in routes.items():

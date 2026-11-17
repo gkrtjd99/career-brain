@@ -13,6 +13,8 @@ dependencies = [
   "pypdf>=5",
   "python-multipart>=0.0.9",
   "httpx>=0.28,<1",
+  # 화면에서 넣은 모델 키를 DB에 암호화 (Fernet, adapters/secret_box.py)
+  "cryptography>=44",
 ]
 
 [project.optional-dependencies]

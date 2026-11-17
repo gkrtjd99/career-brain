@@ -26,6 +26,8 @@ class Settings:
     restore_stale_seconds: float = 60.0
     # 모델 엔드포인트·라우트·예산. 없으면 모델 호출은 전부 거부된다. 예시: models.example.toml
     models_config: str = "models.toml"
+    # O22 화면에서 넣은 모델 키를 암호화하는 암호 키 파일 (CAREER_SECRET_KEY가 없을 때, 처음 쓸 때 0600으로 만든다)
+    secret_key_file: str = "data/secret.key"
     # 동적 공고 페이지를 Playwright로 렌더링 (선택 설치: extra `browser` + `playwright install chromium`)
     browser_fetch: bool = False
     # 스캔 PDF 비전 호출(종량제)의 예상 최대 비용이 이 금액(USD)을 넘으면 웹에서 확인을 받는다 (c0025).
@@ -72,6 +74,7 @@ class Settings:
             ),
             restore_stale_seconds=float(os.environ.get("CAREER_RESTORE_STALE_SECONDS", "60")),
             models_config=os.environ.get("CAREER_MODELS_CONFIG", "models.toml"),
+            secret_key_file=os.environ.get("CAREER_SECRET_KEY_FILE") or "data/secret.key",
             browser_fetch=os.environ.get("CAREER_BROWSER_FETCH", "0").lower() in ("1", "true"),
             vision_confirm_usd=_usd_or_off(os.environ.get("CAREER_VISION_CONFIRM_USD", "0.10")),
             public_url=os.environ.get("CAREER_PUBLIC_URL") or None,

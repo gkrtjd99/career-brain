@@ -50,7 +50,7 @@ from career_core.llm import (
     ModelResult,
     TokenUsage,
 )
-from career_core.llm.gateway import ModelGateway
+from career_core.llm.gateway import ModelGateway, scoped_gateway
 from career_core.ports import ActorContext
 from career_core.usecases.data_classes import restricted_claims
 from career_core.usecases.extraction import find_quote, parse_model_json
@@ -621,6 +621,7 @@ async def judge_application_visibility(
 
     sent = [b for b in inputs if not withheld(b)]
     verdicts: dict[str, Verdict] = {}
+    gateway = await scoped_gateway(gateway, actor.workspace_id)  # 화면에서 덮은 라우트 (O22)
     run = unavailable(gateway, actor, JUDGE_VISIBILITY_PURPOSE) if call_model is None else None
     if run is None:
         if call_model is None:

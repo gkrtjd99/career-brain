@@ -70,6 +70,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0021 공간 공용 설정 (표시 시간대·기술명 별칭). 학습 설정 PUT과 같은 범위.
     "settings.read": "read",
     "settings.write": "draft-write",
+    # O22 모델 연결·라우트·예산 (개인 앱이 켤 때). 바꾸기·연결 시험은 키를 다루므로 소유자만.
+    "models.read": "read",
+    "models.manage": "workspace-admin",
 }
 
 

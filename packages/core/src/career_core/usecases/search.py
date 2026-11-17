@@ -24,7 +24,7 @@ from career_core.db import Database
 from career_core.db.types import to_pgvector
 from career_core.domain.korean import TechAliases, content_words, korean_analyzer, strip_particle
 from career_core.llm import EMBED_QUERY, ModelCallError, ModelDenied
-from career_core.llm.gateway import ModelGateway
+from career_core.llm.gateway import ModelGateway, scoped_gateway
 from career_core.ports import ActorContext
 from career_core.usecases.indexing import CURRENT_BLOCKS, MAX_TEXT_CHARS, STUDY_MISTAKE_BODY
 from career_core.usecases.workspace_settings import workspace_aliases
@@ -361,6 +361,7 @@ async def search(
 
     semantic_rows: list = []
     note = None
+    gateway = await scoped_gateway(gateway, actor.workspace_id)  # 화면에서 덮은 임베딩 라우트 (O22)
     space = gateway.embedding_space() if gateway else None
     if gateway is None or space is None:
         # 키만 없는 경우를 따로 알린다 (설정은 했는데 OPENAI_API_KEY 등이 비어 있음)

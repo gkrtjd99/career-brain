@@ -132,6 +132,7 @@ career.example.com {
 - 바꾼 뒤에는 `personal-api reindex` (Docker: `docker compose run --rm app reindex`)로 다시 색인한다.
 - 로컬 모델은 `CAREER_EMBED_IDLE_SECONDS`(기본 300초) 동안 안 쓰면 메모리에서 내린다. 스레드 수는 `CAREER_EMBED_THREADS`(기본 2).
 - `personal-api models`로 설정 상태를 보고(키 값은 출력하지 않음), `personal-api ping`으로 연결을 확인한다(과금됨).
+- 웹 "연결·관리"에서도 연결을 만들고 키를 넣을 수 있다 (파일 연결은 읽기 전용으로 보임). 그 키는 DB에 암호화해 두고, 암호 키는 `CAREER_SECRET_KEY` 또는 `CAREER_SECRET_KEY_FILE`(기본 `data/secret.key`, Docker는 `/data` 볼륨)이다. 암호 키 파일을 백업하지 않으면 다른 설치로 옮긴 뒤 웹에서 키를 다시 넣는다 ([models.md](../architecture/models.md#화면에서-연결-o22-c0030)).
 
 ## 4. 업데이트
 
@@ -206,6 +207,8 @@ personal-api token extend <id> --days 90   # 만료를 지금부터 90일 뒤로
 | `CAREER_WEB_DIR` | `apps/personal-web/dist` (있을 때) | 웹 정적 파일. 빈 값이면 끔 |
 | `CAREER_BLOB_DIR` | `data/blobs` (이미지: `/data/blobs`) | 업로드 원본 |
 | `CAREER_MODELS_CONFIG` | `models.toml` (이미지: `/config/models.toml`) | 모델 설정 |
+| `CAREER_SECRET_KEY` | – | 웹에서 넣은 모델 키를 DB에 암호화하는 Fernet 키 (urlsafe base64). 없으면 아래 파일 |
+| `CAREER_SECRET_KEY_FILE` | `data/secret.key` (이미지: `/data/secret.key`) | 위 키가 없을 때 쓰는 암호 키 파일. 처음 키를 저장할 때 0600으로 만든다. 잃으면 웹에서 넣은 키를 다시 넣어야 한다 ([models.md](../architecture/models.md#화면에서-연결-o22-c0030)) |
 | `CAREER_MODEL_DIR` | – (이미지: `/data/models`) | 로컬 임베딩 모델 파일 |
 | `CAREER_MAX_UPLOAD_MB` | `20` | 업로드 한도 |
 | `CAREER_MAX_RESTORE_MB` | `2048` | 웹 복원(백업 묶음) 업로드 한도, 이 경로만 |

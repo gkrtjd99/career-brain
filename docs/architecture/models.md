@@ -23,6 +23,8 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 
 ## 엔드포인트 (models.toml)
 
+화면에서 만드는 연결은 아래 "화면에서 연결"을 본다.
+
 설정 파일은 `models.toml`(git 제외). 예시: 레포 루트 `models.example.toml`. 경로는 `CAREER_MODELS_CONFIG`로 바꿀 수 있다.
 파일이 없으면 엔드포인트가 0개이고 모든 모델 호출이 거부된다.
 
@@ -49,6 +51,45 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
 - 토큰은 기록하지만 실지출(`spent_usd`)·월 예산에는 넣지 않는다. `price_as = "anthropic"`처럼 주면 API 정가 환산액을 `equivalent_usd`로 따로 보여준다.
 - CLIProxyAPI 기본 설정은 모든 인터페이스에 바인딩된다. `config.yaml`에 `host: "127.0.0.1"`을 둔다.
 - 소비자 구독을 API처럼 쓰는 것은 제공자 약관 위반일 수 있다. 프로젝트 자체는 이 점을 경고하지 않는다. 사용자가 판단한다.
+
+## 화면에서 연결 (O22, c0030)
+
+개인 앱은 웹 "연결·관리 → 모델 연결·용도별 모델·사용량·예산"에서 연결·라우트·월 예산을 바꿀 수 있다 (plan §21).
+`models.toml`은 그대로 읽고(읽기 전용, `source: "file"`), 화면에서 만든 것은 DB에 둔다(`source: "ui"`).
+
+- **합치는 규칙.** 연결 = 파일 + 화면(공간마다). 화면 연결의 이름이 파일 연결과 겹치면 저장을 거부한다(409 `connection_name_taken`).
+  나중에 파일에 같은 이름이 생기면 파일이 이긴다. 라우트·예산은 화면 값이 파일 값을 덮고, 라우트 `null`·예산 `null`이면 파일 값으로 돌아간다.
+  가리키는 연결이 사라진 라우트 덮기는 건너뛴다(파일 값).
+- **검사는 `parse_models_config`와 같다.** 아는 preset, OpenAI 호환은 주소 필수, 과금 `metered`·`subscription`·`free`, 토큰 파라미터 `max_tokens`·`max_completion_tokens`,
+  로컬(`local`) 연결은 `embed` 라우트만, `embed`는 Anthropic 불가. 화면 규칙을 더한다: `data_classes`는 `public`·`private`만(`restricted` → 422 `restricted_not_allowed`),
+  주소는 `http(s)://`, `price_as`는 단가표 제공자(anthropic·openai·gemini·xai) 중 하나. 종량제 직접 연결(LiteLLM 등)은 `price_as`를 단가 제공자로 쓴다.
+- **키.** `cryptography` Fernet으로 암호화해 `core.model_connection_secrets`에 둔다 (연결과 1:1, 끊으면 같이 지워짐). 암호 키는 `CAREER_SECRET_KEY`(urlsafe base64 Fernet 키),
+  없으면 `CAREER_SECRET_KEY_FILE`(기본 `data/secret.key`, 이미지 `/data/secret.key`)을 처음 암호화할 때 0600으로 만든다. API·CLI는 키를 돌려주지 않는다 (상태 `set`·`missing`·`not_needed`·`needs_reentry`, 끝 4자리만).
+  게이트웨이에는 연결마다 합성 환경변수 이름 `CAREER_CONN_<NAME>_KEY`를 주고, 풀어낸 키를 `os.environ` 위에 얹은 Mapping으로 넘긴다 (`os.environ`은 바꾸지 않는다).
+  암호 키가 바뀌었거나(다른 설치) 암호문이 없으면(복원) `needs_reentry`이고 호출은 `api_key_missing`으로 막힌다.
+- **내보내기.** `model_connections`·`model_route_overrides`·`model_settings`는 들어가고 `model_connection_secrets`는 빠진다(`EXCLUDED_TABLES`). 복원하면 연결·라우트·예산은 남고 키는 "다시 넣어야 함".
+- **바로 쓴다.** `ModelGateway(overlay=ModelConnections(...))`이면 공간마다 보기(`gateway.view(workspace_id)`)를 만들어 그 설정으로 호출한다.
+  API 프로세스는 저장 직후 `invalidate`로 다음 호출에서 다시 읽고, worker 같은 다른 프로세스는 `refresh_seconds`(5초)마다 `overlay.signature`(공간의 `model_settings.version` + 행 수·마지막 수정 시각)를 보고 바뀌었으면 다시 만든다.
+  `reconfigure(config, env)`는 돌고 있는 게이트웨이의 파일 설정을 바꾸고 egress 정책·클라이언트·공간 보기를 버린다.
+  라우트·임베딩 공간을 미리 보는 곳(검색·색인·판정·공고 비전)은 `scoped_gateway(gw, ws)`로 그 공간 보기를 쓴다.
+- **서비스에서는 꺼져 있다.** `CoreDeps.model_connections`가 없으면 `/core/models/*`는 404 `not_enabled`, overlay 없는 게이트웨이는 DB를 보지 않는다.
+- **연결 시험**은 과금되지 않는 목록만 부른다: OpenAI 호환 `GET {base_url}/models`(`Authorization: Bearer`), Anthropic `GET https://api.anthropic.com/v1/models`(`x-api-key`, `anthropic-version`).
+  10초 제한, 다른 곳으로 넘겨주기(redirect)는 따라가지 않는다. 장부에 아무것도 남지 않는다. 결과 `error_code`: `key_missing`(부르지 않음), `unreachable`, `unauthorized`(401·403), `bad_response`.
+  파일 연결도 그 환경변수 키로 시험할 수 있다. 실제 생성 호출 시험은 `personal-api ping`(과금됨).
+
+| 메서드·경로 | 권한 | 본문 → 응답 |
+|---|---|---|
+| `GET /core/models/status` | `models.read` (read) | → 상태 (아래) |
+| `POST /core/models/connections` | `models.manage` (workspace-admin) | `{name, preset, base_url?, api_key?, billing?, price_as?, data_classes[], token_param?}` → 201 상태 |
+| `PATCH /core/models/connections/{name}` | 〃 | 보낸 칸만 바뀜. `api_key` 없음 = 그대로, 문자열 = 바꿈, `null` = 지움 → 상태 |
+| `DELETE /core/models/connections/{name}` | 〃 | 쓰는 라우트 덮기가 있으면 409 `connection_in_use` → 상태 |
+| `POST /core/models/connections/{name}/test` | 〃 | → `{ok, models[], error_code?}` |
+| `PUT /core/models/routes` | 〃 | `{routes: {purpose: "conn/model" \| null}}` → 상태 |
+| `PUT /core/models/budget` | 〃 | `{monthly_usd: "20.00" \| null}` → 상태 |
+
+상태: `{connections: [{name, source, preset, kind, base_url, billing, price_as, data_classes, key, key_last4, last_test_at, last_test_ok, leaves_host}], routes: [{purpose, endpoint, model, source}], purposes: [...], budget: {monthly_usd, source, spent_usd_this_month}, presets: [{name, kind, base_url, billing, needs_key}]}`.
+금액은 문자열, 시각은 UTC ISO(`Z`). 오류는 `{"detail": "<code>"}`뿐이다: 본문을 직접 읽어 FastAPI의 422 응답처럼 입력 값(키)을 되돌려 주지 않는다. 파일 연결을 고치거나 끊으면 409 `connection_read_only`.
+MCP 도구로는 열지 않는다. `personal-api models`는 `CAREER_API_TOKEN`이 있으면 그 공간의 화면 연결·라우트·예산을 출처와 함께 보여 준다(키 상태만). `personal-api ping`·`usage`·`reindex`도 화면 설정을 쓴다.
 
 ## 토큰 정규화
 

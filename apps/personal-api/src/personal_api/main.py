@@ -18,7 +18,12 @@ from personal_api.identity import (
     PersonalTokenResolver,
     mcp_oauth_from_settings,
 )
-from personal_api.models import load_config, load_prices, shared_client_factory
+from personal_api.models import (
+    build_connections,
+    load_config,
+    load_prices,
+    shared_client_factory,
+)
 from personal_api.settings import Settings
 from personal_api.web import mount_web, web_dir_from_env
 
@@ -27,6 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     db = Database(settings.database_url)
     models = load_config(settings)
+    connections = build_connections(settings, db)  # O22 화면에서 모델 연결 (켬)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -50,7 +56,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         restore_dir=settings.restore_dir,
         restore_stale_seconds=settings.restore_stale_seconds,
         monthly_budget_usd=models.budget.monthly_usd,
-        models=ModelGateway(db, models, load_prices(models), client_factory=shared_client_factory),
+        models=ModelGateway(
+            db,
+            models,
+            load_prices(models),
+            client_factory=shared_client_factory,
+            overlay=connections,
+        ),
+        model_connections=connections,
         mcp_oauth=mcp_oauth_from_settings(settings, db),
         tokens=PersonalTokenAdmin(db),
     )

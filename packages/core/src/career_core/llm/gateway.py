@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Protocol
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -115,6 +116,27 @@ class _Plan:
     price_provider: str | None
 
 
+class ConfigOverlay(Protocol):
+    """파일 설정 위에 공간별 설정(화면에서 만든 연결·라우트·예산)을 얹는 곳 (O22).
+
+    ``signature``는 몇 초마다 부르는 싼 확인이다 (값이 바뀌면 ``build``로 다시 만든다).
+    ``build``가 돌려주는 env에는 그 공간 연결의 키가 들어 있다: 로그에 남기지 않는다.
+    """
+
+    async def signature(self, workspace_id: UUID) -> Hashable: ...
+
+    async def build(
+        self, workspace_id: UUID, base: ModelsConfig, env: Mapping[str, str]
+    ) -> tuple[ModelsConfig, Mapping[str, str]]: ...
+
+
+@dataclass(slots=True)
+class _View:
+    gateway: ModelGateway
+    signature: Hashable
+    checked: float
+
+
 class ModelGateway:
     def __init__(
         self,
@@ -127,20 +149,95 @@ class ModelGateway:
         client_factory: ClientFactory = default_client_factory,
         env: Mapping[str, str] | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        overlay: ConfigOverlay | None = None,
+        refresh_seconds: float = 5.0,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
+        """``overlay``를 주면(개인 앱) 공간마다 파일 설정 + DB 설정으로 호출한다. 없으면 파일 설정만."""
         self._db = db
         self._config = config
         self._prices = prices
+        self._egress_given = egress
         self._egress = egress or ProviderEgressPolicy(config.egress_map())
         self._budget = budget
         self._factory = client_factory
         self._env = os.environ if env is None else env
         self._clock = clock
         self._clients: dict[str, ModelClient | EmbeddingClient] = {}
+        self._overlay = overlay
+        self._refresh_seconds = refresh_seconds
+        self._monotonic = monotonic
+        self._views: dict[UUID, _View] = {}
 
     @property
     def config(self) -> ModelsConfig:
         return self._config
+
+    @property
+    def env(self) -> Mapping[str, str]:
+        return self._env
+
+    @property
+    def prices(self) -> PriceBook:
+        return self._prices
+
+    @property
+    def overlay(self) -> ConfigOverlay | None:
+        return self._overlay
+
+    def reconfigure(self, config: ModelsConfig, env: Mapping[str, str] | None = None) -> None:
+        """돌고 있는 게이트웨이의 설정을 바꾼다. egress 정책을 다시 만들고 클라이언트를 버린다.
+
+        진행 중인 호출은 이미 집은 클라이언트로 끝난다. 공간별 보기도 버린다 (다음 호출 때 다시 만든다).
+        """
+        self._config = config
+        if env is not None:
+            self._env = env
+        self._egress = self._egress_given or ProviderEgressPolicy(config.egress_map())
+        self._clients = {}
+        self._views = {}
+
+    def invalidate(self, workspace_id: UUID | None = None) -> None:
+        """다음 ``view``가 DB를 바로 다시 보게 한다 (이 프로세스에서 설정을 바꾼 직후)."""
+        if workspace_id is None:
+            for v in self._views.values():
+                v.checked = float("-inf")
+        elif (v := self._views.get(workspace_id)) is not None:
+            v.checked = float("-inf")
+
+    async def view(self, workspace_id: UUID) -> ModelGateway:
+        """그 공간에서 쓰는 게이트웨이. ``overlay``가 없으면 자기 자신 (DB를 보지 않는다).
+
+        ``refresh_seconds``마다 ``overlay.signature``를 보고, 바뀌었으면 설정을 다시 만든다 (worker 같은 다른
+        프로세스가 화면의 변경을 재시작 없이 따라간다).
+        """
+        if self._overlay is None:
+            return self
+        now = self._monotonic()
+        current = self._views.get(workspace_id)
+        if current is not None and now - current.checked < self._refresh_seconds:
+            return current.gateway
+        sig = await self._overlay.signature(workspace_id)
+        if current is not None and sig == current.signature:
+            current.checked = now
+            return current.gateway
+        config, env = await self._overlay.build(workspace_id, self._config, self._env)
+        if current is not None:
+            current.gateway.reconfigure(config, env)
+            current.signature, current.checked = sig, now
+            return current.gateway
+        child = ModelGateway(
+            self._db,
+            config,
+            self._prices,
+            egress=self._egress_given,
+            budget=self._budget,
+            client_factory=self._factory,
+            env=env,
+            clock=self._clock,
+        )
+        self._views[workspace_id] = _View(child, sig, now)
+        return child
 
     def _client(
         self, endpoint: EndpointConfig, api_key: str | None
@@ -161,6 +258,9 @@ class ModelGateway:
         run_step: int | None = None,
     ) -> ModelResult:
         """``run_id``·``run_step``: 실행 단계 안의 호출이면 장부 행에 같이 남긴다 (실행 비용 보정용)."""
+        if self._overlay is not None:
+            scoped = await self.view(actor.workspace_id)
+            return await scoped.run(actor, purpose, request, run_id=run_id, run_step=run_step)
         tag = (run_id, run_step) if run_id is not None else None
         route = self._config.route_for(purpose)
         if route is None:
@@ -394,6 +494,11 @@ class ModelGateway:
         purpose: str = EMBED_PURPOSE,
     ) -> EmbeddingResult:
         """임베딩도 대화 호출과 같은 순서(egress·단가·예산·장부)를 지난다."""
+        if self._overlay is not None:
+            scoped = await self.view(actor.workspace_id)
+            return await scoped.embed(
+                actor, texts, data_classes=data_classes, input_type=input_type, purpose=purpose
+            )
         route = self._config.embedding_route()
         if route is None:
             raise ModelDenied("no_route")
@@ -529,3 +634,8 @@ class ModelGateway:
         async with self._db.workspace_session(actor.workspace_id) as session:
             session.add(row)
         return row.id
+
+
+async def scoped_gateway(gateway: ModelGateway | None, workspace_id: UUID) -> ModelGateway | None:
+    """그 공간의 설정으로 본 게이트웨이 (``ModelGateway.view``). 라우트·임베딩 공간을 미리 볼 때 쓴다."""
+    return None if gateway is None else await gateway.view(workspace_id)
