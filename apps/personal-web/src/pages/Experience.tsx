@@ -1,5 +1,5 @@
 import type { Claim, ClaimKind, Contribution, Experience } from "@career-brain/client";
-import { Badge, Button, EmptyState, Label, MarkdownView, Section, Select, Textarea } from "@career-brain/ui";
+import { Button, cn, Label, MarkdownView, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { Copy, Download, Plus } from "lucide-react";
@@ -50,8 +50,14 @@ export function ExperiencePage() {
                 {
                   value: "claims",
                   label: (
-                    <span className="inline-flex items-center gap-1.5">
-                      주장 {pending ? <Badge tone="warn">{pending}</Badge> : null}
+                    <span>
+                      주장
+                      {pending ? (
+                        <span className="ml-1.5 font-semibold tabular-nums">
+                          <span className="sr-only">확인 필요 </span>
+                          {pending}
+                        </span>
+                      ) : null}
                     </span>
                   ),
                 },
@@ -87,37 +93,61 @@ function ClaimsTab({ exp }: { exp: Experience }) {
   const retired = exp.claims.filter((c) => c.status === "retired");
 
   return (
-    <div className="space-y-7">
-      {exp.claims.length === 0 ? <EmptyState>아직 주장이 없습니다. 아래에서 직접 추가하거나 인터뷰로 정리하세요.</EmptyState> : null}
+    <div className="space-y-10">
+      {exp.claims.length === 0 ? (
+        <p className="text-sm text-muted">아직 주장이 없습니다. 아래에서 직접 추가하거나 인터뷰 탭에서 정리하세요.</p>
+      ) : null}
       {groups.map((g) =>
         g.claims.length ? (
-          <Section key={g.title} title={`${g.title} ${g.claims.length}`}>
-            {g.hint ? <p className="-mt-1 text-xs text-muted">{g.hint}</p> : null}
-            <div className="space-y-2">
-              {g.claims.map((c) => (
-                <ClaimItem key={c.id} claim={c} experienceId={exp.id} onOpenSpan={setSpanId} />
-              ))}
-            </div>
-          </Section>
+          <section key={g.title}>
+            <h2 className="text-[15px] font-semibold">
+              {g.title} <span className="font-normal text-muted tabular-nums">{g.claims.length}</span>
+            </h2>
+            {g.hint ? <p className="mt-0.5 text-[13px] text-muted">{g.hint}</p> : null}
+            <ClaimList claims={g.claims} experienceId={exp.id} onOpenSpan={setSpanId} />
+          </section>
         ) : null,
       )}
       {retired.length ? (
-        <div>
-          <Button variant="ghost" size="sm" onClick={() => setShowArchived((v) => !v)}>
+        <section>
+          <button
+            type="button"
+            aria-expanded={showArchived}
+            onClick={() => setShowArchived((v) => !v)}
+            className="inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg"
+          >
             보관한 주장 {retired.length}개 {showArchived ? "숨기기" : "보기"}
-          </Button>
+          </button>
           {showArchived ? (
-            <div className="mt-2 space-y-2 opacity-80">
-              {retired.map((c) => (
-                <ClaimItem key={c.id} claim={c} experienceId={exp.id} onOpenSpan={setSpanId} />
-              ))}
-            </div>
+            <ClaimList claims={retired} experienceId={exp.id} onOpenSpan={setSpanId} className="opacity-70" />
           ) : null}
-        </div>
+        </section>
       ) : null}
       <AddClaim experienceId={exp.id} />
       <SpanSheet spanId={spanId} onClose={() => setSpanId(null)} />
     </div>
+  );
+}
+
+function ClaimList({
+  claims,
+  experienceId,
+  onOpenSpan,
+  className,
+}: {
+  claims: Claim[];
+  experienceId: string;
+  onOpenSpan: (spanId: string) => void;
+  className?: string;
+}) {
+  return (
+    <ul className={cn("mt-3 divide-y divide-line border-t border-line", className)}>
+      {claims.map((c) => (
+        <li key={c.id}>
+          <ClaimItem claim={c} experienceId={experienceId} onOpenSpan={onOpenSpan} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -143,9 +173,10 @@ function AddClaim({ experienceId }: { experienceId: string }) {
       </Button>
     );
   return (
-    <Section title="주장 직접 추가">
+    <section>
+      <h2 className="mb-3 text-[15px] font-semibold">주장 직접 추가</h2>
       <form
-        className="space-y-2 rounded-lg border border-line bg-surface p-3"
+        className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
           if (statement.trim()) add.mutate();
@@ -192,11 +223,9 @@ function AddClaim({ experienceId }: { experienceId: string }) {
             취소
           </Button>
         </div>
-        <p className="text-xs text-muted">
-          직접 쓴 주장은 원문 근거가 없으면 “근거 없음”으로 표시됩니다.
-        </p>
+        <p className="text-[13px] text-muted">직접 쓴 주장은 원문 근거가 없으면 “근거 없음”으로 표시됩니다.</p>
       </form>
-    </Section>
+    </section>
   );
 }
 
@@ -209,12 +238,13 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
   return (
     <Loaded query={q}>
       {(md) => (
-        <div className="space-y-3">
+        <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-muted">확인한 주장만 모은 정리본입니다.</p>
+            <p className="text-[13px] text-muted">확인한 주장만 모은 정리본입니다.</p>
             <div className="flex gap-1.5">
               <Button
                 size="sm"
+                className="max-sm:h-9"
                 onClick={async () => {
                   await navigator.clipboard.writeText(md);
                   setCopied(true);
@@ -225,6 +255,7 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
               </Button>
               <Button
                 size="sm"
+                className="max-sm:h-9"
                 onClick={() => {
                   const url = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
                   const a = document.createElement("a");
@@ -238,7 +269,7 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
               </Button>
             </div>
           </div>
-          <article className="rounded-lg border border-line bg-surface px-4 py-5 md:px-6">
+          <article className="border-t border-line pt-6">
             <MarkdownView source={md} />
           </article>
         </div>

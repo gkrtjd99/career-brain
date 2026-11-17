@@ -1,5 +1,5 @@
 import type { ClaimStatus, SearchHit } from "@career-brain/client";
-import { Button, EmptyState, Input, Sheet, StatusBadge } from "@career-brain/ui";
+import { Button, Input, Sheet, STATUS_LABEL, type VerificationStatus } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, Search as SearchIcon } from "lucide-react";
 import { useState } from "react";
@@ -49,7 +49,7 @@ export function ClaimPicker({
     >
       <form
         role="search"
-        className="mb-3 flex gap-2"
+        className="mb-4 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           setQ(draft.trim());
@@ -69,54 +69,63 @@ export function ClaimPicker({
         </Button>
       </form>
       {!q ? (
-        <EmptyState>문단 내용과 관련된 낱말로 주장을 찾습니다.</EmptyState>
+        <p className="text-sm text-muted">문단 내용과 관련된 낱말로 주장을 찾습니다.</p>
       ) : (
         <Loaded query={result}>
           {(r) =>
             r.hits.length ? (
-              <ul className="space-y-2">
+              <ul className="divide-y divide-line border-t border-line">
                 {r.hits.map((h: SearchHit) => {
                   const on = selected.includes(h.id);
                   const confirmed = CONFIRMED.includes(h.claim_status as ClaimStatus);
                   return (
-                    <li key={h.id} className="rounded-lg border border-line bg-surface p-2.5">
-                      <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                        {h.claim_status ? <StatusBadge status={h.claim_status} /> : null}
-                        <span className="truncate">{h.experience_title}</span>
+                    <li key={h.id} className="flex items-start gap-3 py-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm leading-6">{h.snippet}</p>
+                        <p className="mt-0.5 truncate text-[13px] text-muted">
+                          {[
+                            h.claim_status
+                              ? (STATUS_LABEL[h.claim_status as VerificationStatus] ?? h.claim_status)
+                              : null,
+                            h.experience_title,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        {!confirmed ? (
+                          <p className="mt-0.5 text-[13px] font-medium">확인 전 주장은 근거로 세지 않습니다.</p>
+                        ) : null}
                       </div>
-                      <p className="text-sm leading-6">{h.snippet}</p>
-                      {!confirmed ? (
-                        <p className="mt-1 text-xs text-warn">확인 전 주장은 근거로 세지 않습니다.</p>
-                      ) : null}
-                      <div className="mt-1.5">
-                        <Button
-                          size="sm"
-                          variant={on ? "ghost" : "secondary"}
-                          disabled={on}
-                          onClick={() =>
-                            onPick({
-                              id: h.id,
-                              statement: h.snippet,
-                              status: h.claim_status ?? "extracted",
-                              experience_title: h.experience_title,
-                            })
-                          }
-                        >
-                          {on ? (
-                            <>
-                              <Check size={14} /> 연결됨
-                            </>
-                          ) : (
-                            "연결"
-                          )}
-                        </Button>
-                      </div>
+                      <Button
+                        size="sm"
+                        className="max-sm:h-9"
+                        variant={on ? "ghost" : "secondary"}
+                        disabled={on}
+                        onClick={() =>
+                          onPick({
+                            id: h.id,
+                            statement: h.snippet,
+                            status: h.claim_status ?? "extracted",
+                            experience_title: h.experience_title,
+                          })
+                        }
+                      >
+                        {on ? (
+                          <>
+                            <Check size={14} /> 연결됨
+                          </>
+                        ) : (
+                          "연결"
+                        )}
+                      </Button>
                     </li>
                   );
                 })}
               </ul>
             ) : (
-              <EmptyState>찾은 주장이 없습니다.</EmptyState>
+              <p className="border-t border-line pt-3 text-sm text-muted">
+                찾은 주장이 없습니다. 다른 낱말로 찾아 보세요.
+              </p>
             )
           }
         </Loaded>

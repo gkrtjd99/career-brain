@@ -1,10 +1,10 @@
 import type { ExperienceSummary, SourceListItem } from "@career-brain/client";
-import { Badge, Button, EmptyState, Input, Label, Sheet } from "@career-brain/ui";
+import { Button, cn, Input, Label, Sheet, type BadgeTone } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Upload } from "lucide-react";
-import { useState } from "react";
-import { ErrorText, List, Loaded, PageHeader } from "../components/common";
+import { useState, type ReactNode } from "react";
+import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
@@ -24,12 +24,17 @@ export function BrainPage() {
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const pendingTotal = (q.data ?? []).reduce((n, e) => n + e.needs_review, 0);
+  const summary = [
+    q.data ? `경험 ${q.data.length}` : null,
+    pendingTotal ? `확인할 주장 ${pendingTotal}` : null,
+    "확인한 주장만 문서와 검색 근거로 씁니다.",
+  ].filter(Boolean);
 
   return (
     <div>
       <PageHeader
         title="브레인"
-        subtitle="확인·보강할 경험 목록. 확인한 주장만 문서와 검색 근거로 쓰입니다."
+        subtitle={summary.join(" · ")}
         actions={
           <>
             <InterviewBatchButton experiences={q.data ?? []} />
@@ -43,7 +48,7 @@ export function BrainPage() {
         }
       />
 
-      <div className="mb-3 flex items-center gap-2" role="radiogroup" aria-label="보기">
+      <div className="mb-3 flex items-center gap-1.5" role="radiogroup" aria-label="보기">
         {[
           { v: false, label: "전체" },
           { v: true, label: `확인 필요${pendingTotal ? ` ${pendingTotal}` : ""}` },
@@ -53,11 +58,11 @@ export function BrainPage() {
             role="radio"
             aria-checked={!!review === f.v}
             onClick={() => navigate({ to: "/brain", search: f.v ? { review: true } : {} })}
-            className={
-              !!review === f.v
-                ? "rounded-full bg-fg px-3 py-1 text-[13px] font-medium text-bg"
-                : "rounded-full border border-line bg-surface px-3 py-1 text-[13px] text-muted hover:text-fg"
-            }
+            className={cn(
+              "h-9 rounded-full px-3.5 text-[13px] tabular-nums transition-colors duration-150",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+              !!review === f.v ? "bg-fg font-medium text-bg" : "text-muted hover:bg-subtle hover:text-fg",
+            )}
           >
             {f.label}
           </button>
@@ -68,40 +73,47 @@ export function BrainPage() {
         {(items) => {
           const shown = review ? items.filter((e) => e.needs_review > 0) : items;
           if (!shown.length)
-            return (
-              <EmptyState>
-                {review
-                  ? "확인할 주장이 없습니다."
-                  : "아직 경험이 없습니다. 이력서·포트폴리오를 올리거나 직접 추가하세요."}
-              </EmptyState>
+            return review ? (
+              <Quiet>
+                확인할 주장이 없습니다.{" "}
+                <Link to="/brain" className="text-fg underline underline-offset-2">
+                  전체 보기
+                </Link>
+              </Quiet>
+            ) : (
+              <Quiet>
+                아직 경험이 없습니다. 이력서·포트폴리오를 올리거나 직접 추가하세요.{" "}
+                <button
+                  type="button"
+                  onClick={() => setUploading(true)}
+                  className="text-fg underline underline-offset-2"
+                >
+                  자료 올리기
+                </button>
+              </Quiet>
             );
           return (
-            <List>
+            <ul className="divide-y divide-line border-t border-line">
               {shown.map((e) => (
                 <li key={e.id}>
                   <Link
                     to="/brain/$experienceId"
                     params={{ experienceId: e.id }}
-                    className="flex items-center gap-3 px-3 py-3 hover:bg-subtle/60"
+                    className="-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{e.title}</div>
-                      <div className="truncate text-xs text-muted">
+                      <div className="truncate text-[13px] text-muted">
                         {[e.organization, e.role, e.period_text, ORIGIN_LABEL[e.origin] ?? e.origin]
                           .filter(Boolean)
                           .join(" · ")}
                       </div>
                     </div>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                      {e.needs_review ? <Badge tone="warn">확인 필요 {e.needs_review}</Badge> : null}
-                      {confirmedCount(e) ? <Badge tone="ok">확인됨 {confirmedCount(e)}</Badge> : null}
-                      {!e.needs_review && !confirmedCount(e) ? <Badge tone="none">주장 없음</Badge> : null}
-                    </div>
-                    <ChevronRight size={16} className="shrink-0 text-muted" />
+                    <ClaimState e={e} />
                   </Link>
                 </li>
               ))}
-            </List>
+            </ul>
           );
         }}
       </Loaded>
@@ -112,6 +124,22 @@ export function BrainPage() {
       <UploadSheet open={uploading} onClose={() => setUploading(false)} />
     </div>
   );
+}
+
+/** 오른쪽 상태: 확인할 것이 있으면 진하게, 나머지는 회색 한 줄. */
+function ClaimState({ e }: { e: ExperienceSummary }) {
+  const confirmed = confirmedCount(e);
+  return (
+    <div className="shrink-0 text-right text-[13px] leading-tight tabular-nums">
+      {e.needs_review ? <div className="font-semibold">확인 필요 {e.needs_review}</div> : null}
+      {confirmed ? <div className="text-muted">확인됨 {confirmed}</div> : null}
+      {!e.needs_review && !confirmed ? <div className="text-muted">주장 없음</div> : null}
+    </div>
+  );
+}
+
+function Quiet({ children }: { children: ReactNode }) {
+  return <p className="border-t border-line pt-3 text-sm text-muted">{children}</p>;
 }
 
 function CreateExperienceSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -190,43 +218,72 @@ function SourcesList() {
   const rows = q.data ?? [];
   if (!rows.length && !q.isError) return null;
   return (
-    <details className="mt-8">
-      <summary className="cursor-pointer text-[13px] font-medium text-muted">올린 자료 {rows.length}개</summary>
+    <details className="group mt-10">
+      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 text-[15px] font-semibold [&::-webkit-details-marker]:hidden">
+        <ChevronRight size={16} className="text-muted transition-transform duration-150 group-open:rotate-90" />
+        올린 자료 <span className="font-normal text-muted tabular-nums">{rows.length}</span>
+      </summary>
       <ErrorText error={q.error ?? extract.error} className="mt-2" />
-      <List className="mt-2">
+      <ul className="mt-2 divide-y divide-line border-t border-line">
         {rows.map((src: SourceListItem) => {
           const parse = src.parse_status ? PARSE_STATUS[src.parse_status] : null;
           const ext = src.extraction_status ? EXTRACTION_STATUS[src.extraction_status] : null;
           const canExtract =
-            src.parse_run_id && (src.parse_status === "complete" || src.parse_status === "partial") && !src.extraction_status;
+            src.parse_run_id &&
+            (src.parse_status === "complete" || src.parse_status === "partial") &&
+            !src.extraction_status;
           return (
-            <li key={src.id} className="flex flex-wrap items-center gap-2 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
+            <li key={src.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+              <div className="min-w-0 flex-1 basis-56">
                 <div className="truncate text-sm font-medium">{src.title}</div>
-                <div className="truncate text-xs text-muted">
-                  {[src.original_filename, size(src.size_bytes), src.pages_total ? `${src.pages_total}쪽` : null, formatDate(src.created_at)]
+                <div className="truncate text-[13px] text-muted tabular-nums">
+                  {[
+                    src.original_filename,
+                    size(src.size_bytes),
+                    src.pages_total ? `${src.pages_total}쪽` : null,
+                    formatDate(src.created_at),
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
-                  {src.parse_error ? ` · ${src.parse_error}` : ""}
                 </div>
+                {src.parse_error ? <div className="text-[13px] break-words text-danger">{src.parse_error}</div> : null}
               </div>
-              {parse ? <Badge tone={parse.tone}>{parse.label}</Badge> : null}
-              {ext ? (
-                <Badge tone={ext.tone}>
-                  {ext.label}
-                  {src.claims_created ? ` ${src.claims_created}` : ""}
-                </Badge>
-              ) : null}
-              {canExtract ? (
-                <Button size="sm" onClick={() => extract.mutate(src.parse_run_id!)} disabled={extract.isPending}>
-                  경험 추출 요청
-                </Button>
-              ) : null}
+              <div className="flex shrink-0 items-center gap-3 text-[13px] tabular-nums">
+                {parse ? <span className={TONE_TEXT[parse.tone]}>{parse.label}</span> : null}
+                {ext ? (
+                  <span className={TONE_TEXT[ext.tone]}>
+                    {ext.label}
+                    {src.claims_created ? ` ${src.claims_created}` : ""}
+                  </span>
+                ) : null}
+                {canExtract ? (
+                  <Button
+                    size="sm"
+                    className="max-sm:h-9"
+                    onClick={() => extract.mutate(src.parse_run_id!)}
+                    disabled={extract.isPending}
+                  >
+                    경험 추출 요청
+                  </Button>
+                ) : null}
+              </div>
             </li>
           );
         })}
-      </List>
-      <p className="mt-1 text-xs text-muted">경험 추출은 원문을 모델로 보내며 비용이 듭니다. 추출한 주장은 확인 전까지 근거로 쓰지 않습니다.</p>
+      </ul>
+      <p className="mt-3 text-[13px] text-muted">
+        경험 추출은 원문을 모델로 보내며 비용이 듭니다. 추출한 주장은 확인 전까지 근거로 쓰지 않습니다.
+      </p>
     </details>
   );
 }
+
+/** 배지 대신 글자로: 실패만 빨강, 확인이 필요한 상태는 진하게, 나머지는 회색. */
+const TONE_TEXT: Record<BadgeTone, string> = {
+  ok: "text-muted",
+  none: "text-muted",
+  neutral: "text-muted",
+  accent: "text-muted",
+  warn: "font-semibold",
+  danger: "font-medium text-danger",
+};

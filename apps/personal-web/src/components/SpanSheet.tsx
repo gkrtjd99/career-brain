@@ -22,9 +22,7 @@ export function SpanSheet({ spanId, onClose }: { spanId: string | null; onClose:
         {(span) => (
           <div className="space-y-3">
             <Highlight text={span.block_text} start={span.start_char} end={span.end_char} />
-            <p className="border-t border-line pt-3 text-xs text-muted">
-              파일: {span.original_filename}
-            </p>
+            <p className="border-t border-line pt-3 text-xs text-muted">파일: {span.original_filename}</p>
           </div>
         )}
       </Loaded>

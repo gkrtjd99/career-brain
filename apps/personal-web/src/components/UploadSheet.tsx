@@ -1,5 +1,5 @@
 import type { UploadOut } from "@career-brain/client";
-import { Badge, Button, Input, Label, Select, Sheet, Spinner } from "@career-brain/ui";
+import { Button, Input, Label, Select, Sheet, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -24,6 +24,23 @@ const UPLOAD_ERROR: Record<string, string> = {
   mime_mismatch: "파일 내용과 확장자가 맞지 않습니다.",
   empty: "빈 파일입니다.",
   too_large: "파일이 너무 큽니다.",
+};
+
+type StepState = "done" | "warn" | "failed" | "running";
+
+function stateOf(status: string): StepState {
+  if (status === "complete") return "done";
+  if (status === "partial") return "warn";
+  if (status === "failed") return "failed";
+  return "running";
+}
+
+/** 배지 대신 글자로: 실패만 빨강, 일부만 된 것은 진하게. */
+const STATE_TEXT: Record<StepState, string> = {
+  done: "font-medium",
+  warn: "font-semibold",
+  failed: "font-medium text-danger",
+  running: "text-muted",
 };
 
 /** 이력서·포트폴리오 올리기 → 읽기(파싱) → 경험 추출 요청. 진행 상태를 그대로 보여준다. */
@@ -118,7 +135,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
               className="h-auto py-1.5"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-            <p className="mt-1 text-xs text-muted">PDF, DOCX, PNG, JPEG, 텍스트, Markdown, HTML</p>
+            <p className="mt-1 text-[13px] text-muted">PDF, DOCX, PNG, JPEG, 텍스트, Markdown, HTML</p>
           </div>
           <div>
             <Label htmlFor="up-title">제목 (선택)</Label>
@@ -133,16 +150,16 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
             </Select>
           </div>
           {isDocx ? (
-            <label className="flex items-start gap-2 text-[13px]">
+            <label className="flex cursor-pointer items-start gap-2.5 py-1 text-[13px]">
               <input
                 type="checkbox"
-                className="mt-1"
+                className="mt-0.5 size-4 shrink-0 accent-fg"
                 checked={dropHidden}
                 onChange={(e) => setDropHidden(e.target.checked)}
               />
               <span>
                 숨김 서식 글은 빼고 읽기
-                <span className="block text-xs text-muted">
+                <span className="block text-muted">
                   Word에서 숨김으로 표시한 글을 경험 추출·검색에 넣지 않습니다. 숨김 글 검사는 그대로 경고합니다.
                 </span>
               </span>
@@ -154,7 +171,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
           </Button>
         </form>
       ) : (
-        <ol className="space-y-4 text-sm">
+        <ol className="space-y-6 text-sm">
           <li className="space-y-1">
             <div className="font-medium">1. 올리기</div>
             <div className="text-[13px] text-muted">
@@ -170,22 +187,10 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
             <div className="font-medium">2. 읽기</div>
             {parse ? (
               <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                <Badge
-                  tone={
-                    parse.status === "complete"
-                      ? "ok"
-                      : parse.status === "failed"
-                        ? "danger"
-                        : parse.status === "partial"
-                          ? "warn"
-                          : "accent"
-                  }
-                >
-                  {PARSE_LABEL[parse.status] ?? parse.status}
-                </Badge>
-                {parse.pages_total ? <span className="text-muted">{parse.pages_total}쪽</span> : null}
+                <span className={STATE_TEXT[stateOf(parse.status)]}>{PARSE_LABEL[parse.status] ?? parse.status}</span>
+                {parse.pages_total ? <span className="text-muted tabular-nums">{parse.pages_total}쪽</span> : null}
                 {parse.missing_pages.length ? (
-                  <span className="text-warn">못 읽은 쪽: {parse.missing_pages.join(", ")}</span>
+                  <span className="font-medium tabular-nums">못 읽은 쪽: {parse.missing_pages.join(", ")}</span>
                 ) : null}
                 {parse.error_code ? <span className="text-danger">{parse.error_code}</span> : null}
                 {!PARSE_DONE.has(parse.status) ? <Spinner /> : null}
@@ -201,14 +206,12 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
             {!extractionId ? (
               <>
                 <p className="text-[13px] text-muted">
-                  읽은 내용을 모델에 보내 경험·주장 후보를 뽑습니다. 모델 비용이 들고, 결과는 모두
-                  “확인 필요” 상태로 들어옵니다.
+                  읽은 내용을 모델에 보내 경험·주장 후보를 뽑습니다. 모델 비용이 들고, 결과는 모두 “확인 필요” 상태로
+                  들어옵니다.
                 </p>
                 <Button
                   variant="primary"
-                  disabled={
-                    !parse || !["complete", "partial"].includes(parse.status) || extract.isPending
-                  }
+                  disabled={!parse || !["complete", "partial"].includes(parse.status) || extract.isPending}
                   onClick={() => extract.mutate()}
                 >
                   추출 요청
@@ -218,28 +221,18 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
             ) : extraction.data ? (
               <div className="space-y-1 text-[13px]">
                 <div className="flex items-center gap-2">
-                  <Badge
-                    tone={
-                      extraction.data.status === "complete"
-                        ? "ok"
-                        : extraction.data.status === "failed"
-                          ? "danger"
-                          : extraction.data.status === "partial"
-                            ? "warn"
-                            : "accent"
-                    }
-                  >
+                  <span className={STATE_TEXT[stateOf(extraction.data.status)]}>
                     {{ pending: "추출 중", complete: "완료", partial: "일부만 보냄", failed: "실패" }[
                       extraction.data.status
                     ] ?? extraction.data.status}
-                  </Badge>
+                  </span>
                   {!extracted ? <Spinner /> : null}
                   {extraction.data.error_code ? (
                     <span className="text-danger">{extraction.data.error_code}</span>
                   ) : null}
                 </div>
                 {extracted ? (
-                  <p className="text-muted">
+                  <p className="text-muted tabular-nums">
                     경험 {extraction.data.experiences_created}개 · 주장 {extraction.data.claims_created}개
                     {extraction.data.claims_dropped
                       ? ` · 원문에서 근거를 못 찾아 버린 주장 ${extraction.data.claims_dropped}개`
@@ -257,7 +250,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
                       onClose();
                       reset();
                     }}
-                    className="inline-block pt-1 text-accent underline-offset-2 hover:underline"
+                    className="inline-flex min-h-9 items-center font-medium underline underline-offset-2"
                   >
                     확인하러 가기
                   </Link>
@@ -267,8 +260,8 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
               <Spinner />
             )}
           </li>
-          <li>
-            <Button variant="ghost" size="sm" onClick={reset}>
+          <li className="border-t border-line pt-3">
+            <Button variant="ghost" size="sm" className="-ml-2.5 max-sm:h-9" onClick={reset}>
               다른 파일 올리기
             </Button>
           </li>
