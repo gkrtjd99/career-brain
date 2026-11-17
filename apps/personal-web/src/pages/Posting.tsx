@@ -602,7 +602,7 @@ function EvidenceLine({
       return <span className="font-medium">수정함 · 근거: 직접 입력</span>;
     case "none":
       return missing && review ? (
-        <Badge tone="warn">확인 필요 · 원문에서 못 찾음</Badge>
+        <span className="font-medium">확인 필요 · 원문에서 못 찾음</span>
       ) : (
         <span className="text-muted">근거 없음 · 비어 있음</span>
       );
