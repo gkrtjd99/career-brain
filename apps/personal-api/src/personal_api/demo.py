@@ -285,8 +285,23 @@ async def _sources(
 
 
 async def _brain(db: Database, actor: ActorContext, span) -> dict[str, UUID]:
-    """경험 3개, 주장(확인됨 + 확인 대기), 인터뷰 답. 반환: 뒤에서 쓰는 주장 ID."""
+    """경험 4개(경력 하나 › 그 안의 프로젝트 둘, 개인 프로젝트), 주장(확인됨 + 확인 대기), 인터뷰 답.
+
+    반환: 뒤에서 쓰는 주장 ID.
+    """
     claims: dict[str, UUID] = {}
+    job = await brain_uc.create_experience(
+        db,
+        actor,
+        title="가상커머스 백엔드 개발",
+        organization="가상커머스 (가상 회사)",
+        role="백엔드 개발자",
+        period_text="2022.03 – 2024.08",
+        kind="work",
+        started_on="2022-03",
+        ended_on="2024-08",
+        tags=["Python", "FastAPI", "PostgreSQL", "Redis"],
+    )
     settle = await brain_uc.create_experience(
         db,
         actor,
@@ -294,6 +309,11 @@ async def _brain(db: Database, actor: ActorContext, span) -> dict[str, UUID]:
         organization="가상커머스 (가상 회사)",
         role="백엔드 개발자",
         period_text="2023.03 – 2024.08",
+        kind="project",
+        parent_id=job,
+        started_on="2023-03",
+        ended_on="2024-08",
+        tags=["PostgreSQL", "배치", "정산"],
     )
     search = await brain_uc.create_experience(
         db,
@@ -302,6 +322,11 @@ async def _brain(db: Database, actor: ActorContext, span) -> dict[str, UUID]:
         organization="가상커머스 (가상 회사)",
         role="백엔드 개발자",
         period_text="2022.06 – 2022.12",
+        kind="project",
+        parent_id=job,
+        started_on="2022-06",
+        ended_on="2022-12",
+        tags=["PostgreSQL", "pg_trgm", "검색"],
     )
     side = await brain_uc.create_experience(
         db,
@@ -310,6 +335,10 @@ async def _brain(db: Database, actor: ActorContext, span) -> dict[str, UUID]:
         organization="개인 프로젝트",
         role="1인 개발",
         period_text="2024.10 – 2025.01",
+        kind="project",
+        started_on="2024-10",
+        ended_on="2025-01",
+        tags=["FastAPI", "SQLite"],
     )
 
     async def claim(exp, key, statement, kind, contribution, source, quote) -> None:

@@ -73,7 +73,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | 도구 | 행동(ACTION_SCOPES) | 같은 HTTP 경로 |
 |---|---|---|
 | `search_brain` (`include_study`로 학습 기록 포함, 아래) | `search.read` | `GET /core/search` |
-| `list_experiences` · `get_experience` · `list_pending_claims` (쿼리 하나, 최대 200개·`truncated`) · `get_evidence` | `brain.read` | `GET /core/experiences…`, `/source-spans/{id}` |
+| `list_experiences`(c0030: 선택 거름 `kind`·`parent_id`·`top_level`·`tags`·`year`·`organization`·`status`·`query`·`sort`·`limit`(기본 200)/`offset`, 결과에 `total`과 종류·상위·달·태그) · `brain_overview` · `get_experience` · `list_pending_claims` (쿼리 하나, 최대 200개·`truncated`) · `get_evidence` | `brain.read` | `GET /core/experiences…`, `/core/brain/overview`, `/source-spans/{id}` |
 | `start_interview` | `brain.write` | `POST /core/interviews` |
 | `get_interview` (`session_id` 또는 경험의 최근 인터뷰) | `brain.read` | `GET /core/interviews…` |
 | `add_interview_answer` | `brain.write` | `POST /core/interview-questions/{id}/answers` |

@@ -395,6 +395,8 @@ async def test_every_workspace_table_is_exported_or_excluded(db):
         # c0012: 복사본 → 원본 문서(같은 표), 복사본 → 원본 revision(revision → 문서 순환)
         "fk_application_documents_source_document",
         "fk_application_documents_source_revision",
+        # c0030: 경험 → 부모 경험(같은 표)
+        "fk_experiences_parent",
     }
     assert plan.groups == ()
 
@@ -1726,6 +1728,20 @@ async def test_schema_steps_cover_every_migration(tmp_path):
             )
 
 
+async def _old_experience(old_db, ws, me, title, period_text=None):
+    """옛 head(c0030 전)의 칸만 쓰는 SQL로 경험을 넣는다 (지금 ORM 모델은 c0030 칸을 가진다)."""
+    exp = uuid4()
+    async with old_db.workspace_session(ws) as s:
+        await s.execute(
+            text(
+                "INSERT INTO core.experiences (id, workspace_id, title, period_text, status, "
+                "origin, created_by) VALUES (:i, :w, :t, :p, 'active', 'user', :a)"
+            ),
+            {"i": exp, "w": ws, "t": title, "p": period_text, "a": me},
+        )
+    return exp
+
+
 async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, monkeypatch):
     """c0020 head에서 만든 진짜 묶음(study_settings)이 지금 설치(workspace_settings)로 들어간다."""
     from career_core.testing import TEST_APP_LOGIN, TEST_APP_PASSWORD
@@ -1742,7 +1758,7 @@ async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, m
         try:
             ws, me = await create_workspace(old, name="옛 설치 (합성)", owner_display_name="olga")
             owner = owner_of(ws, me)
-            await brain.create_experience(old, owner, title="옛 head 경험 (합성)")
+            await _old_experience(old, ws, me, "옛 head 경험 (합성)", "2023.03 – 2024.08")
             async with old.workspace_session(ws) as s:
                 await s.execute(
                     text(
@@ -1770,8 +1786,10 @@ async def test_archive_from_an_older_migration_head_is_converted(db, tmp_path, m
             await s.execute(text("SELECT timezone, tech_aliases FROM core.workspace_settings"))
         ).one()
     assert (row.timezone, row.tech_aliases) == ("Europe/Paris", [])
-    titles = [e.title for e in await brain.list_experiences(db, copy)]
-    assert titles == ["옛 head 경험 (합성)"]
+    [exp] = await brain.list_experiences(db, copy)
+    assert exp.title == "옛 head 경험 (합성)"
+    # c0030 단계: 원문 기간이 분명하면 migration과 같이 날짜를 채운다
+    assert (exp.kind, exp.started_on, exp.ended_on, exp.tags) == ("other", "2023-03", "2024-08", [])
     # 같은 묶음을 그 공간에 합치면 모두 겹친다 (변환한 행이 DB 출력과 같은 모양)
     merged = await merge_workspace(db, blobs, copy, out, dry_run=True)
     assert merged.schema_converted_from == ["c0020"] and merged.rows_added == 0
@@ -1821,7 +1839,7 @@ async def test_archive_from_heads_before_c0018_is_converted(db, tmp_path, monkey
                 old, name=f"{old_head} 설치 (합성)", owner_display_name="o"
             )
             owner = owner_of(ws, me)
-            exp = await brain.create_experience(old, owner, title=f"{old_head} 경험 (합성)")
+            exp = await _old_experience(old, ws, me, f"{old_head} 경험 (합성)")
             p = {"w": ws, "a": me, "e": exp, **{k: str(v) for k, v in ids.items()}}
             async with old.workspace_session(ws) as s:
                 for sql in (

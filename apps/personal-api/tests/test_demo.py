@@ -83,7 +83,10 @@ async def test_demo_fills_every_area_without_model_or_network(db, tmp_path, no_e
         assert sorted(statuses) == ["complete"] * 3
         assert await _count(s, DocumentBlock) >= 10
         assert await _count(s, SourceSpan) == 8
-        assert await _count(s, Experience) == 3
+        assert await _count(s, Experience) == 4
+        # 경력 하나 아래 프로젝트 둘 (한 단계), 기간은 달 단위
+        assert await _count(s, Experience, Experience.parent_id.is_not(None)) == 2
+        assert await _count(s, Experience, Experience.started_on.is_(None)) == 0
         by_status = dict(
             (await s.execute(select(Claim.status, func.count()).group_by(Claim.status))).all()
         )

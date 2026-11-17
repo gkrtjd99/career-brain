@@ -3,8 +3,9 @@
 NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
 """
 
+import dataclasses
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -20,6 +21,9 @@ _RULE_STATUS = {
     "parse_not_finished": status.HTTP_409_CONFLICT,
     "claim_retired": status.HTTP_409_CONFLICT,
     "interview_closed": status.HTTP_409_CONFLICT,
+    # c0030: 상하는 한 단계뿐 (지금 상태와 부딪힘)
+    "parent_is_child": status.HTTP_409_CONFLICT,
+    "experience_has_children": status.HTTP_409_CONFLICT,
 }
 
 
@@ -34,11 +38,37 @@ def _not_found() -> HTTPException:
 # ---------------------------------------------------------------- schemas
 
 
+MONTH = r"^\d{4}-\d{2}$"
+Tags = Annotated[list[Annotated[str, Field(max_length=200)]], Field(max_length=100)]
+
+
 class ExperienceIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     organization: str | None = Field(default=None, max_length=300)
     role: str | None = Field(default=None, max_length=300)
     period_text: str | None = Field(default=None, max_length=100)
+    # c0030 (O19). 달은 YYYY-MM. 태그는 정규화 뒤 30개·40자 이하 (넘으면 422 too_many_tags·tag_too_long)
+    kind: str = "other"
+    parent_id: UUID | None = None
+    started_on: str | None = Field(default=None, pattern=MONTH)
+    ended_on: str | None = Field(default=None, pattern=MONTH)
+    ongoing: bool = False
+    tags: Tags = Field(default_factory=list)
+
+
+class ExperiencePatch(BaseModel):
+    """준 칸만 고친다. null은 비우기 (제목은 비울 수 없다)."""
+
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    organization: str | None = Field(default=None, max_length=300)
+    role: str | None = Field(default=None, max_length=300)
+    period_text: str | None = Field(default=None, max_length=100)
+    kind: str | None = None
+    parent_id: UUID | None = None
+    started_on: str | None = Field(default=None, pattern=MONTH)
+    ended_on: str | None = Field(default=None, pattern=MONTH)
+    ongoing: bool | None = None
+    tags: Tags | None = None
 
 
 class ExperienceSummaryOut(BaseModel):
@@ -50,6 +80,50 @@ class ExperienceSummaryOut(BaseModel):
     origin: str
     claim_counts: dict[str, int]
     needs_review: int
+    kind: str
+    parent_id: UUID | None
+    parent_title: str | None
+    started_on: str | None
+    ended_on: str | None
+    ongoing: bool
+    tags: list[str]
+    children_count: int
+    updated_at: datetime | None
+
+
+class ChildExperienceOut(BaseModel):
+    id: UUID
+    title: str
+    kind: str
+    role: str | None
+    started_on: str | None
+    ended_on: str | None
+    ongoing: bool
+
+
+class RecentExperienceOut(BaseModel):
+    id: UUID
+    title: str
+    kind: str
+    organization: str | None
+    updated_at: datetime
+
+
+class TagCountOut(BaseModel):
+    tag: str
+    count: int
+
+
+class BrainOverviewOut(BaseModel):
+    experiences: int
+    kinds: dict[str, int]
+    needs_review: int
+    pending_claims: int
+    undated: int
+    year_min: int | None
+    year_max: int | None
+    recent: list[RecentExperienceOut]
+    tags: list[TagCountOut]
 
 
 class EvidenceOut(BaseModel):
@@ -84,6 +158,15 @@ class ExperienceOut(BaseModel):
     origin: str
     status: str
     claims: list[ClaimOut]
+    kind: str
+    parent_id: UUID | None
+    parent_title: str | None
+    started_on: str | None
+    ended_on: str | None
+    ongoing: bool
+    tags: list[str]
+    children: list[ChildExperienceOut]
+    updated_at: datetime | None
 
 
 class ClaimIn(BaseModel):
@@ -259,20 +342,51 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
     asker = Annotated[ActorContext, Depends(authorize("interview.ai"))]
 
     @router.get("/experiences", response_model=list[ExperienceSummaryOut])
-    async def list_experiences(actor: reader) -> list[ExperienceSummaryOut]:
+    async def list_experiences(
+        actor: reader,
+        response: Response,
+        kind: Annotated[list[str] | None, Query(max_length=10)] = None,
+        parent_id: UUID | None = None,
+        top_level: bool = False,
+        tag: Annotated[list[str] | None, Query(max_length=30)] = None,
+        year: Annotated[int | None, Query(ge=1900, le=2200)] = None,
+        org: Annotated[str | None, Query(max_length=300)] = None,
+        status: Annotated[Literal["needs_review", "confirmed", "no_claims"] | None, Query()] = None,
+        q: Annotated[str | None, Query(max_length=200)] = None,
+        sort: Literal["start", "updated", "title"] = "start",
+        limit: Annotated[int, Query(ge=1, le=brain.MAX_LIST_LIMIT)] = brain.MAX_LIST_LIMIT,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> list[ExperienceSummaryOut]:
+        """활성 경험. 거름·정렬·쪽. 거른 전체 수는 ``X-Total-Count`` 머리글."""
+        f = brain.ExperienceFilter(
+            kinds=tuple(kind or ()),
+            parent_id=parent_id,
+            top_level=top_level,
+            tags=tuple(tag or ()),
+            year=year,
+            organization=org,
+            review=status,
+            q=q,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            rows, total = await brain.page_experiences(db, actor, f)
+        except ClaimRuleError as exc:
+            raise _rule(exc) from exc
+        response.headers["X-Total-Count"] = str(total)
         return [
-            ExperienceSummaryOut(
-                id=e.id,
-                title=e.title,
-                organization=e.organization,
-                role=e.role,
-                period_text=e.period_text,
-                origin=e.origin,
-                claim_counts=e.claim_counts,
-                needs_review=e.needs_review,
+            ExperienceSummaryOut.model_validate(
+                {**dataclasses.asdict(e), "needs_review": e.needs_review}
             )
-            for e in await brain.list_experiences(db, actor)
+            for e in rows
         ]
+
+    @router.get("/brain/overview", response_model=BrainOverviewOut)
+    async def brain_overview(actor: reader) -> BrainOverviewOut:
+        view = await brain.brain_overview(db, actor)
+        return BrainOverviewOut.model_validate(view, from_attributes=True)
 
     @router.post("/experiences", response_model=StatusOut, status_code=201)
     async def create_experience(actor: writer, body: ExperienceIn) -> StatusOut:
@@ -281,6 +395,22 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
         except ClaimRuleError as exc:
             raise _rule(exc) from exc
         return StatusOut(id=exp_id, status="active")
+
+    @router.patch("/experiences/{experience_id}", response_model=ExperienceOut)
+    async def update_experience(
+        actor: writer, experience_id: UUID, body: ExperiencePatch
+    ) -> ExperienceOut:
+        fields = body.model_dump(exclude_unset=True)
+        if fields.get("kind", "") is None or fields.get("ongoing", False) is None:
+            raise HTTPException(status_code=422, detail="null_not_allowed")
+        try:
+            await brain.update_experience(db, actor, experience_id, **fields)
+            view = await brain.get_experience(db, actor, experience_id)
+        except brain.NotFound as exc:
+            raise _not_found() from exc
+        except ClaimRuleError as exc:
+            raise _rule(exc) from exc
+        return ExperienceOut.model_validate(view, from_attributes=True)
 
     @router.get("/experiences/{experience_id}", response_model=ExperienceOut)
     async def get_experience(actor: reader, experience_id: UUID) -> ExperienceOut:

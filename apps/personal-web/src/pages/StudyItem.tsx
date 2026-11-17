@@ -339,7 +339,7 @@ function SessionForm({ itemId }: { itemId: string }) {
 
 function CandidateForm({ item }: { item: StudyItem }) {
   const invalidate = useStudyInvalidate();
-  const experiences = useQuery({ queryKey: ["experiences"], queryFn: api.experiences });
+  const experiences = useQuery({ queryKey: ["experiences"], queryFn: () => api.experiences() });
   const [form, setForm] = useState({ experience: "", statement: "", kind: "skill" as ClaimKind, attempt: "" });
   const ready = item.status === "done" || item.attempts.length > 0;
   const save = useMutation({

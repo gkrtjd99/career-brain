@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -205,6 +206,13 @@ class Experience(Base):
     role: Mapped[str | None] = mapped_column(Text, default=None)
     # 원문에 적힌 기간을 그대로 둔다. 날짜로 추측해 바꾸지 않는다.
     period_text: Mapped[str | None] = mapped_column(Text, default=None)
+    # c0030 (O19): 종류·상하(한 단계)·월 단위 기간(그 달 1일)·태그. 모호한 기간은 비운다.
+    kind: Mapped[str] = mapped_column(Text, default="other")
+    parent_id: Mapped[UUID | None] = mapped_column(default=None)
+    started_on: Mapped[date | None] = mapped_column(Date, default=None)
+    ended_on: Mapped[date | None] = mapped_column(Date, default=None)
+    ongoing: Mapped[bool] = mapped_column(default=False)
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     status: Mapped[str] = mapped_column(Text, default="active")
     origin: Mapped[str] = mapped_column(Text)
     extraction_run_id: Mapped[UUID | None] = mapped_column(default=None)

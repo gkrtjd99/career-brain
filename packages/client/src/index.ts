@@ -35,7 +35,23 @@ export class ApiError extends Error {
   }
 }
 
-type Query = Record<string, string | number | undefined | null>;
+type Query = Record<string, string | number | boolean | string[] | undefined | null>;
+
+function experienceQuery(q: T.ExperienceQuery): Query {
+  return {
+    kind: q.kind,
+    parent_id: q.parentId,
+    top_level: q.topLevel,
+    tag: q.tags,
+    year: q.year,
+    org: q.org,
+    status: q.status,
+    q: q.q,
+    sort: q.sort,
+    limit: q.limit,
+    offset: q.offset,
+  };
+}
 
 export function createClient({
   baseUrl,
@@ -60,7 +76,9 @@ export function createClient({
     if (opts.query) {
       const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(opts.query)) {
-        if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+        // 배열은 같은 이름을 여러 번 (예: tag=a&tag=b)
+        if (Array.isArray(v)) v.filter((x) => x !== "").forEach((x) => qs.append(k, x));
+        else if (v !== undefined && v !== null && v !== "" && v !== false) qs.set(k, String(v));
       }
       const s = qs.toString();
       if (s) url += `?${s}`;
@@ -130,10 +148,21 @@ export function createClient({
     extraction: (runId: string) => get<T.ExtractionRun>(`/core/extraction-runs/${id(runId)}`),
 
     // 경험·주장
-    experiences: () => get<T.ExperienceSummary[]>("/core/experiences"),
+    experiences: (query: T.ExperienceQuery = {}) =>
+      get<T.ExperienceSummary[]>("/core/experiences", experienceQuery(query)),
+    /** 거른 쪽과 전체 수 (X-Total-Count) */
+    experiencePage: async (query: T.ExperienceQuery = {}, signal?: AbortSignal) => {
+      const res = await request("GET", "/core/experiences", { query: experienceQuery(query), signal });
+      const items = (await res.json()) as T.ExperienceSummary[];
+      const total = Number(res.headers.get("X-Total-Count") ?? items.length);
+      return { items, total } satisfies T.ExperiencePage;
+    },
+    brainOverview: () => get<T.BrainOverview>("/core/brain/overview"),
     experience: (experienceId: string) =>
       get<T.Experience>(`/core/experiences/${id(experienceId)}`),
     createExperience: (body: T.ExperienceIn) => post<T.StatusOut>("/core/experiences", body),
+    updateExperience: (experienceId: string, body: T.ExperiencePatch) =>
+      patch<T.Experience>(`/core/experiences/${id(experienceId)}`, body),
     addClaim: (experienceId: string, body: T.ClaimIn) =>
       post<T.StatusOut>(`/core/experiences/${id(experienceId)}/claims`, body),
     /** 주장 여러 개의 짧은 보기 (문서 근거 표시용). 없는 ID는 빠진다. */

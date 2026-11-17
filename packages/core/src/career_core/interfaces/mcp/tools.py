@@ -14,7 +14,7 @@ import dataclasses
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -100,7 +100,7 @@ def jsonable(value: Any) -> Any:
 def _default(value: Any) -> Any:
     if isinstance(value, UUID | Decimal):
         return str(value)
-    if isinstance(value, datetime):
+    if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, frozenset | set | tuple):
         return list(value)
@@ -143,9 +143,47 @@ class NoArgs(Args):
     pass
 
 
-async def _list_experiences(env: ToolEnv, a: NoArgs) -> Any:
-    rows = await brain_uc.list_experiences(env.db, env.actor)
-    return {"experiences": [{**jsonable(e), "needs_review": e.needs_review} for e in rows]}
+class ListExperiencesArgs(Args):
+    # c0030 (O19): 거름은 모두 선택. HTTP ``GET /core/experiences``와 같은 뜻.
+    kind: list[Literal["work", "project", "education", "activity", "other"]] | None = None
+    parent_id: UUID | None = None
+    top_level: bool = False
+    tags: list[str] | None = Field(default=None, max_length=30)
+    year: int | None = Field(default=None, ge=1900, le=2200)
+    organization: str | None = Field(default=None, max_length=300)
+    status: Literal["needs_review", "confirmed", "no_claims"] | None = None
+    query: str | None = Field(default=None, max_length=200)
+    sort: Literal["start", "updated", "title"] = "start"
+    limit: int = Field(default=200, ge=1, le=brain_uc.MAX_LIST_LIMIT)
+    offset: int = Field(default=0, ge=0)
+
+
+async def _list_experiences(env: ToolEnv, a: ListExperiencesArgs) -> Any:
+    rows, total = await brain_uc.page_experiences(
+        env.db,
+        env.actor,
+        brain_uc.ExperienceFilter(
+            kinds=tuple(a.kind or ()),
+            parent_id=a.parent_id,
+            top_level=a.top_level,
+            tags=tuple(a.tags or ()),
+            year=a.year,
+            organization=a.organization,
+            review=a.status,
+            q=a.query,
+            sort=a.sort,
+            limit=a.limit,
+            offset=a.offset,
+        ),
+    )
+    return {
+        "experiences": [{**jsonable(e), "needs_review": e.needs_review} for e in rows],
+        "total": total,
+    }
+
+
+async def _brain_overview(env: ToolEnv, a: NoArgs) -> Any:
+    return await brain_uc.brain_overview(env.db, env.actor)
 
 
 class ExperienceArgs(Args):
@@ -413,10 +451,22 @@ TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         "list_experiences",
-        "List experiences with claim counts by status.",
+        "List experiences with claim counts by status, kind (work, project, education, "
+        "activity, other), parent (one level: projects under a work experience), months "
+        "(YYYY-MM, null when the source period was ambiguous; period_text is the original) "
+        "and tags. Optional filters: kind, parent_id, top_level, tags (any), year (overlaps), "
+        "organization, status (needs_review|confirmed|no_claims), query, sort, limit/offset.",
+        "brain.read",
+        ListExperiencesArgs,
+        _list_experiences,
+    ),
+    Tool(
+        "brain_overview",
+        "Counts for the brain index: experiences per kind, experiences/claims needing review, "
+        "5 most recently updated, top tags with counts, year range.",
         "brain.read",
         NoArgs,
-        _list_experiences,
+        _brain_overview,
     ),
     Tool(
         "get_experience",

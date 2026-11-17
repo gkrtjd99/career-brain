@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -44,6 +45,7 @@ from career_core.domain.brain import (
     EvidenceKind,
     ExtractionStatus,
 )
+from career_core.domain.experiences import ExperienceKind, normalize_tags, parse_period
 from career_core.domain.sources import ParseStatus
 from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
@@ -71,10 +73,15 @@ Rules:
   "team" if it is a team/organization result, otherwise "unknown".
 - kind: one of responsibility, action, result, decision, difficulty, skill, other.
 - period: copy the period as written (e.g. "2021.03 - 2023.02") or null. Never guess.
+- experience kind: one of work (a job), project, education (school, course, bootcamp),
+  activity (club, volunteering, competition), other. Use other when unclear.
+- tags: up to 10 technologies or topics, each copied as written in the text
+  (e.g. "PostgreSQL"). Empty list when none are named.
 - If nothing qualifies, return {"experiences": []}.
 
 Return JSON only, no prose:
 {"experiences": [{"title": str, "organization": str|null, "role": str|null, "period": str|null,
+  "kind": str, "tags": [str],
   "claims": [{"kind": str, "statement": str, "contribution": str,
               "quotes": [{"block": int, "text": str}]}]}]}
 """
@@ -97,6 +104,8 @@ class _Experience(BaseModel):
     organization: str | None = None
     role: str | None = None
     period: str | None = None
+    kind: str = "other"
+    tags: list[str] = Field(default_factory=list)
     claims: list[_Claim] = Field(default_factory=list)
 
 
@@ -143,6 +152,51 @@ def _norm(value: str, allowed: type, default: str) -> str:
 def _clean(value: str | None, limit: int = 300) -> str | None:
     value = (value or "").strip()
     return value[:limit] or None
+
+
+MAX_EXTRACTED_TAGS = 10
+
+
+def _in_text(blocks: list[DocumentBlock], value: str, *, ignore_case: bool = False) -> bool:
+    for b in blocks:
+        text = b.text.casefold() if ignore_case else b.text
+        if find_quote(text, value.casefold() if ignore_case else value):
+            return True
+    return False
+
+
+@dataclass(frozen=True, slots=True)
+class StructureCandidate:
+    """경험 구조 후보 (c0030). 날짜는 원문에 그대로 있는 기간 글에서만 읽는다."""
+
+    kind: str
+    started_on: date | None
+    ended_on: date | None
+    ongoing: bool
+    tags: list[str]
+
+
+def structure_candidate(item: _Experience, blocks: list[DocumentBlock]) -> StructureCandidate:
+    """모델이 낸 종류·기간·태그를 원문으로 거른다.
+
+    - 기간: 모델이 옮긴 ``period`` 글이 보낸 블록에 그대로 있고(공백 차이만 허용) 시작·끝 달이 분명할 때만
+      날짜를 채운다 (``parse_period``). 모델이 날짜를 만들어 넣을 길은 없다.
+    - 태그: 보낸 블록에 (대소문자 무시) 그대로 나오는 낱말만, 10개까지.
+    - 종류: 정해진 값이 아니면 ``other``.
+    """
+    period = None
+    if item.period and _in_text(blocks, item.period.strip()):
+        period = parse_period(item.period)
+    tags = [
+        t for t in normalize_tags(item.tags, strict=False) if _in_text(blocks, t, ignore_case=True)
+    ][:MAX_EXTRACTED_TAGS]
+    return StructureCandidate(
+        kind=_norm(item.kind, ExperienceKind, ExperienceKind.OTHER.value),
+        started_on=period.started_on if period else None,
+        ended_on=period.ended_on if period else None,
+        ongoing=bool(period and period.ongoing),
+        tags=tags,
+    )
 
 
 async def request_extraction(db: Database, actor: ActorContext, parse_run_id: UUID) -> UUID:
@@ -257,7 +311,8 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
             model_call_id=UUID(result.call_id),
         )
 
-    by_ordinal = {b.ordinal: b for b in blocks[:sent]}
+    sent_blocks = list(blocks[:sent])
+    by_ordinal = {b.ordinal: b for b in sent_blocks}
     async with db.workspace_session(ws) as s:
         await guard_lease(s, run_id)  # 작업 행을 먼저 잠근다 (lease를 잃었으면 LeaseLost로 되돌림)
         ext = await s.get(ExtractionRun, run_id, with_for_update=True)
@@ -279,6 +334,7 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
                     dropped += 1
             if not verified:
                 continue  # 근거 있는 주장이 하나도 없으면 경험 자체를 만들지 않는다
+            structure = structure_candidate(item, sent_blocks)
             exp = Experience(
                 id=uuid4(),
                 workspace_id=ws,
@@ -286,6 +342,11 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
                 organization=_clean(item.organization),
                 role=_clean(item.role),
                 period_text=_clean(item.period, 100),
+                kind=structure.kind,
+                started_on=structure.started_on,
+                ended_on=structure.ended_on,
+                ongoing=structure.ongoing,
+                tags=structure.tags,
                 origin=ClaimOrigin.AI_EXTRACTION.value,
                 extraction_run_id=run_id,
                 created_by=requested_by,

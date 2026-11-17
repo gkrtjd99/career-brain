@@ -194,6 +194,18 @@ export function noteLabel(note: string): string {
 
 /** 서버 오류 코드 → 사람이 읽는 문장 */
 export const ERROR_TEXT: Record<string, string> = {
+  // 경험 구조 (c0030)
+  invalid_experience_kind: "알 수 없는 경험 종류입니다.",
+  invalid_month: "달은 YYYY-MM 형식이어야 합니다.",
+  end_before_start: "끝 달이 시작 달보다 앞섭니다.",
+  end_without_start: "끝 달을 적으려면 시작 달도 적어 주세요.",
+  ongoing_with_end: "진행 중이면 끝 달을 비워 주세요.",
+  tag_too_long: "태그는 하나에 40자까지입니다.",
+  too_many_tags: "태그는 30개까지입니다.",
+  parent_not_found: "상위 경험을 찾을 수 없습니다.",
+  parent_self: "자기 자신을 상위 경험으로 고를 수 없습니다.",
+  parent_is_child: "다른 경험 아래에 있는 경험은 상위 경험이 될 수 없습니다 (한 단계만).",
+  experience_has_children: "안에 경험이 있는 경험은 다른 경험 아래로 옮길 수 없습니다 (한 단계만).",
   contribution_required: "본인 기여인지 팀 성과인지 먼저 골라 주세요.",
   confirm_requires_approve: "확정 권한(approve)이 없는 토큰입니다.",
   claim_retired: "보관된 주장은 바꿀 수 없습니다.",

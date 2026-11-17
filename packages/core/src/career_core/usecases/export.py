@@ -1359,6 +1359,31 @@ def _c0029_parse_hidden_text(arc) -> None:
         arc.rewrite("core.parse_runs", lambda row: {**row, "hidden_text": "keep"})
 
 
+@schema_step(
+    "c0030_experience_structure",
+    "experiences에 kind('other')·parent_id(null)·started_on/ended_on·ongoing·tags([]). "
+    "날짜는 migration과 같이 원문 기간이 분명할 때만 채운다 (모호하면 null)",
+)
+def _c0030_experience_structure(arc) -> None:
+    if not arc.has("core.experiences"):
+        return
+    from career_core.domain.experiences import parse_period
+
+    def change(row: dict) -> dict:
+        period = parse_period(row.get("period_text"))
+        return {
+            **row,
+            "kind": "other",
+            "parent_id": None,
+            "started_on": period.started_on.isoformat() if period else None,
+            "ended_on": period.ended_on.isoformat() if period and period.ended_on else None,
+            "ongoing": bool(period and period.ongoing),
+            "tags": [],
+        }
+
+    arc.rewrite("core.experiences", change)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2228,7 +2253,20 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
     # 경험: 확인 상태만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행 — 다른 경험을 합쳐 잃지 않게).
     # 제목·조직·역할·기간만 다른 행은 비슷한 행으로 보여 주고 고르게 한다
     "core.experiences": (
-        SameExcept(("status", "updated_at"), ("title", "organization", "role", "period_text")),
+        SameExcept(
+            # c0030: 종류·상하·날짜·태그는 정리하며 바뀐다 (정체 칸이 아니다)
+            (
+                "status",
+                "updated_at",
+                "kind",
+                "parent_id",
+                "started_on",
+                "ended_on",
+                "ongoing",
+                "tags",
+            ),
+            ("title", "organization", "role", "period_text"),
+        ),
     ),
     # 주장: 확인(상태·확인한 사람·시각). 문장·종류·기여는 정체 칸 (문장·기여를 고친 행은 비슷한 행)
     "core.claims": (
