@@ -2,6 +2,7 @@
 
 personal-api migrate     # core → personal 순서로 migration (소유자 계정)
 personal-api bootstrap   # 공간 + owner + API 토큰 생성 (앱 계정), 토큰은 한 번만 출력
+personal-api demo        # 합성 자료로 채운 새 데모 공간 + 그 공간의 토큰 (모델·네트워크 없음, --name)
 personal-api serve       # API + 내장 worker + 웹 정적 파일 (한 프로세스, 작은 서버용)
 personal-api worker      # 백그라운드 작업 처리 (serve --no-worker 와 함께 따로 띄울 때)
 personal-api models      # 엔드포인트·라우트·단가·키 설정 상태 (키 값은 출력하지 않음)
@@ -142,6 +143,44 @@ async def _bootstrap(settings: Settings, workspace_name: str, display_name: str)
         return await issue_token(db, workspace_id=ws, actor_id=actor, label="bootstrap")
     finally:
         await db.dispose()
+
+
+async def _demo(settings: Settings, name: str) -> int:
+    """새 데모 공간. 다시 실행하면 공간이 하나 더 생긴다 (기존 공간은 그대로)."""
+    from personal_api.demo import seed_demo
+
+    db = Database(settings.database_url)
+    try:
+        result = await seed_demo(
+            db,
+            LocalBlobStore(settings.blob_dir),
+            name=name,
+            max_upload_bytes=settings.max_upload_bytes,
+        )
+    finally:
+        await db.dispose()
+    c = result.counts
+    print(
+        f"demo workspace {result.workspace_id} ({result.workspace_name}) filled with synthetic data:"
+    )
+    print(
+        f"  sources {c['sources']} (parsed), experiences {c['experiences']}, "
+        f"claims {c['claims']} ({c['claims_pending']} waiting for confirmation), "
+        f"interview answers {c['interview_answers']}"
+    )
+    print(
+        f"  postings {c['postings']} ({c['postings_saved']} saved), "
+        f"applications {c['applications']}, shared documents {c['shared_documents']}"
+    )
+    print(
+        f"  study items {c['study_items']}, assessments {c['assessments']}, "
+        f"attempts {c['attempts']}, mistakes {c['mistakes']} (first review tomorrow)"
+    )
+    print("no model or network calls were made; other workspaces are unchanged")
+    print("API token for the demo workspace (shown once, store it safely):")
+    print(result.token)
+    print("paste it in the web settings (설정 → API 토큰) to open the demo workspace")
+    return 0
 
 
 async def _actor(db: Database) -> ActorContext:
@@ -705,6 +744,10 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("bootstrap", help="create a workspace, owner and API token (run once)")
     b.add_argument("--workspace-name", default="내 커리어")
     b.add_argument("--display-name", default="me")
+    dm = sub.add_parser(
+        "demo", help="create a NEW workspace with synthetic demo data and print its token"
+    )
+    dm.add_argument("--name", default="데모", help="workspace name (default: 데모)")
     sv = sub.add_parser("serve", help="run the API (+ in-process worker and web UI)")
     sv.add_argument("--host", default=None, help="bind address (CAREER_HOST, default 127.0.0.1)")
     sv.add_argument("--port", type=int, default=None, help="port (CAREER_PORT, default 8000)")
@@ -797,6 +840,8 @@ def main(argv: list[str] | None = None) -> None:
         token = asyncio.run(_bootstrap(settings, args.workspace_name, args.display_name))
         print("API token (shown once, store it safely):")
         print(token)
+    elif args.cmd == "demo":
+        sys.exit(asyncio.run(_demo(settings, args.name)))
     elif args.cmd == "serve":
         from personal_api.serve import serve
 
