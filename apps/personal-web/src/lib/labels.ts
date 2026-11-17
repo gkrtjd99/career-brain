@@ -13,6 +13,8 @@ import type {
   PostingField,
   PostingStatus,
   ReviewGrade,
+  SourceAttention,
+  SourcePurpose,
   StageKind,
   StageOutcome,
   StudyItemKind,
@@ -194,6 +196,12 @@ export function noteLabel(note: string): string {
 
 /** 서버 오류 코드 → 사람이 읽는 문장 */
 export const ERROR_TEXT: Record<string, string> = {
+  // 원본 용도 (c0032)
+  source_has_confirmed_claims:
+    "확인한 주장이 이 자료를 근거로 쓰고 있어 용도를 바꿀 수 없습니다. 그 주장을 먼저 보관하세요.",
+  source_not_experience: "내 경험 자료가 아니라서 경험 추출과 근거 연결을 하지 않습니다.",
+  proof_requires_restricted: "증빙 서류는 외부로 보내지 않는 제한 등급만 쓸 수 있습니다.",
+  purpose_changed: "용도를 바꿔 추출을 멈췄습니다.",
   // 경험 구조 (c0030)
   invalid_experience_kind: "알 수 없는 경험 종류입니다.",
   invalid_month: "달은 YYYY-MM 형식이어야 합니다.",
@@ -510,6 +518,45 @@ export const GRADE: Record<ReviewGrade, { label: string; hint: string }> = {
 };
 
 // ---------------------------------------------------------------- 원본·활동
+
+/** 원본 용도 (c0032). 올릴 때와 원본 화면에서 같은 말로 묻는다 */
+export const PURPOSE_OPTIONS: { value: SourcePurpose; label: string; text: string }[] = [
+  { value: "experience", label: "내 경험 자료", text: "경험과 성과를 뽑아 브레인에 넣습니다." },
+  {
+    value: "proof",
+    label: "증빙 서류",
+    text: "자격증·성적표·증명서 사본. 원본을 보관하고 외부 모델에 보내지 않습니다.",
+  },
+  {
+    value: "reference",
+    label: "참고 자료",
+    text: "회사 자료·다른 사람의 자기소개서·후기. 내 경험으로 쓰지 않습니다.",
+  },
+];
+
+export const PURPOSE_LABEL: Record<SourcePurpose, string> = {
+  experience: "내 경험 자료",
+  proof: "증빙 서류",
+  reference: "참고 자료",
+};
+
+/** 받은 자료함에 올라온 이유. warn은 진하게, danger는 빨강, 나머지는 회색 */
+export const ATTENTION_LABEL: Record<SourceAttention, { label: string; tone: BadgeTone }> = {
+  parse_failed: { label: "읽기 실패", tone: "danger" },
+  extraction_failed: { label: "추출 실패", tone: "danger" },
+  processing: { label: "읽는 중", tone: "neutral" },
+  extracting: { label: "추출 중", tone: "neutral" },
+  pending_claims: { label: "확인할 주장", tone: "warn" },
+  parse_partial: { label: "일부만 읽음", tone: "warn" },
+  extraction_partial: { label: "일부만 추출", tone: "warn" },
+  not_extracted: { label: "추출 전", tone: "warn" },
+};
+
+export const DATA_CLASS_LABEL: Record<string, string> = {
+  public: "공개",
+  private: "비공개",
+  restricted: "제한",
+};
 
 export const PARSE_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
   pending: { label: "읽는 중", tone: "accent" },

@@ -24,6 +24,8 @@ _RULE_STATUS = {
     # c0030: 상하는 한 단계뿐 (지금 상태와 부딪힘)
     "parent_is_child": status.HTTP_409_CONFLICT,
     "experience_has_children": status.HTTP_409_CONFLICT,
+    # c0032: 증빙·참고 원본은 근거가 되지 않고 경험 추출 대상도 아니다
+    "source_not_experience": status.HTTP_409_CONFLICT,
 }
 
 
@@ -215,6 +217,7 @@ class SpanOut(BaseModel):
     source_id: UUID
     source_title: str
     original_filename: str
+    source_purpose: str = "experience"
 
 
 class ExtractionOut(BaseModel):
@@ -491,6 +494,8 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
             new = await brain.attach_span(db, actor, claim_id, body.span_id)
         except brain.NotFound as exc:
             raise _not_found() from exc
+        except ClaimRuleError as exc:
+            raise _rule(exc) from exc
         return StatusOut(id=claim_id, status=new)
 
     @router.post("/source-spans", response_model=StatusOut, status_code=201)

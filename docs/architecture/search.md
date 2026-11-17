@@ -20,6 +20,8 @@
 - 한국어: 조사가 붙은 원문(`시간을`)에도 낱말(`시간`) 부분 일치로 걸린다. 기술명 별칭으로 검색어를 넓히고(아래), 선택 extra `korean`을 깔면 형태소 분석으로 검색어 낱말을 고른다(아래). DB 로캘이 한글을 글자로 분류해야 trigram이 동작한다 (`en_US.utf8`·`C.UTF-8` 확인, `C`는 불가).
 - HNSW 등 근사 색인은 두지 않았다. 개인 자료 규모에서는 정확 검색이 충분하고, 재현율 손실이 없다.
 
+- 원본 용도 (c0032): 원문 블록은 내 경험 자료(`purpose = experience`)만 기본으로 본다. 참고 자료(`reference`)는 `include_reference=true`(HTTP `GET /core/search`, MCP `search_brain`)일 때만 더하고 결과의 `record`가 `reference`, `purpose`가 `reference`다. 증빙(`proof`)의 블록은 색인하지 않고 검색 SQL에서도 빠진다 (`database.md` "원본 용도").
+
 ## 임베딩: API 또는 로컬
 
 `models.toml`의 `routes.embed` 하나로 고른다. 예시 설정(`models.example.toml`)의 기본은 `openai/text-embedding-3-large` + `[embedding] dimensions = 1024`다. 라우트가 없거나 그 엔드포인트의 키 환경변수가 비어 있으면 색인·검색어 임베딩을 부르지 않고(장부 기록도 없음) 키워드 검색만 한다. 검색 결과의 `semantic_note`는 각각 `no_embedding_route`, `embedding_api_key_missing`.

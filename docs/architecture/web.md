@@ -114,6 +114,8 @@ c0023에서 더한 것: `GET /core/runs/workflows/{workflow}/estimate?units=`(`r
 
 c0029: `POST /core/sources` 폼 `hidden_text`(`keep` 기본 · `exclude` = DOCX 숨김 서식 글을 원본 블록에서 뺌), 응답 `UploadOut.hidden_text`·원본 상세 `ParseOut.hidden_text`(실제 값). 자료 올리기 화면은 DOCX를 고르면 "숨김 서식 글은 빼고 읽기"를 보여 준다. 숨김 글 검사 코드 `hidden_text_covered`(PDF 글 뒤에 덮은 불투명 도형·이미지, 이름표 "덮어 가린 글").
 
+c0032 (원본 용도, `database.md` "원본 용도"): `POST /core/sources` 폼 `purpose`(`experience` 기본 · `proof` · `reference`, 응답 `UploadOut.purpose`·`data_class`), `POST /core/sources/suggest-purpose` `{filename, mime, text_head}` → `{suggested_purpose, matched}`(`sources.read`, 모델 없음), `PATCH /core/sources/{id}` `{purpose, data_class?}`(`sources.write`, 409 `source_has_confirmed_claims`, 422 `proof_requires_restricted`), `GET /core/sources?purpose=&attention=true`(받은 자료함: 처리 중·실패·일부만·확인할 후보·추출 전만, 행마다 `purpose`·`pending_claims`·`attention`), 원본 상세에 `purpose`·`created_at`·`extraction`·`pending_claims`·`confirmed_claims`, `GET /core/search?include_reference=true`(결과 `record = reference`). 화면: 자료 올리기는 파일·붙여넣기 둘 다 받고 용도를 세 가지로 묻는다(제안을 미리 고르고 "추천" 표시, 사람이 확정). 브레인 색인 위에 받은 자료함(손이 가야 하는 자료만), 아래에 "올린 자료 모두 보기"(`/brain/sources`, 용도 필터). 자료 화면(`/brain/sources/$sourceId`)에서 용도·등급을 보고 수정한다. 검색 화면에 "참고 자료 포함"과 결과의 "참고 자료 · 내 경험 아님".
+
 함께 바뀐 응답: 공고 목록에 `created_at`·`saved_at`, 지원 목록에 `questions`·`unwritten`, 검색의 원문 결과에 `block_id`·`parse_run_id`·`ordinal`·`match_start`·`match_end`.
 
 ## 웹에서 일괄 실행 시작 (c0023)

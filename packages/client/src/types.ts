@@ -30,9 +30,47 @@ export interface UploadOut {
   deduplicated: boolean;
   /** c0029: 숨김 서식 글을 블록에 넣는지·빼는지 (DOCX만 exclude). 같은 파일이면 처음 값 */
   hidden_text: HiddenTextMode;
+  /** c0032: 원본의 용도·등급. 같은 파일이면 처음 원본의 용도 (증빙이면 등급은 restricted) */
+  purpose: SourcePurpose;
+  data_class: string;
 }
 
 export type HiddenTextMode = "keep" | "exclude";
+
+/**
+ * 원본 용도 (c0032). experience = 내 경험 자료(경험·주장 추출), proof = 증빙 서류(추출 안 함,
+ * 늘 restricted, 검색·MCP에 안 나옴), reference = 참고 자료(추출 안 함, 기본 검색에서 빠짐).
+ */
+export type SourcePurpose = "experience" | "proof" | "reference";
+
+/** 받은 자료함에 올라온 이유 (앞의 것이 더 급하다). null = 다 처리됨 */
+export type SourceAttention =
+  | "parse_failed"
+  | "extraction_failed"
+  | "processing"
+  | "extracting"
+  | "pending_claims"
+  | "parse_partial"
+  | "extraction_partial"
+  | "not_extracted";
+
+export interface PurposeSuggestion {
+  suggested_purpose: SourcePurpose;
+  /** 걸린 낱말 또는 "image". 기본값이면 null */
+  matched: string | null;
+}
+
+export interface PurposeChange {
+  source_id: Uuid;
+  purpose: SourcePurpose;
+  data_class: string;
+  changed: boolean;
+  discarded_claims: number;
+  discarded_experiences: number;
+  cancelled_extractions: number;
+  /** → experience: 큐에 넣은 추출 (읽기 전이거나 권한이 없으면 null) */
+  extraction_run_id: Uuid | null;
+}
 
 export interface ParseOut {
   run_id: Uuid;
@@ -57,6 +95,13 @@ export interface Source {
   title: string;
   data_class: string;
   versions: SourceVersion[];
+  purpose: SourcePurpose;
+  created_at: IsoDateTime | null;
+  /** 최신 읽기 결과로 요청한 마지막 경험 추출 */
+  extraction: { id: Uuid; status: string; error_code: string | null; claims_created: number } | null;
+  /** 이 원본에서 뽑은 확인 전 후보 / 이 원본을 근거로 단 확인된 주장 */
+  pending_claims: number;
+  confirmed_claims: number;
 }
 
 export interface SourceListItem {
@@ -77,6 +122,9 @@ export interface SourceListItem {
   extraction_run_id: Uuid | null;
   extraction_status: string | null;
   claims_created: number | null;
+  purpose: SourcePurpose;
+  pending_claims: number;
+  attention: SourceAttention | null;
 }
 
 export interface Block {
@@ -353,7 +401,8 @@ export interface WikiPage {
 
 /** study_note·study_mistake: 학습 메모·오답 (학습 기록, 경험 아님). 기본 검색에는 없고 kinds로 요청한다 */
 export type SearchKind = "claim" | "block" | "answer" | "study_note" | "study_mistake";
-export type SearchRecord = "experience" | "source" | "study";
+/** reference = 참고 자료의 원문 (include_reference일 때만, 내 경험이 아님) */
+export type SearchRecord = "experience" | "source" | "study" | "reference";
 
 export interface SearchHit {
   kind: SearchKind;
@@ -379,6 +428,8 @@ export interface SearchHit {
   record?: SearchRecord;
   study_item_id?: Uuid | null;
   study_title?: string | null;
+  /** c0032: 원본 용도 (experience | reference) */
+  purpose?: SourcePurpose;
 }
 
 /** 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api) */
@@ -392,6 +443,8 @@ export interface SearchResult {
   query: string;
   mode: string;
   semantic_note: string | null;
+  /** 참고 자료의 원문까지 찾았는지 (c0032) */
+  include_reference?: boolean;
   hits: SearchHit[];
   expanded_terms?: ExpandedTerm[];
 }

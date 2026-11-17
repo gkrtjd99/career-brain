@@ -4,6 +4,9 @@ AI는 "원문에서 고르기"만 한다. 주장마다 원문을 그대로 복�
 코드가 그 인용이 실제 블록에 있는지 확인한다. 인용이 확인되지 않은 주장은 버린다.
 남은 주장도 `extracted`(후보)이며 사용자가 확인해야 사실이 된다.
 
+용도(c0032): 내 경험 자료(``purpose = experience``)만 추출한다. 증빙·참고 원본은 요청부터 거부하고
+(``source_not_experience``), 실행 직전에도 다시 보고 모델을 부르지 않는다.
+
 문서 내용은 데이터로만 다룬다. 문서 안의 지시문으로 다른 자료를 보내거나 확인 상태를 바꿀 수 없다
 (모델 출력은 후보 생성에만 쓰이고, 인용 검증을 통과해야 저장된다).
 
@@ -46,7 +49,7 @@ from career_core.domain.brain import (
     ExtractionStatus,
 )
 from career_core.domain.experiences import ExperienceKind, normalize_tags, parse_period
-from career_core.domain.sources import ParseStatus
+from career_core.domain.sources import ParseStatus, SourcePurpose
 from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ModelCallError, ModelDenied, ModelRequest
 from career_core.llm.gateway import ModelGateway
@@ -207,6 +210,14 @@ async def request_extraction(db: Database, actor: ActorContext, parse_run_id: UU
             raise NotFound("parse_run")
         if run.status not in (ParseStatus.COMPLETE, ParseStatus.PARTIAL):
             raise ClaimRuleError("parse_not_finished")
+        # c0032: 내 경험 자료만 추출한다. 증빙·참고 원본은 모델에 보내지 않는다.
+        purpose = await s.scalar(
+            select(Source.purpose)
+            .join(SourceVersion, SourceVersion.source_id == Source.id)
+            .where(SourceVersion.id == run.source_version_id)
+        )
+        if purpose != SourcePurpose.EXPERIENCE:
+            raise ClaimRuleError("source_not_experience")
         pending = await s.scalar(
             select(ExtractionRun.id).where(
                 ExtractionRun.parse_run_id == parse_run_id,
@@ -258,12 +269,14 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
         ext = await s.get(ExtractionRun, run_id)
         if ext is None or ext.status != ExtractionStatus.PENDING:
             return StepOutcome(done=True)
-        data_class = await s.scalar(
-            select(Source.data_class)
-            .join(SourceVersion, SourceVersion.source_id == Source.id)
-            .join(ParseRun, ParseRun.source_version_id == SourceVersion.id)
-            .where(ParseRun.id == ext.parse_run_id)
-        )
+        data_class, purpose = (
+            await s.execute(
+                select(Source.data_class, Source.purpose)
+                .join(SourceVersion, SourceVersion.source_id == Source.id)
+                .join(ParseRun, ParseRun.source_version_id == SourceVersion.id)
+                .where(ParseRun.id == ext.parse_run_id)
+            )
+        ).one()
         blocks = (
             (
                 await s.execute(
@@ -278,6 +291,9 @@ async def process_extraction(deps: ExtractionDeps, ws: UUID, run_id: UUID) -> St
         requested_by = ext.requested_by
         for b in blocks:
             s.expunge(b)
+    if purpose != SourcePurpose.EXPERIENCE:
+        # 요청한 뒤 용도가 바뀌었다 (용도를 바꿀 때 대기 중인 추출을 닫지만, 한 번 더 막는다)
+        return await _fail(db, ws, run_id, "source_not_experience")
     if not blocks:
         return await _fail(db, ws, run_id, "no_text")
 

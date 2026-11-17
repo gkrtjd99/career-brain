@@ -33,10 +33,12 @@ class HitOut(BaseModel):
     ordinal: int | None = None
     match_start: int | None = None
     match_end: int | None = None
-    # experience | source | study (학습 메모·오답은 학습 기록이지 경험이 아니다)
+    # experience | source | study | reference (학습 기록·참고 자료는 내 경험이 아니다)
     record: str = "experience"
     study_item_id: UUID | None = None
     study_title: str | None = None
+    # c0032: 원본 용도 (experience | reference). 증빙 원본의 글은 결과에 없다
+    purpose: str = "experience"
 
 
 class ExpandedTermOut(BaseModel):
@@ -50,6 +52,7 @@ class SearchOut(BaseModel):
     mode: str
     semantic_note: str | None
     hits: list[HitOut]
+    include_reference: bool = False
     # 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api)
     expanded_terms: list[ExpandedTermOut] = []
 
@@ -71,15 +74,28 @@ def add_search_routes(router: APIRouter, deps, authorize) -> None:
             Query(description="claim,block,answer (기본) + study_note,study_mistake (학습 기록)"),
         ] = None,
         limit: Annotated[int, Query(ge=1, le=50)] = 10,
+        include_reference: Annotated[
+            bool,
+            Query(
+                description="참고 자료(남의 글·회사 자료)의 원문도 찾기. 결과는 record=reference"
+            ),
+        ] = False,
     ) -> SearchOut:
         wanted = tuple(k.strip() for k in kinds.split(",")) if kinds else search_uc.KINDS
         result = await search_uc.search(
-            deps.db, actor, q, gateway=deps.models, kinds=wanted, limit=limit
+            deps.db,
+            actor,
+            q,
+            gateway=deps.models,
+            kinds=wanted,
+            limit=limit,
+            include_reference=include_reference,
         )
         return SearchOut(
             query=result.query,
             mode=result.mode,
             semantic_note=result.semantic_note,
+            include_reference=include_reference,
             hits=[HitOut.model_validate(h, from_attributes=True) for h in result.hits],
             expanded_terms=[
                 ExpandedTermOut.model_validate(e, from_attributes=True)

@@ -8,6 +8,8 @@
 - 키워드 쪽 검색어는 공간 별칭 사전(기본 표 + `workspace_settings.tech_aliases`)으로 넓힌다: `패스트API`로 찾으면
   `FastAPI`·`fast api`도 그 낱말의 일치로 센다 (점수의 분모는 질문 낱말 수 그대로, RRF 합치기는 같다).
   넓힌 표기는 결과의 `expanded_terms`에 남는다. 영문 표기는 낱말 경계, 한글 표기는 앞에 한글이 붙지 않을 때만.
+- 원본 용도(c0032): 기본은 내 경험 자료의 원문만 본다. 참고 원본(`reference`)은 `include_reference=True`일 때만
+  찾고 결과의 `record`가 `reference`다 (내 경험이 아니다). 증빙 원본(`proof`)의 글은 어떤 경우에도 결과에 없다.
 - 학습 메모(`study_note`)·오답(`study_mistake`)은 `kinds`로 요청하면 찾는다. 결과의 `record`는 `study`로,
   경험(`experience`)과 구분한다. 학습 기록은 경험의 근거가 아니다 (경험 제목·주장 상태를 붙이지 않는다).
 """
@@ -41,6 +43,9 @@ RECORDS = {
     "study_note": "study",
     "study_mistake": "study",
 }
+# 원본 용도 (domain.sources.SourcePurpose). 증빙(proof)은 검색 대상이 아니다.
+EXPERIENCE = "experience"
+REFERENCE = "reference"
 RRF_K = 60
 # 의미 검색 순위의 비중. 합성 30문항에서 0.5~1.0 사이 차이가 거의 없어 표준 RRF(1.0)를 쓴다.
 SEMANTIC_WEIGHT = 1.0
@@ -54,32 +59,33 @@ WITH items AS (
            c.experience_id, ex.title AS experience_title,
            NULL::uuid AS source_id, NULL::text AS source_title, NULL::int AS page,
            NULL::text AS question, NULL::uuid AS parse_run_id, NULL::int AS ordinal,
-           NULL::uuid AS study_item_id, NULL::text AS study_title
+           NULL::uuid AS study_item_id, NULL::text AS study_title,
+           'experience'::text AS purpose
     FROM core.claims c JOIN core.experiences ex ON ex.id = c.experience_id
     WHERE c.status <> 'retired'
     UNION ALL
     SELECT 'block', b.id, b.text, NULL, NULL, NULL, s.id, s.title, b.page, NULL,
-           b.parse_run_id, b.ordinal, NULL, NULL
+           b.parse_run_id, b.ordinal, NULL, NULL, s.purpose
     FROM core.document_blocks b
     JOIN core.parse_runs pr ON pr.id = b.parse_run_id
     JOIN core.source_versions sv ON sv.id = pr.source_version_id
     JOIN core.sources s ON s.id = sv.source_id
-    WHERE b.parse_run_id IN ({CURRENT_BLOCKS})
+    WHERE b.parse_run_id IN ({CURRENT_BLOCKS}) AND s.purpose <> 'proof'
     UNION ALL
     SELECT 'answer', a.id, a.answer, NULL, se.experience_id, ex.title, NULL, NULL, NULL, q.prompt,
-           NULL, NULL, NULL, NULL
+           NULL, NULL, NULL, NULL, 'experience'
     FROM core.interview_answers a
     JOIN core.interview_questions q ON q.id = a.question_id
     JOIN core.interview_sessions se ON se.id = q.session_id
     LEFT JOIN core.experiences ex ON ex.id = se.experience_id
     UNION ALL
     SELECT 'study_note', ss.id, ss.notes, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-           NULL, NULL, si.id, si.title
+           NULL, NULL, si.id, si.title, 'experience'
     FROM core.study_sessions ss JOIN core.study_items si ON si.id = ss.study_item_id
     WHERE ss.notes IS NOT NULL AND btrim(ss.notes) <> ''
     UNION ALL
     SELECT 'study_mistake', m.id, {STUDY_MISTAKE_BODY}, NULL, NULL, NULL, NULL, NULL, NULL,
-           m.question, NULL, NULL, m.study_item_id, COALESCE(si.title, sa.title)
+           m.question, NULL, NULL, m.study_item_id, COALESCE(si.title, sa.title), 'experience'
     FROM core.study_mistakes m
     LEFT JOIN core.study_items si ON si.id = m.study_item_id
     LEFT JOIN core.study_attempts at ON at.id = m.attempt_id
@@ -100,7 +106,7 @@ SELECT i.*,
                 WHERE CASE WHEN t.rx THEN i.body ~* t.p ELSE i.body ILIKE t.p END)::float
          / GREATEST(CAST(:ngroups AS int), 1) AS score
 FROM items i
-WHERE i.kind = ANY(:kinds)
+WHERE i.kind = ANY(:kinds) AND i.purpose = ANY(:purposes)
   AND (word_similarity(CAST(:q AS text), i.body) >= :min_sim
        OR i.body ILIKE ANY(CAST(:likes AS text[]))
        OR i.body ~* ANY(CAST(:regexes AS text[])))
@@ -117,7 +123,7 @@ FROM items i
 JOIN core.embeddings e
   ON e.target_kind = i.kind AND e.target_id = i.id AND e.space = :space
  AND e.content_hash = encode(sha256(convert_to(left(i.body, {MAX_TEXT_CHARS}), 'UTF8')), 'hex')
-WHERE i.kind = ANY(:kinds)
+WHERE i.kind = ANY(:kinds) AND i.purpose = ANY(:purposes)
 ORDER BY distance, i.kind, i.id
 LIMIT :k
 """
@@ -150,6 +156,8 @@ class SearchHit:
     # 학습 기록만: 그 기록의 학습 항목(없으면 None)과 항목·시험 제목
     study_item_id: UUID | None = None
     study_title: str | None = None
+    # c0032: 원본 용도. 참고 원본의 글이면 reference (record도 reference)
+    purpose: str = "experience"
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,7 +316,8 @@ def _hit(row, terms: list[str], patterns: tuple[re.Pattern[str], ...] = (), **ex
         ordinal=row.ordinal if block else None,
         match_start=match[0] if match else None,
         match_end=match[1] if match else None,
-        record=RECORDS[row.kind],
+        record="reference" if row.purpose == REFERENCE else RECORDS[row.kind],
+        purpose=row.purpose,
         study_item_id=row.study_item_id,
         study_title=row.study_title,
         **extra,
@@ -324,8 +333,11 @@ async def search(
     kinds: tuple[str, ...] = KINDS,
     limit: int = 10,
     expand_aliases: bool = True,
+    include_reference: bool = False,
 ) -> SearchResult:
-    """`expand_aliases=False`면 별칭으로 넓히지 않는다 (평가 비교용)."""
+    """`expand_aliases=False`면 별칭으로 넓히지 않는다 (평가 비교용).
+    `include_reference=True`면 참고 원본의 글도 찾는다 (결과의 `record = reference`)."""
+    purposes = [EXPERIENCE, REFERENCE] if include_reference else [EXPERIENCE]
     query = " ".join((query or "").split())[:MAX_QUERY_CHARS]
     kinds = tuple(k for k in kinds if k in ALL_KINDS) or KINDS
     limit = max(1, min(limit, 50))
@@ -352,6 +364,7 @@ async def search(
                     "ngroups": len(likes),
                     "regexes": [p for _, p in alias_res],
                     "kinds": list(kinds),
+                    "purposes": purposes,
                     "min_sim": MIN_WORD_SIMILARITY,
                     "k": pool,
                 },
@@ -387,6 +400,7 @@ async def search(
                             "qv": to_pgvector(emb.vectors[0]),
                             "space": emb.space,
                             "kinds": list(kinds),
+                            "purposes": purposes,
                             "k": pool,
                         },
                     )

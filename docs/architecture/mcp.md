@@ -95,7 +95,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 
 | 도구 | 행동(ACTION_SCOPES) | 같은 HTTP 경로 |
 |---|---|---|
-| `search_brain` (`include_study`로 학습 기록 포함, 아래) | `search.read` | `GET /core/search` |
+| `search_brain` (`include_study`로 학습 기록, `include_reference`로 참고 자료 포함, 아래) | `search.read` | `GET /core/search` |
 | `list_experiences`(c0030: 선택 거름 `kind`·`parent_id`·`top_level`·`tags`·`year`·`organization`·`status`·`query`·`sort`·`limit`(기본 200)/`offset`, 결과에 `total`과 종류·상위·달·태그) · `brain_overview` · `get_experience` · `list_pending_claims` (쿼리 하나, 최대 200개·`truncated`) · `get_evidence` | `brain.read` | `GET /core/experiences…`, `/core/brain/overview`, `/source-spans/{id}` |
 | `start_interview` | `brain.write` | `POST /core/interviews` |
 | `get_interview` (`session_id` 또는 경험의 최근 인터뷰) | `brain.read` | `GET /core/interviews…` |
@@ -111,6 +111,8 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `run_start` · `run_status` · `run_cancel` | `runs.start` · `runs.read` · `runs.control` | `/core/runs…` |
 
 `search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`).
+
+`include_reference: true`(c0032)를 주면 참고 자료(남의 자기소개서·면접 후기·회사 자료) 원본의 글도 찾고, 그 결과마다 `record: "reference"`, `note: "reference material written by others, not the user's experience"`를 붙인다 (응답에도 `include_reference: true`). 증빙 서류(`purpose = proof`)의 글은 어떤 인자로도 나오지 않고, 증빙 원본의 근거 위치를 `get_evidence`로 열면 `proof_not_shared` 오류다.
 
 권한 거부는 도구 결과 `{"error": "forbidden"}`(`isError: true`)로 돌아온다. HTTP의 403과 같은 판정이다 (`test_mcp.py::test_same_policy_via_mcp_as_http`).
 

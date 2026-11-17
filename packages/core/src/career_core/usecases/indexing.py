@@ -3,6 +3,8 @@
 - 색인 대상: 폐기되지 않은 주장, 각 원본의 최신 파싱 블록, 인터뷰 답, 학습 메모(`study_note`),
   오답(`study_mistake`). 학습 메모·오답은 사용자가 쓴 글이므로 private 등급이다 (경험이 아니라 학습 기록).
 - 본문 해시가 같은 벡터가 이미 있으면 다시 만들지 않는다. 본문이 바뀌면 새로 만든다.
+- 증빙 원본(``sources.purpose = 'proof'``, c0032)의 블록은 색인하지 않는다 (로컬 임베딩이어도). 검색에 나오지 않고,
+  외부 임베딩으로 갈 길도 없다. 참고 원본은 색인한다 (검색이 기본으로 빼고 ``include_reference``로 보인다).
 - 자료 등급은 대상마다 정한다. API 임베딩이 허용하지 않는 등급(restricted 등)은 보내지 않고 건너뛴다.
   로컬 임베딩은 기계 밖으로 나가지 않으므로 모든 등급을 색인한다.
 - 작업 하나는 공간(workspace) 단위다. 대기 중인 색인 작업이 있으면 새로 넣지 않는다.
@@ -83,7 +85,7 @@ WITH items AS (
     JOIN core.parse_runs pr ON pr.id = b.parse_run_id
     JOIN core.source_versions sv ON sv.id = pr.source_version_id
     JOIN core.sources s ON s.id = sv.source_id
-    WHERE b.parse_run_id IN ({CURRENT_BLOCKS})
+    WHERE b.parse_run_id IN ({CURRENT_BLOCKS}) AND s.purpose <> 'proof'
     UNION ALL
     SELECT 'answer', a.id, a.answer, 1 FROM core.interview_answers a
     UNION ALL

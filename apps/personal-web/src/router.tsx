@@ -1,4 +1,4 @@
-import type { ExperienceKind, SearchKind } from "@career-brain/client";
+import type { ExperienceKind, SearchKind, SourcePurpose } from "@career-brain/client";
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
@@ -10,6 +10,7 @@ import { NotFoundPage } from "./pages/NotFound";
 import { PostingPage } from "./pages/Posting";
 import { PostingsPage } from "./pages/Postings";
 import { SearchPage } from "./pages/Search";
+import { SourcePage, SourcesPage } from "./pages/Sources";
 import type { ManageSearch, ManageTab } from "./pages/Manage";
 import type { StudyTab } from "./pages/Study";
 import { TodayPage } from "./pages/Today";
@@ -78,6 +79,25 @@ const brainRoute = createRoute({
   component: BrainPage,
 });
 
+const PURPOSES: SourcePurpose[] = ["experience", "proof", "reference"];
+
+/** 올린 자료 전체 (받은 자료함의 "모든 자료"). purpose = 용도 필터 */
+export const sourcesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/sources",
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { purpose?: SourcePurpose } =>
+    PURPOSES.includes(s.purpose as SourcePurpose) ? { purpose: s.purpose as SourcePurpose } : {},
+  component: SourcesPage,
+});
+
+export const sourceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/sources/$sourceId",
+  beforeLoad: requireToken,
+  component: SourcePage,
+});
+
 export type ExperienceTab = "claims" | "wiki" | "interview";
 const TABS: ExperienceTab[] = ["claims", "wiki", "interview"];
 
@@ -95,8 +115,9 @@ export const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/search",
   beforeLoad: requireToken,
-  validateSearch: (s: Record<string, unknown>): { q?: string; kinds?: string } => {
+  validateSearch: (s: Record<string, unknown>): { q?: string; kinds?: string; ref?: true } => {
     const q = typeof s.q === "string" && s.q.trim() ? s.q : undefined;
+    const ref = s.ref === true || s.ref === "true" || s.ref === "1";
     const kinds =
       typeof s.kinds === "string"
         ? s.kinds
@@ -104,7 +125,7 @@ export const searchRoute = createRoute({
             .filter((k): k is SearchKind => KINDS.includes(k as SearchKind))
             .join(",") || undefined
         : undefined;
-    return { ...(q ? { q } : {}), ...(kinds ? { kinds } : {}) };
+    return { ...(q ? { q } : {}), ...(kinds ? { kinds } : {}), ...(ref ? { ref: true as const } : {}) };
   },
   component: SearchPage,
 });
@@ -258,6 +279,8 @@ const photoToolRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   todayRoute,
   brainRoute,
+  sourcesRoute,
+  sourceRoute,
   experienceRoute,
   searchRoute,
   postingsRoute,

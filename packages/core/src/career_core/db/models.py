@@ -71,6 +71,8 @@ class Source(Base):
     workspace_id: Mapped[UUID]
     title: Mapped[str] = mapped_column(Text)
     data_class: Mapped[str] = mapped_column(Text)
+    # c0032: experience(내 경험 자료) | proof(증빙) | reference(참고). domain.sources.SourcePurpose
+    purpose: Mapped[str] = mapped_column(Text, default="experience")
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

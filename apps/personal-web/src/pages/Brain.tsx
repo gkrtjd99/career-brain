@@ -1,6 +1,6 @@
-import type { BrainOverview, ExperienceKind, ExperienceSummary, SourceListItem } from "@career-brain/client";
-import { Button, cn, Input, Select, Sheet, type BadgeTone } from "@career-brain/ui";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { BrainOverview, ExperienceKind, ExperienceSummary } from "@career-brain/client";
+import { Button, cn, Input, Select, Sheet } from "@career-brain/ui";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Search as SearchIcon, Upload } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -9,7 +9,6 @@ import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/Experience
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
 import { api } from "../lib/api";
-import { formatDate } from "../lib/dates";
 import {
   confirmedCount,
   EXPERIENCE_KIND_LABEL,
@@ -19,8 +18,9 @@ import {
   periodLabel,
   type ExperienceNode,
 } from "../lib/experience";
-import { EXTRACTION_STATUS, ORIGIN_LABEL, PARSE_STATUS } from "../lib/labels";
+import { ORIGIN_LABEL } from "../lib/labels";
 import type { BrainSearch } from "../router";
+import { SourceInbox } from "./Sources";
 
 const route = getRouteApi("/brain");
 
@@ -93,6 +93,7 @@ export function BrainPage() {
       {o && o.needs_review > 0 && !filtersActive(search) ? (
         <ReviewBlock overview={o} onShowAll={() => setSearch({ review: true })} />
       ) : null}
+      {!filtersActive(search) ? <SourceInbox /> : null}
 
       <ErrorText error={overview.error} className="mb-3" />
       {o && o.experiences === 0 ? (
@@ -113,7 +114,12 @@ export function BrainPage() {
         </>
       ) : null}
 
-      <SourcesList />
+      <Link
+        to="/brain/sources"
+        className="mt-10 inline-flex min-h-9 items-center gap-0.5 text-[13px] text-muted hover:text-fg"
+      >
+        올린 자료 모두 보기 <ChevronRight size={14} />
+      </Link>
 
       <CreateExperienceSheet open={creating} onClose={() => setCreating(false)} />
       <UploadSheet open={uploading} onClose={() => setUploading(false)} />
@@ -620,96 +626,3 @@ function CreateExperienceSheet({ open, onClose }: { open: boolean; onClose: () =
     </Sheet>
   );
 }
-
-function size(n: number | null) {
-  if (n === null) return null;
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** 올린 원본과 읽기·추출 상태. 화면의 중심이 아니라 아래에 접어 둔다 (plan §13). */
-function SourcesList() {
-  const qc = useQueryClient();
-  const q = useQuery({
-    queryKey: ["sources"],
-    queryFn: () => api.sources(),
-    refetchInterval: (query) =>
-      query.state.data?.some((s) => s.parse_status === "pending" || s.extraction_status === "pending") ? 4000 : false,
-  });
-  const extract = useMutation({
-    mutationFn: (runId: string) => api.requestExtraction(runId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
-  });
-  const rows = q.data ?? [];
-  if (!rows.length && !q.isError) return null;
-  return (
-    <details className="group mt-10">
-      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 text-[15px] font-semibold [&::-webkit-details-marker]:hidden">
-        <ChevronRight size={16} className="text-muted transition-transform duration-150 group-open:rotate-90" />
-        올린 자료 <span className="font-normal text-muted tabular-nums">{rows.length}</span>
-      </summary>
-      <ErrorText error={q.error ?? extract.error} className="mt-2" />
-      <ul className="mt-2 divide-y divide-line border-t border-line">
-        {rows.map((src: SourceListItem) => {
-          const parse = src.parse_status ? PARSE_STATUS[src.parse_status] : null;
-          const ext = src.extraction_status ? EXTRACTION_STATUS[src.extraction_status] : null;
-          const canExtract =
-            src.parse_run_id &&
-            (src.parse_status === "complete" || src.parse_status === "partial") &&
-            !src.extraction_status;
-          return (
-            <li key={src.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-              <div className="min-w-0 flex-1 basis-56">
-                <div className="truncate text-sm font-medium">{src.title}</div>
-                <div className="truncate text-[13px] text-muted tabular-nums">
-                  {[
-                    src.original_filename,
-                    size(src.size_bytes),
-                    src.pages_total ? `${src.pages_total}쪽` : null,
-                    formatDate(src.created_at),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-                {src.parse_error ? <div className="text-[13px] break-words text-danger">{src.parse_error}</div> : null}
-              </div>
-              <div className="flex shrink-0 items-center gap-3 text-[13px] tabular-nums">
-                {parse ? <span className={TONE_TEXT[parse.tone]}>{parse.label}</span> : null}
-                {ext ? (
-                  <span className={TONE_TEXT[ext.tone]}>
-                    {ext.label}
-                    {src.claims_created ? ` ${src.claims_created}` : ""}
-                  </span>
-                ) : null}
-                {canExtract ? (
-                  <Button
-                    size="sm"
-                    className="max-sm:h-9"
-                    onClick={() => extract.mutate(src.parse_run_id!)}
-                    disabled={extract.isPending}
-                  >
-                    경험 추출 요청
-                  </Button>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-3 text-[13px] text-muted">
-        경험 추출은 원문을 모델로 보내며 비용이 듭니다. 추출한 주장은 확인 전까지 근거로 쓰지 않습니다.
-      </p>
-    </details>
-  );
-}
-
-/** 배지 대신 글자로: 실패만 빨강, 확인이 필요한 상태는 진하게, 나머지는 회색. */
-const TONE_TEXT: Record<BadgeTone, string> = {
-  ok: "text-muted",
-  none: "text-muted",
-  neutral: "text-muted",
-  accent: "text-muted",
-  warn: "font-semibold",
-  danger: "font-medium text-danger",
-};
