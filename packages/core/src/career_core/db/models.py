@@ -12,10 +12,12 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     Text,
     Uuid,
@@ -1098,3 +1100,81 @@ class JudgeCache(Base):
     # c0026: 요청에 들어간 주장·지원 문서. 그 행을 지우면 trigger `judge_cache_forget`이 이 응답도 지운다
     claim_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid), default=list)
     document_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid), default=list)
+
+
+# ---------------------------------------------------------------- c0030: 화면에서 만든 모델 연결 (O22)
+
+
+class ModelConnection(Base):
+    """화면에서 만든 모델 연결 하나. 키는 여기 두지 않는다 (``ModelConnectionSecret``)."""
+
+    __tablename__ = "model_connections"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    name: Mapped[str] = mapped_column(Text)
+    preset: Mapped[str] = mapped_column(Text)
+    base_url: Mapped[str | None] = mapped_column(Text, default=None)
+    billing: Mapped[str] = mapped_column(Text)
+    price_as: Mapped[str | None] = mapped_column(Text, default=None)
+    token_param: Mapped[str] = mapped_column(Text)
+    data_classes: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    api_key_last4: Mapped[str | None] = mapped_column(Text, default=None)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ModelConnectionSecret(Base):
+    """연결 키의 암호문 (Fernet). 내보내기에서 뺀다 (export.EXCLUDED_TABLES)."""
+
+    __tablename__ = "model_connection_secrets"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    connection_id: Mapped[UUID]
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    def __repr__(self) -> str:  # 암호문도 로그에 남기지 않는다
+        return f"ModelConnectionSecret(connection_id={self.connection_id})"
+
+
+class ModelRouteOverride(Base):
+    """용도(purpose)마다 파일 라우트를 덮는 값."""
+
+    __tablename__ = "model_route_overrides"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    purpose: Mapped[str] = mapped_column(Text)
+    endpoint: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class ModelSettings(Base):
+    """공간당 1행: 월 예산 덮기(NULL = 파일 값)와 바뀔 때마다 오르는 ``version``."""
+
+    __tablename__ = "model_settings"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    monthly_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), default=None)
+    version: Mapped[int] = mapped_column(BigInteger, default=0)
+    updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

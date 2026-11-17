@@ -34,6 +34,7 @@ from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
+from career_core.interfaces.http.models import add_model_routes
 from career_core.interfaces.http.postings import add_posting_routes
 from career_core.interfaces.http.search import add_search_routes
 from career_core.interfaces.http.settings import add_settings_routes
@@ -77,6 +78,10 @@ class CoreDeps:
     restore_dir: str | None = None
     # c0027: 웹 복원의 끊김 판정(초). 없으면 60. worker의 신호 간격은 RestoreDeps.heartbeat (기본 2)
     restore_stale_seconds: float | None = None
+    # O22 화면에서 모델 연결·라우트·예산 (usecases.model_connections.ModelConnections). 없으면
+    # /core/models/* 가 404 ``not_enabled`` (서비스는 운영자 설정을 쓴다). 게이트웨이(models)에도 같은 것을
+    # overlay로 주어야 화면 설정이 호출에 쓰인다.
+    model_connections: Any = None
 
 
 class WorkspaceOut(BaseModel):
@@ -207,6 +212,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
         ]
 
     add_usage_routes(router, deps, authorize)
+    add_model_routes(router, deps, authorize)  # O22 (켜지 않으면 404 not_enabled)
     add_brain_routes(router, deps, authorize)
     add_search_routes(router, deps, authorize)
     add_posting_routes(router, deps, authorize)

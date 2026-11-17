@@ -26,7 +26,7 @@ from career_core.db import Database, Embedding
 from career_core.domain.sources import DataClass
 from career_core.jobs.lease import guard_lease
 from career_core.llm import EMBED_PASSAGE, ModelCallError, ModelDenied
-from career_core.llm.gateway import ModelGateway
+from career_core.llm.gateway import ModelGateway, scoped_gateway
 from career_core.ports import ActorContext
 from career_core.usecases.index_queue import (
     INDEX_JOB,
@@ -111,7 +111,7 @@ class IndexDeps:
 
 
 async def process_index(deps: IndexDeps, ws: UUID, _target: UUID) -> StepOutcome:
-    gw = deps.gateway
+    gw = await scoped_gateway(deps.gateway, ws)  # 화면에서 덮은 임베딩 라우트 (O22)
     space = gw.embedding_space() if gw else None
     if gw is None or space is None:
         return StepOutcome(done=True)  # 임베딩을 쓰지 않는 설정: 키워드 검색만

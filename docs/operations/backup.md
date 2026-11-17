@@ -136,6 +136,8 @@ no_data_change("c0032", "색인·함수만")  # 내보내는 표의 모양이 �
 | 외부 로그인 연결 (`oauth_identities`) | **빠짐** | 설치·인가 서버마다 다시 연결한다 (`personal-api oauth-link`) |
 | API 토큰 (`personal.api_tokens`), 세션 | **빠짐** | 비밀. 복원하면 새 토큰을 발급한다 |
 | 모델 키 (`.env`, `app.env`), `models.toml` | **빠짐** | 설정 파일. DB에 없다 |
+| 웹에서 만든 모델 연결·라우트·예산 (`model_connections`, `model_route_overrides`, `model_settings`) | 들어감 | 키 끝 4자리까지. c0030 |
+| 웹에서 넣은 모델 키 암호문 (`model_connection_secrets`), 암호 키(`secret.key`) | **빠짐** | 비밀. 복원하면 연결은 남고 키는 "다시 넣어야 함"(`needs_reentry`) |
 | 서비스 계정·결제 (`platform`) | **빠짐** | career-service 소유 |
 
 묶음에는 개인 자료가 그대로 들어 있다. `--recipient`로 암호화하거나 서버 밖에 암호화해서 둔다. 해시는 무결성 검사(손상·부분 수정)이고 서명이 아니다.

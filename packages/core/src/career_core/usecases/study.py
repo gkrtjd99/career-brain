@@ -76,7 +76,7 @@ from career_core.domain.study import (
     split_process,
     zone,
 )
-from career_core.llm.gateway import ModelGateway
+from career_core.llm.gateway import ModelGateway, scoped_gateway
 from career_core.ports import ActorContext
 from career_core.usecases import judges
 from career_core.usecases import workspace_settings as ws_settings
@@ -1992,6 +1992,7 @@ async def _judge_lines(
 ) -> tuple[list[LineSuggestions], judges.JudgeRun]:
     """후보 주장에 판정 모델 의견을 붙인다. 아무것도 저장·연결하지 않는다."""
     if call_model is None:
+        gateway = await scoped_gateway(gateway, actor.workspace_id)  # 화면에서 덮은 라우트 (O22)
         if (why := judges.unavailable(gateway, actor, judges.JUDGE_CLAIM_PURPOSE)) is not None:
             return lines, why
         assert gateway is not None

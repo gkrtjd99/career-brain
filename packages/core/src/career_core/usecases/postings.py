@@ -72,7 +72,7 @@ from career_core.domain.postings import (
 )
 from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ImageInput, ModelCallError, ModelDenied, ModelRequest
-from career_core.llm.gateway import ModelGateway
+from career_core.llm.gateway import ModelGateway, scoped_gateway
 from career_core.ports import ACTOR_AGENT, ActorContext, BlobStore, ParseError
 from career_core.usecases.brain import NotFound
 from career_core.usecases.extraction import find_quote, parse_model_json
@@ -771,7 +771,7 @@ async def _process_scanned_pdf(
             version_id=same,
             http_status=result.status,
         )
-    gateway = deps.gateway
+    gateway = await scoped_gateway(deps.gateway, ws)  # 화면에서 덮은 라우트 (O22)
     if gateway is None or gateway.config.routes.get(VISION_PURPOSE) is None:
         return await _failed(
             db, ws, run_id, manual, result.status, "pdf_no_text", "vision_route_missing"
@@ -1371,7 +1371,7 @@ async def _process_image(
             http_status=result.status,
         )
     manual = FetchError.NEEDS_MANUAL_CHECK.value
-    gateway = deps.gateway
+    gateway = await scoped_gateway(deps.gateway, ws)  # 화면에서 덮은 라우트 (O22)
     if gateway is None or gateway.config.routes.get(VISION_PURPOSE) is None:
         return await _failed(db, ws, run_id, manual, result.status, "vision_route_missing")
     if len(data) > MAX_IMAGE_BYTES:

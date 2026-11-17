@@ -56,13 +56,17 @@ def add_usage_routes(router: APIRouter, deps, authorize) -> None:
         ] = "day",
     ) -> UsageOut:
         now = datetime.now(UTC)
+        budget = deps.monthly_budget_usd
+        gw = deps.models
+        if gw is not None and gw.overlay is not None:  # O22: 화면에서 덮은 예산
+            budget = (await gw.view(actor.workspace_id)).config.budget.monthly_usd
         summary = await usage_summary(
             deps.db,
             actor.workspace_id,
             since=now - timedelta(days=days),
             until=now,
             group_by=group_by,
-            monthly_budget_usd=deps.monthly_budget_usd,
+            monthly_budget_usd=budget,
             now=now,
         )
         return UsageOut(

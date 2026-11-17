@@ -67,7 +67,7 @@ from personal_api.identity import (
     revoke_token,
     update_token,
 )
-from personal_api.models import build_gateway, load_config, load_prices
+from personal_api.models import build_connections, build_gateway, load_config, load_prices
 from personal_api.runner import (
     maintenance_interval_seconds,
     run_worker,
@@ -193,30 +193,61 @@ async def _actor(db: Database) -> ActorContext:
     return actor
 
 
-def _models(settings: Settings) -> None:
-    config = load_config(settings)
-    prices = load_prices(config)
+async def _screen_models(settings: Settings, base) -> tuple[object, dict | None]:
+    """CAREER_API_TOKEN이 있으면 그 공간의 화면 설정(O22)을 합친 설정과 상태. 키 값은 다루지 않는다."""
+    token = os.environ.get(TOKEN_ENV)
+    if not token:
+        return base, None
+    db = Database(settings.database_url)
+    try:
+        actor = await PersonalTokenResolver(db).resolve(token)
+        if actor is None:
+            return base, None
+        conns = build_connections(settings, db)
+        status = await conns.status(actor, base, os.environ)
+        return await conns.effective(actor.workspace_id, base, os.environ), status
+    finally:
+        await db.dispose()
+
+
+async def _models(settings: Settings) -> None:
+    base = load_config(settings)
+    prices = load_prices(base)
+    config, status = await _screen_models(settings, base)
     if not config.endpoints:
         print(f"no endpoints configured ({settings.models_config}); all model calls are denied")
+        if status is None:
+            print(f"(set {TOKEN_ENV} to include connections made in the web UI)")
         return
+    ui = {c["name"]: c for c in (status or {}).get("connections", []) if c["source"] == "ui"}
     print("endpoints:")
     for ep in config.endpoints.values():
-        key = (
-            "-"
-            if not ep.api_key_env
-            else (f"{ep.api_key_env}={'set' if os.environ.get(ep.api_key_env) else 'MISSING'}")
-        )
+        if ep.name in ui:
+            key = f"ui:{ui[ep.name]['key']}"
+        elif not ep.api_key_env:
+            key = "-"
+        else:
+            key = f"{ep.api_key_env}={'set' if os.environ.get(ep.api_key_env) else 'MISSING'}"
         classes = ",".join(sorted(ep.data_classes - {"restricted"})) or "none"
-        print(f"  {ep.name:<12} {ep.kind:<9} {ep.billing:<12} key {key:<28} data {classes}")
+        source = "ui" if ep.name in ui else "file"
+        print(
+            f"  {ep.name:<12} {source:<4} {ep.kind:<9} {ep.billing:<12} key {key:<28} "
+            f"data {classes}"
+        )
+    route_sources = {r["purpose"]: r["source"] for r in (status or {}).get("routes", [])}
     print("routes:")
     for purpose, route in sorted(config.routes.items()):
         ep = config.endpoints[route.endpoint]
         provider = ep.pricing_provider if ep.billing == BILLING_METERED else ep.price_as
         price = prices.lookup(provider, route.model) if provider else None
         shown = f"in {price.rates.input} / out {price.rates.output} USD/1M" if price else "no price"
-        print(f"  {purpose:<12} {route.endpoint}/{route.model:<28} {shown}")
+        src = route_sources.get(purpose, "file")
+        print(f"  {purpose:<12} {src:<4} {route.endpoint}/{route.model:<28} {shown}")
     if config.budget.monthly_usd is not None:
-        print(f"monthly budget: {config.budget.monthly_usd} USD (metered endpoints only)")
+        src = status["budget"]["source"] if status else "file"
+        print(f"monthly budget: {config.budget.monthly_usd} USD ({src}, metered endpoints only)")
+    if status is None:
+        print(f"(set {TOKEN_ENV} to include connections made in the web UI)")
 
 
 def _fetch_xai() -> dict:
@@ -250,12 +281,13 @@ async def _usage(settings: Settings, days: int, group_by: str) -> None:
     try:
         actor = await _actor(db)
         now = datetime.now(UTC)
+        view = await build_gateway(settings, db).view(actor.workspace_id)  # 화면 예산 포함 (O22)
         s = await usage_summary(
             db,
             actor.workspace_id,
             since=now - timedelta(days=days),
             group_by=group_by,
-            monthly_budget_usd=load_config(settings).budget.monthly_usd,
+            monthly_budget_usd=view.config.budget.monthly_usd,
             now=now,
         )
     finally:
@@ -315,6 +347,7 @@ async def _reindex(settings: Settings) -> None:
         actor = await _actor(db)
         await enqueue_index(db, actor.workspace_id)
         gw = build_gateway(settings, db)
+        gw = await gw.view(actor.workspace_id)  # 화면에서 덮은 임베딩 라우트 (O22)
         space, why = gw.embedding_space(), gw.embedding_status()
     finally:
         await db.dispose()
@@ -849,7 +882,7 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "worker":
         asyncio.run(_worker(settings, once=args.once))
     elif args.cmd == "models":
-        _models(settings)
+        asyncio.run(_models(settings))
     elif args.cmd == "pricing":
         sys.exit(_pricing(settings, args.max_age_days, args.fetch_xai))
     elif args.cmd == "usage":

@@ -75,6 +75,8 @@ EXCLUDED_TABLES: dict[str, str] = {
     "core.restore_jobs": "웹 복원 작업 상태 (c0024). 이 설치의 임시 파일을 가리키는 일시 상태",
     "core.judge_cache": "판정 모델 응답 캐시 (c0022): 다시 물으면 생기는 파생 자료이고, "
     "지운 문서의 인용을 백업으로 옮기지 않는다",
+    "core.model_connection_secrets": "모델 연결 키의 암호문 (c0030): 묶음에 키를 넣지 않는다. "
+    "복원한 연결은 끝 4자리만 남아 '다시 넣어야 함'(needs_reentry)으로 보인다",
 }
 # 복원 후 다시 큐에 넣는 작업 종류 → 대상 표. 내보낼 때 대기·실행 중이던 것만 manifest에 적는다.
 REQUEUE_KINDS: dict[str, str] = {
@@ -1357,6 +1359,15 @@ no_data_change("c0026", "judge_cache 대상 ID·삭제 trigger (judge_cache는 �
 def _c0029_parse_hidden_text(arc) -> None:
     if arc.has("core.parse_runs"):
         arc.rewrite("core.parse_runs", lambda row: {**row, "hidden_text": "keep"})
+
+
+@schema_step(
+    "c0030",
+    "화면 모델 연결 model_connections·라우트 덮기 model_route_overrides·model_settings (옛 묶음에는 빈 표). "
+    "키 암호문 model_connection_secrets는 내보내지 않음",
+)
+def _c0030_model_connections(arc) -> None:
+    arc.ensure_tables("core.model_connections", "core.model_route_overrides", "core.model_settings")
 
 
 def _parents() -> dict[str, str | None]:
