@@ -606,6 +606,65 @@ async def _profile_summary(env: ToolEnv, a: NoArgs) -> Any:
     return {"record": "profile", "note": PROFILE_NOTE, **jsonable(summary)}
 
 
+# ---------------------------------------------------------------- 나: 학력·기술·공통 답변 (c0040, c0042)
+
+EDUCATION_NOTE = (
+    "Education records written by the user (school, major, degree, status, months, GPA with its "
+    "scale). Read-only. Months are YYYY-MM-01; null means not written — never estimate."
+)
+SKILLS_NOTE = (
+    "Skills are derived, not self-rated: experience tags, confirmed 'skill' claims and license/"
+    "language credentials, grouped by the workspace tech alias table. No proficiency levels."
+)
+ANSWER_NOTE = (
+    "Reusable answers the user wrote themselves (1-minute intro, motivation template, strengths/"
+    "weaknesses, conflict, failure, aspiration). Evidence is limited to confirmed claims; a claim "
+    "with confirmed=false is no longer confirmed and is not copied into documents."
+)
+
+
+async def _education_list(env: ToolEnv, a: NoArgs) -> Any:
+    from career_core.usecases import education as education_uc
+
+    rows = await education_uc.list_education(env.db, env.actor)
+    return {"note": EDUCATION_NOTE, "education": [jsonable(r) for r in rows]}
+
+
+async def _skills_overview(env: ToolEnv, a: NoArgs) -> Any:
+    from career_core.usecases import skills as skills_uc
+
+    rows = await skills_uc.skills_overview(env.db, env.actor)
+    return {"note": SKILLS_NOTE, "skills": [jsonable(r) for r in rows]}
+
+
+class AnswerListArgs(Args):
+    kind: (
+        Literal["intro", "motivation", "personality", "conflict", "failure", "aspiration", "other"]
+        | None
+    ) = None
+
+
+async def _answer_asset_list(env: ToolEnv, a: AnswerListArgs) -> Any:
+    from career_core.usecases import answers as answers_uc
+
+    rows = await answers_uc.list_answers(env.db, env.actor)
+    return {
+        "note": ANSWER_NOTE,
+        "answers": [jsonable(r) for r in rows if a.kind is None or r.kind == a.kind],
+    }
+
+
+class AnswerGetArgs(Args):
+    answer_id: UUID
+
+
+async def _answer_asset_get(env: ToolEnv, a: AnswerGetArgs) -> Any:
+    from career_core.usecases import answers as answers_uc
+
+    view = await answers_uc.get_answer(env.db, env.actor, a.answer_id)
+    return {"note": ANSWER_NOTE, **jsonable(view)}
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -700,6 +759,49 @@ TOOLS: tuple[Tool, ...] = (
         "profile.read",
         NoArgs,
         _profile_summary,
+        untrusted=True,
+    ),
+    Tool(
+        "education_list",
+        "List the user's education: school, campus, major, double/minor major, degree "
+        "(high_school|associate|bachelor|master|doctor), status (enrolled|on_leave|expected|"
+        "graduated|completed|dropped), transfer flag, entered/graduated months and GPA with its "
+        "scale (4.5|4.3|4.0|100). Read-only.",
+        "education.read",
+        NoArgs,
+        _education_list,
+        untrusted=True,
+    ),
+    Tool(
+        "skills_overview",
+        "List the user's skills derived from experience tags, confirmed skill claims and "
+        "license/language credentials, merged by the workspace tech alias table: experiences "
+        "using each skill (with months), credentials, first/last year used and counts. No "
+        "proficiency levels. Read-only.",
+        "brain.read",
+        NoArgs,
+        _skills_overview,
+        untrusted=True,
+    ),
+    Tool(
+        "answer_asset_list",
+        "List the user's reusable answers (공통 답변: intro, motivation, personality, conflict, "
+        "failure, aspiration, other) with title, excerpt, character counts, number of linked "
+        "confirmed claims and how many applications used each. Read-only.",
+        "answers.read",
+        AnswerListArgs,
+        _answer_asset_list,
+        untrusted=True,
+    ),
+    Tool(
+        "answer_asset_get",
+        "Get one reusable answer the user wrote: full body, character counts, linked claims "
+        "(confirmed=false means no longer confirmed and not usable as evidence) and the "
+        "applications/documents it was copied into. Read-only; inserting it into an application "
+        "happens in the web app.",
+        "answers.read",
+        AnswerGetArgs,
+        _answer_asset_get,
         untrusted=True,
     ),
     Tool(

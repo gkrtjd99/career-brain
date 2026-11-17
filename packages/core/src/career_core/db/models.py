@@ -1402,8 +1402,101 @@ class Profile(Base):
     links: Mapped[list] = mapped_column(JSONB, default=list)  # [{label, url}]
     headline: Mapped[str | None] = mapped_column(Text, default=None)
     default_photo_id: Mapped[UUID | None] = mapped_column(default=None)
+    # c0041: 병역·보훈·장애·희망 조건 (모두 선택, restricted: MCP·모델로 보내지 않는다)
+    military_status: Mapped[str | None] = mapped_column(Text, default=None)
+    military_branch: Mapped[str | None] = mapped_column(Text, default=None)
+    military_rank: Mapped[str | None] = mapped_column(Text, default=None)
+    military_started_on: Mapped[date | None] = mapped_column(Date, default=None)
+    military_ended_on: Mapped[date | None] = mapped_column(Date, default=None)
+    military_exemption_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    veteran: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    disability: Mapped[bool | None] = mapped_column(Boolean, default=None)
+    desired_roles: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    desired_locations: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    desired_salary: Mapped[str | None] = mapped_column(Text, default=None)
+    available_from: Mapped[str | None] = mapped_column(Text, default=None)
+    employment_types: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     updated_by: Mapped[UUID | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0040: 학력
+
+
+class Education(Base):
+    """학교 하나 (plan §20 "나 › 학력"). 입학·졸업은 월 단위(그 달 1일), 학점은 만점과 함께."""
+
+    __tablename__ = "education"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    school: Mapped[str] = mapped_column(Text)
+    campus: Mapped[str | None] = mapped_column(Text, default=None)
+    major: Mapped[str | None] = mapped_column(Text, default=None)
+    extra_major: Mapped[str | None] = mapped_column(Text, default=None)
+    extra_major_kind: Mapped[str | None] = mapped_column(Text, default=None)  # double | minor
+    degree: Mapped[str] = mapped_column(Text)  # domain.education.Degree
+    status: Mapped[str] = mapped_column(Text)  # domain.education.EducationStatus
+    transferred: Mapped[bool] = mapped_column(Boolean, default=False)
+    entered_on: Mapped[date | None] = mapped_column(Date, default=None)
+    graduated_on: Mapped[date | None] = mapped_column(Date, default=None)
+    gpa: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), default=None)
+    gpa_scale: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), default=None)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    source_id: Mapped[UUID | None] = mapped_column(default=None)
+    experience_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+# ---------------------------------------------------------------- c0042: 공통 답변
+
+
+class AnswerAsset(Base):
+    """지원을 넘어 다시 쓰는 내 글 (plan §19.4). 근거는 확인한 사실(주장)만 잇는다."""
+
+    __tablename__ = "answer_assets"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)  # domain.answers.AnswerKind
+    title: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text, default="")
+    source_submission_id: Mapped[UUID | None] = mapped_column(default=None)
+    source_document_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class AnswerAssetClaim(Base):
+    __tablename__ = "answer_asset_claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    answer_asset_id: Mapped[UUID]
+    claim_id: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnswerAssetUse(Base):
+    """공통 답변을 지원 문서에 넣은 기록."""
+
+    __tablename__ = "answer_asset_uses"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    answer_asset_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    document_id: Mapped[UUID]
+    revision_id: Mapped[UUID | None] = mapped_column(default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

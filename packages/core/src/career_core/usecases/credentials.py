@@ -24,6 +24,7 @@ from career_core.db.base import utcnow
 from career_core.db.models import (
     Credential,
     DocumentBlock,
+    Education,
     Experience,
     ParseRun,
     Source,
@@ -483,6 +484,11 @@ async def extract_in_session(
             Credential.name == values["name"],
         )
     )
+    if not same and values["kind"] == CredentialKind.DEGREE:
+        # 학력으로 옮긴 증빙(c0040)은 다시 뽑아도 학력 후보를 또 만들지 않는다
+        same = await s.scalar(
+            select(func.count()).select_from(Education).where(Education.source_id == source_id)
+        )
     if same:
         return ExtractResult(source_id, None, "already_recorded", replaced)
     c = Credential(

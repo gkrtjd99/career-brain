@@ -20,14 +20,19 @@ from pydantic import BaseModel, Field
 
 from career_core.domain.profiles import (
     MAX_ADDRESS,
+    MAX_AVAILABLE_FROM,
     MAX_EMAIL,
+    MAX_EXEMPTION_REASON,
     MAX_HEADLINE,
     MAX_LINK_LABEL,
     MAX_LINK_URL,
     MAX_LINKS,
+    MAX_MILITARY_TEXT,
     MAX_NAME,
     MAX_PHONE,
     MAX_PHOTO_BYTES,
+    MAX_PREFERENCE_ITEMS,
+    MAX_SALARY,
     PhotoSpec,
     ProfileRuleError,
 )
@@ -97,6 +102,45 @@ class PhotoUploadOut(PhotoOut):
     removed_metadata: list[str]
 
 
+Month = Annotated[str, Field(pattern=r"^\d{4}-\d{2}(-\d{2})?$")]
+MilitaryStatus = Literal["served", "not_served", "exempt", "not_applicable", "serving"]
+EmploymentType = Literal["regular", "contract", "intern"]
+
+
+class ProfileDetailsPatch(BaseModel):
+    """병역·보훈·장애·희망 조건 (c0041). 준 칸만 바꾼다 (null·빈 목록은 비우기). 모두 선택."""
+
+    military_status: MilitaryStatus | None = None
+    military_branch: str | None = Field(default=None, max_length=MAX_MILITARY_TEXT * 2)
+    military_rank: str | None = Field(default=None, max_length=MAX_MILITARY_TEXT * 2)
+    military_started_on: Month | None = None  # 달까지 ("YYYY-MM")
+    military_ended_on: Month | None = None
+    military_exemption_reason: str | None = Field(default=None, max_length=MAX_EXEMPTION_REASON * 2)
+    veteran: bool | None = None
+    disability: bool | None = None
+    desired_roles: list[str] | None = Field(default=None, max_length=MAX_PREFERENCE_ITEMS * 2)
+    desired_locations: list[str] | None = Field(default=None, max_length=MAX_PREFERENCE_ITEMS * 2)
+    desired_salary: str | None = Field(default=None, max_length=MAX_SALARY * 2)
+    available_from: str | None = Field(default=None, max_length=MAX_AVAILABLE_FROM * 2)
+    employment_types: list[EmploymentType] | None = None
+
+
+class ProfileDetailsOut(BaseModel):
+    military_status: str | None
+    military_branch: str | None
+    military_rank: str | None
+    military_started_on: date | None  # 그 달 1일
+    military_ended_on: date | None
+    military_exemption_reason: str | None
+    veteran: bool | None
+    disability: bool | None
+    desired_roles: list[str]
+    desired_locations: list[str]
+    desired_salary: str | None
+    available_from: str | None
+    employment_types: list[str]
+
+
 class PhotoPatch(BaseModel):
     is_default: Literal[True] | None = None
     spec: PhotoSpec | None = None
@@ -151,6 +195,27 @@ def add_profile_routes(router: APIRouter, deps, authorize) -> None:
         except ProfileRuleError as exc:
             raise _rule(exc) from exc
         return _profile_out(view)
+
+    @router.get("/profile/details", response_model=ProfileDetailsOut)
+    async def get_details(actor: reader) -> ProfileDetailsOut:
+        view = await uc.get_profile_details(deps.db, actor)
+        return ProfileDetailsOut.model_validate(view, from_attributes=True)
+
+    @router.patch("/profile/details", response_model=ProfileDetailsOut)
+    async def patch_details(body: ProfileDetailsPatch, actor: writer) -> ProfileDetailsOut:
+        changes = body.model_dump(exclude_unset=True)
+        try:
+            for key in ("military_started_on", "military_ended_on"):
+                if changes.get(key):
+                    v = changes[key]
+                    changes[key] = date(int(v[:4]), int(v[5:7]), 1)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid_military_period") from exc
+        try:
+            view = await uc.update_profile_details(deps.db, actor, changes)
+        except ProfileRuleError as exc:
+            raise _rule(exc) from exc
+        return ProfileDetailsOut.model_validate(view, from_attributes=True)
 
     @router.get("/profile/photos", response_model=list[PhotoOut])
     async def list_photos(actor: reader) -> list[PhotoOut]:
