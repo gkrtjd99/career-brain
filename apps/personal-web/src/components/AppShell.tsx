@@ -1,4 +1,4 @@
-import { Badge, cn, Sheet } from "@career-brain/ui";
+import { cn, Sheet } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
@@ -57,12 +57,12 @@ function SideLink({ item, path, onClick }: { item: NavItem; path: string; onClic
       onClick={onClick}
       className={cn(
         "flex h-9 items-center gap-2.5 rounded-md px-2.5 text-sm",
-        active ? "bg-surface font-medium text-fg shadow-[0_0_0_1px_var(--app-line)]" : "text-muted hover:bg-subtle hover:text-fg",
+        active ? "bg-subtle font-medium text-fg" : "text-muted transition-colors duration-150 hover:bg-subtle/60 hover:text-fg",
       )}
     >
-      <Icon size={17} strokeWidth={active ? 2.2 : 1.8} className={active ? "text-accent" : undefined} />
+      <Icon size={17} strokeWidth={active ? 2.2 : 1.8} />
       <span className="flex-1">{item.label}</span>
-      {item.coming ? <Badge tone="none">준비 중</Badge> : null}
+      {item.coming ? <span className="text-xs text-muted">준비 중</span> : null}
     </Link>
   );
 }
@@ -117,7 +117,7 @@ export function AppShell() {
       {/* 좁은 화면: 아래 탭 + 더보기 */}
       <nav
         aria-label="주 메뉴"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {MOBILE_TABS.map((it) => {
           const active = isActive(path, it.to);
@@ -128,7 +128,7 @@ export function AppShell() {
               to={it.to}
               className={cn(
                 "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px]",
-                active ? "font-medium text-accent" : "text-muted",
+                active ? "font-medium text-fg" : "text-muted",
               )}
             >
               <Icon size={20} strokeWidth={active ? 2.2 : 1.8} />
@@ -141,7 +141,7 @@ export function AppShell() {
           className={cn(
             "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px]",
             [...MAIN.slice(4), ...SYSTEM].some((it) => isActive(path, it.to))
-              ? "font-medium text-accent"
+              ? "font-medium text-fg"
               : "text-muted",
           )}
         >

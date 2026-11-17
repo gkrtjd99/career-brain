@@ -57,7 +57,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="mb-5 space-y-1">
+    <header className="mb-8 space-y-1">
       {back ? (
         <Link
           to={back.to}
@@ -102,8 +102,8 @@ export function Tabs<T extends string>({
           className={cn(
             "-mb-px border-b-2 px-2 py-2 text-sm whitespace-nowrap sm:px-3",
             value === it.value
-              ? "border-accent font-medium text-fg"
-              : "border-transparent text-muted hover:text-fg",
+              ? "border-fg font-medium text-fg"
+              : "border-transparent text-muted transition-colors duration-150 hover:text-fg",
           )}
         >
           {it.label}
@@ -113,10 +113,10 @@ export function Tabs<T extends string>({
   );
 }
 
-/** 목록 행. 얇은 구분선으로 나눈 흰 작업 영역 안에 둔다. */
+/** 목록: 상자 없이 위 선과 행 사이 얇은 선으로만 나눈다. */
 export function List({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <ul className={cn("divide-y divide-line rounded-lg border border-line bg-surface", className)}>
+    <ul className={cn("divide-y divide-line border-y border-line", className)}>
       {children}
     </ul>
   );
