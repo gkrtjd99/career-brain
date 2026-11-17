@@ -1,7 +1,7 @@
 import type { ApiToken, ApiTokenStatus, IssuedApiToken } from "@career-brain/client";
 import { Button, ConfirmDialog, Input, Label, Section, Select } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { ApiError, api } from "../lib/api";
 import { formatDate, formatDateTime } from "../lib/dates";
 import { TOKEN_SOON_DAYS, tokenDaysLeft, tokenExpiresSoon, tokenExpiryText } from "../lib/tokens";
@@ -112,23 +112,9 @@ function revokeError(error: unknown) {
 export function TokensSection() {
   const qc = useQueryClient();
   const tokens = useQuery({ queryKey: ["api-tokens"], queryFn: api.apiTokens });
-  const [label, setLabel] = useState("");
-  const [expires, setExpires] = useState("");
-  const [issued, setIssued] = useState<IssuedApiToken | null>(null);
-  const [copied, setCopied] = useState(false);
   const [target, setTarget] = useState<ApiToken | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const soon = (tokens.data ?? []).filter((t) => tokenExpiresSoon(t));
-
-  const issue = useMutation({
-    mutationFn: () => api.issueApiToken({ label: label.trim(), expires_days: expires ? Number(expires) : null }),
-    onSuccess: (res) => {
-      setIssued(res);
-      setCopied(false);
-      setLabel("");
-      void qc.invalidateQueries({ queryKey: ["api-tokens"] });
-    },
-  });
   const revoke = useMutation({
     mutationFn: (tokenId: string) => api.revokeApiToken(tokenId),
     onSuccess: () => {
@@ -200,63 +186,7 @@ export function TokensSection() {
           )}
         </Loaded>
 
-        <form
-          className="space-y-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (label.trim()) issue.mutate();
-          }}
-        >
-          <h3 className="text-sm font-medium">새 토큰</h3>
-          <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
-            <div>
-              <Label htmlFor="token-label">이름 (어디서 쓰는지)</Label>
-              <Input
-                id="token-label"
-                value={label}
-                maxLength={100}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="예: 노트북, MCP"
-              />
-            </div>
-            <div>
-              <Label htmlFor="token-expiry">만료</Label>
-              <Select id="token-expiry" value={expires} onChange={(e) => setExpires(e.target.value)}>
-                {EXPIRY_CHOICES.map(([v, text]) => (
-                  <option key={v} value={v}>
-                    {text}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-          <ErrorText error={issue.error} />
-          <Button type="submit" variant="primary" size="sm" disabled={!label.trim() || issue.isPending}>
-            토큰 만들기
-          </Button>
-        </form>
-
-        {issued ? (
-          <div className="space-y-2 rounded-md border border-fg p-3" role="status">
-            <p className="text-[13px] font-medium">
-              새 토큰 "{issued.token.label}" — 지금 한 번만 보입니다. 안전한 곳에 보관하세요.
-            </p>
-            <code className="block rounded bg-subtle px-2 py-1.5 text-xs break-all">{issued.secret}</code>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(issued.secret).then(() => setCopied(true));
-                }}
-              >
-                {copied ? "복사함" : "복사"}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setIssued(null)}>
-                닫기 (다시 볼 수 없음)
-              </Button>
-            </div>
-          </div>
-        ) : null}
+        <NewTokenForm />
       </div>
 
       <ConfirmDialog
@@ -277,5 +207,97 @@ export function TokensSection() {
         <ErrorText error={revokeError(revoke.error)} />
       </ConfirmDialog>
     </Section>
+  );
+}
+
+/**
+ * 새 토큰 만들기 칸. 토큰 원문은 만든 직후 여기 한 번만 보이고 다시 볼 수 없다.
+ * MCP·에이전트 탭은 이름 "MCP"·만료 90일로 미리 채워 같은 칸을 쓴다.
+ */
+export function NewTokenForm({
+  defaultLabel = "",
+  defaultExpires = "",
+  heading = "새 토큰",
+}: {
+  defaultLabel?: string;
+  /** "" = 만료 없음, 아니면 일 수 */
+  defaultExpires?: "" | "30" | "90" | "365";
+  heading?: string;
+}) {
+  const qc = useQueryClient();
+  const [label, setLabel] = useState(defaultLabel);
+  const [expires, setExpires] = useState<string>(defaultExpires);
+  const [issued, setIssued] = useState<IssuedApiToken | null>(null);
+  const [copied, setCopied] = useState(false);
+  const fid = useId();
+  const issue = useMutation({
+    mutationFn: () => api.issueApiToken({ label: label.trim(), expires_days: expires ? Number(expires) : null }),
+    onSuccess: (res) => {
+      setIssued(res);
+      setCopied(false);
+      setLabel(defaultLabel);
+      void qc.invalidateQueries({ queryKey: ["api-tokens"] });
+    },
+  });
+  return (
+    <div className="space-y-6">
+      <form
+        className="space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (label.trim()) issue.mutate();
+        }}
+      >
+        <h3 className="text-sm font-medium">{heading}</h3>
+        <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
+          <div>
+            <Label htmlFor={`${fid}-label`}>이름 (어디서 쓰는지)</Label>
+            <Input
+              id={`${fid}-label`}
+              value={label}
+              maxLength={100}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="예: 노트북, MCP"
+            />
+          </div>
+          <div>
+            <Label htmlFor={`${fid}-expiry`}>만료</Label>
+            <Select id={`${fid}-expiry`} value={expires} onChange={(e) => setExpires(e.target.value)}>
+              {EXPIRY_CHOICES.map(([v, text]) => (
+                <option key={v} value={v}>
+                  {text}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <ErrorText error={issue.error} />
+        <Button type="submit" variant="primary" size="sm" disabled={!label.trim() || issue.isPending}>
+          토큰 만들기
+        </Button>
+      </form>
+
+      {issued ? (
+        <div className="space-y-2 rounded-md border border-fg p-3" role="status">
+          <p className="text-[13px] font-medium">
+            새 토큰 "{issued.token.label}" — 지금 한 번만 보입니다. 안전한 곳에 보관하세요.
+          </p>
+          <code className="block rounded bg-subtle px-2 py-1.5 text-xs break-all">{issued.secret}</code>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard?.writeText(issued.secret).then(() => setCopied(true));
+              }}
+            >
+              {copied ? "복사함" : "복사"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setIssued(null)}>
+              닫기 (다시 볼 수 없음)
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

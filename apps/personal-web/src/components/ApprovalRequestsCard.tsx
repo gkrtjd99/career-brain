@@ -36,7 +36,7 @@ function PendingApprovals({ className }: { className?: string }) {
         <h2 className="text-[15px] font-semibold">
           승인 요청 <span className="tabular-nums">{list.length}</span>
         </h2>
-        <Link to="/system" search={{ tab: "approvals" }} className="text-[13px] text-muted hover:text-fg">
+        <Link to="/manage" search={{ tab: "runs" }} className="text-[13px] text-muted hover:text-fg">
           전체
         </Link>
       </div>
@@ -46,8 +46,8 @@ function PendingApprovals({ className }: { className?: string }) {
           return (
             <li key={a.id}>
               <Link
-                to="/system"
-                search={{ tab: "approvals", approval: a.id }}
+                to="/manage"
+                search={{ tab: "runs", approval: a.id }}
                 className="-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
               >
                 <div className="min-w-0 flex-1">
@@ -66,7 +66,7 @@ function PendingApprovals({ className }: { className?: string }) {
         })}
       </ul>
       {list.length > 5 ? (
-        <p className="mt-2 text-[13px] text-muted">나머지 {list.length - 5}건은 시스템 화면에서</p>
+        <p className="mt-2 text-[13px] text-muted">나머지 {list.length - 5}건은 연결·관리 › 작업·승인에서</p>
       ) : null}
     </section>
   );

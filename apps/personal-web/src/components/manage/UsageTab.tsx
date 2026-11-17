@@ -1,11 +1,11 @@
 import type { UsageGroup, UsageRow } from "@career-brain/client";
-import { Badge, cn, Select } from "@career-brain/ui";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Badge, Button, cn, Input, Select } from "@career-brain/ui";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { Loaded, PageHeader } from "../components/common";
-import { api } from "../lib/api";
-import { formatDate } from "../lib/dates";
-import { int, usd } from "../lib/format";
+import { ErrorText, Loaded } from "../common";
+import { api } from "../../lib/api";
+import { formatDate } from "../../lib/dates";
+import { int, usd } from "../../lib/format";
 
 const GROUPS: [UsageGroup, string][] = [
   ["day", "날짜별"],
@@ -29,7 +29,7 @@ function equivalent(r: UsageRow) {
   return r.calls > 0 && r.unknown_cost_calls === r.calls ? "미집계" : usd(r.equivalent_usd);
 }
 
-export function UsagePage() {
+export function UsageTab({ canEdit }: { canEdit: boolean }) {
   const [days, setDays] = useState(30);
   const [groupBy, setGroupBy] = useState<UsageGroup>("day");
   const q = useQuery({
@@ -40,7 +40,7 @@ export function UsagePage() {
 
   return (
     <div className="max-w-4xl">
-      <PageHeader title="사용량" subtitle="모델 호출 토큰과 비용. 호출마다 기록합니다." />
+      <p className="mb-4 text-[13px] text-muted">모델 호출마다 토큰과 비용을 기록합니다.</p>
       <div className="mb-6 flex flex-wrap gap-2">
         <Select value={days} onChange={(e) => setDays(Number(e.target.value))} className="w-auto" aria-label="기간">
           <option value={7}>최근 7일</option>
@@ -90,11 +90,7 @@ export function UsagePage() {
                       </div>
                     ) : null}
                   </Row>
-                  {budget === null ? (
-                    <Row label="월 예산">
-                      <span className="text-muted">설정 안 함 (models.toml [budget])</span>
-                    </Row>
-                  ) : null}
+                  <BudgetRow canEdit={canEdit} />
                   <Row label="기간 호출">{int(u.total.calls)}회</Row>
                   <Row label="기간 청구">{usd(u.total.spent_usd)}</Row>
                   <Row label="종량제 환산">
@@ -208,5 +204,89 @@ function RowKey({ row, group, total }: { row: UsageRow; group: UsageGroup; total
         <span className="text-xs font-normal text-muted">단가 미상 {row.unknown_cost_calls}</span>
       ) : null}
     </span>
+  );
+}
+
+const BUDGET_SOURCE: Record<string, string> = { file: "models.toml에서 옴", ui: "화면에서 정함 (파일 값을 덮음)" };
+
+/** 월 예산 한 줄: 값·출처, 고치기(PUT /core/models/budget). 화면 값을 지우면 파일 값으로 돌아간다. */
+function BudgetRow({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ["models-status"], queryFn: api.modelsStatus, retry: false });
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (value: string | null) => api.putModelBudget(value),
+    onSuccess: () => {
+      setDraft(null);
+      void qc.invalidateQueries({ queryKey: ["models-status"] });
+      void qc.invalidateQueries({ queryKey: ["usage"] });
+    },
+  });
+  const b = status.data?.budget;
+  const value = b?.monthly_usd ? Number(b.monthly_usd) : null;
+  const valid = draft !== null && (draft.trim() === "" || /^\d{1,6}(\.\d{1,2})?$/.test(draft.trim()));
+  return (
+    <div className="py-2.5 text-sm">
+      <div className="flex items-baseline justify-between gap-4">
+        <dt className="shrink-0 text-muted">월 예산</dt>
+        <dd className="min-w-0 text-right tabular-nums">
+          {status.isError ? (
+            <span className="text-muted">models.toml [budget]에서 정합니다</span>
+          ) : !b ? (
+            <span className="text-muted">확인 중</span>
+          ) : (
+            <>
+              {value !== null ? usd(value, 2) : <span className="text-muted">정하지 않음 (제한 없음)</span>}
+              {b.source ? <span className="text-muted"> · {BUDGET_SOURCE[b.source]}</span> : null}
+            </>
+          )}
+          {canEdit && b && draft === null ? (
+            <button
+              type="button"
+              onClick={() => setDraft(b.monthly_usd ?? "")}
+              className="ml-2 inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-0"
+            >
+              고치기
+            </button>
+          ) : null}
+        </dd>
+      </div>
+      {draft !== null ? (
+        <form
+          className="mt-2 flex flex-wrap items-center justify-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (valid && draft.trim()) save.mutate(draft.trim());
+          }}
+        >
+          <label htmlFor="budget-usd" className="text-[13px] text-muted">
+            한 달 USD
+          </label>
+          <Input
+            id="budget-usd"
+            inputMode="decimal"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="20.00"
+            className="w-28 text-right tabular-nums"
+          />
+          <Button type="submit" size="sm" variant="primary" disabled={!valid || !draft.trim() || save.isPending}>
+            저장
+          </Button>
+          {b?.source === "ui" ? (
+            <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(null)}>
+              파일 값으로
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
+            취소
+          </Button>
+          <p className="w-full text-right text-[13px] text-muted">
+            종량제 지출이 이번 달(UTC) 이 값에 닿으면 호출을 막습니다. 구독·무료 연결은 세지 않습니다.
+          </p>
+          <ErrorText error={save.error} className="w-full text-right" />
+        </form>
+      ) : null}
+    </div>
   );
 }

@@ -134,7 +134,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
   - **뒷받침**: 조회·결정·사용 때의 해시 비교는 그대로 둔다. trigger가 꺼진 채 바뀐 변경도 사용 순간 다시 계산한 대상 버전이 다르면 쓰지 않는다 (시험: trigger를 끈 연결로 바꿔도 `submit`이 `target_changed`로 막힌다).
   - `consume_approval`은 `used`로 바꾼 뒤 바로 flush한다. 같은 트랜잭션의 제출(지원 상태 변경)이 방금 쓴 승인을 다시 무효로 만들지 않게.
   - 복원(`restore_workspace`)이 행을 넣는 동안은 트랜잭션 로컬 설정 `career.restoring = on`으로 멈춘다 (묶음의 승인 상태 그대로).
-- **변경 비교**: `GET /core/approvals/{id}/diff` → `{approval, requested, current, target_changed, changes[]}`. `requested`는 요청 때 저장한 요약, `current`는 지금 대상으로 다시 만든 요약(대상이 없으면 null). `changes`는 칸별 차이이고 문서 목록은 `document_id`로 짝짓는다 (`path` 예: `documents[<id>].revision`, `label`은 문서 제목). 웹 `/system?tab=approvals`가 이 비교를 보여 주고, 결정할 때 본 승인의 `payload_hash`를 보낸다.
+- **변경 비교**: `GET /core/approvals/{id}/diff` → `{approval, requested, current, target_changed, changes[]}`. `requested`는 요청 때 저장한 요약, `current`는 지금 대상으로 다시 만든 요약(대상이 없으면 null). `changes`는 칸별 차이이고 문서 목록은 `document_id`로 짝짓는다 (`path` 예: `documents[<id>].revision`, `label`은 문서 제목). 웹 연결·관리 › 작업·승인(`/manage?tab=runs`)이 이 비교를 보여 주고, 결정할 때 본 승인의 `payload_hash`를 보낸다.
 - 묶음 칸(행위·대상·버전·내용·요청자·만료)은 만든 뒤 바꿀 수 없다(trigger). 닫힌 승인(`used`·`rejected`·`invalidated`·`expired`)은 다시 열 수 없다.
 
 ### 제출 승인 (`applications.submit`)

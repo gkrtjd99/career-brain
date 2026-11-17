@@ -268,7 +268,7 @@ export function TodayPage() {
         <p className="mt-12 text-[13px] text-muted">
           {nearBudget ? `이번 달 모델 비용 ${usd(spent, 2)} / 예산 ${usd(budget, 2)}. ` : null}
           {troubled ? `최근 30일 모델 호출 중 오류·거부 ${u!.total.errors + u!.total.denied}건. ` : null}
-          <Link to="/usage" className="underline underline-offset-2 hover:text-fg">
+          <Link to="/manage" search={{ tab: "usage" }} className="underline underline-offset-2 hover:text-fg">
             사용량 보기
           </Link>
         </p>

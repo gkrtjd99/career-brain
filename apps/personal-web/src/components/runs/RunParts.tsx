@@ -10,7 +10,7 @@ import { RUN_CODE, RUN_STATUS } from "../../lib/systemLabels";
 import { ErrorText } from "../common";
 import { LiveProvider, useLiveConnected } from "../system/live";
 
-// 웹에서 시작하는 일괄 실행(c0023)의 공용 조각: 시작 전 참고 비용, 진행 표시(시스템 화면 실행 상세로 연결).
+// 웹에서 시작하는 일괄 실행(c0023)의 공용 조각: 시작 전 참고 비용, 진행 표시(연결·관리 › 작업·승인의 실행 상세로 연결).
 // 실행 기록에는 글이 없다 (ID·개수만). 결과 글은 각 화면(수정안 탭·인터뷰)에서 본다.
 
 const ACTIVE: Run["status"][] = ["queued", "running", "waiting_approval"];
@@ -101,7 +101,7 @@ export function CostEstimate({
         </p>
       ) : e ? (
         <p className="text-muted">
-          아직 이 작업을 돌린 적이 없어 예상 비용이 없습니다. 끝나면 시스템 화면에서 실제 비용을 봅니다.
+          아직 이 작업을 돌린 적이 없어 예상 비용이 없습니다. 끝나면 연결·관리 › 작업·승인에서 실제 비용을 봅니다.
         </p>
       ) : null}
       <ErrorText error={q.error} />
@@ -186,11 +186,11 @@ function RunProgressCard({ runId, listKey, noun, onFinished }: ProgressProps) {
       ) : null}
       {run.error_code ? <p className="text-danger">실패: {RUN_CODE[run.error_code] ?? run.error_code}</p> : null}
       <Link
-        to="/system"
-        search={{ run: run.id }}
+        to="/manage"
+        search={{ tab: "runs", run: run.id }}
         className="inline-flex min-h-9 items-center gap-1 text-muted underline underline-offset-2 hover:text-fg"
       >
-        <ExternalLink size={13} /> 시스템 화면에서 실행 보기 (멈춤·취소·사건)
+        <ExternalLink size={13} /> 연결·관리에서 실행 보기 (멈춤·취소·사건)
       </Link>
     </div>
   );

@@ -2,16 +2,13 @@ import type { Approval, ApprovalChange, ApprovalStatus, RunStatus } from "@caree
 import { Badge, Button, ConfirmDialog, Label, Section, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import type { BadgeTone } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { ErrorText, errorText, Loaded, PageHeader, Tabs } from "../components/common";
-import { MaintenanceTab } from "../components/system/MaintenanceTab";
-import { LiveProvider, useLiveConnected } from "../components/system/live";
-import { OAuthTab } from "../components/system/OAuthTab";
-import { api } from "../lib/api";
-import { formatDateTime } from "../lib/dates";
-import { int, usd } from "../lib/format";
+import { ErrorText, errorText, Loaded } from "../common";
+import { LiveProvider, useLiveConnected } from "../system/live";
+import { api } from "../../lib/api";
+import { formatDateTime } from "../../lib/dates";
+import { int, usd } from "../../lib/format";
 import {
   ACTION_LABEL,
   APPROVAL_STATUS,
@@ -23,10 +20,7 @@ import {
   RUN_STATUS,
   systemErrorText,
   WORKFLOW_LABEL,
-} from "../lib/systemLabels";
-
-const route = getRouteApi("/system");
-export type SystemTab = "runs" | "approvals" | "maintenance" | "audit" | "oauth";
+} from "../../lib/systemLabels";
 
 const ACTIVE: RunStatus[] = ["queued", "running", "waiting_approval", "interrupted"];
 
@@ -99,68 +93,40 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   );
 }
 
-export function SystemPage() {
-  // 실행·승인 상태는 SSE(/core/live)로 받고, 끊기면 각 목록이 몇 초 간격으로 다시 읽는다
+// ---------------------------------------------------------------- 작업·승인 탭
+
+/**
+ * 작업·승인 탭: 사람이 결정할 승인 요청을 먼저, 그 아래 실행 목록. 상세는 시트로 연다 (?approval=, ?run=).
+ * 실행·승인 상태는 SSE(/core/live)로 받고, 끊기면 각 목록이 몇 초 간격으로 다시 읽는다.
+ */
+export function RunsTab({
+  approval,
+  run,
+  open,
+}: {
+  approval?: string;
+  run?: string;
+  open: (target: { approval?: string; run?: string }) => void;
+}) {
   return (
     <LiveProvider>
-      <SystemScreen />
+      <div className="space-y-10">
+        <Section title="승인 요청">
+          <ApprovalsList onOpen={(id) => open({ approval: id })} />
+        </Section>
+        <Section title="실행">
+          <RunsList onOpen={(id) => open({ run: id })} />
+        </Section>
+      </div>
+      <RunSheet runId={run ?? null} onClose={() => open({})} onApproval={(id) => open({ approval: id })} />
+      <ApprovalSheet approvalId={approval ?? null} onClose={() => open({})} onRun={(id) => open({ run: id })} />
     </LiveProvider>
-  );
-}
-
-function SystemScreen() {
-  const { tab = "runs", approval, run } = route.useSearch();
-  const navigate = useNavigate();
-  const pending = useQuery({
-    queryKey: ["approvals", "pending"],
-    queryFn: () => api.approvals({ status: "pending", limit: 20 }),
-  });
-  const go = (search: { tab?: SystemTab; approval?: string; run?: string }) =>
-    navigate({
-      to: "/system",
-      search: {
-        ...(search.tab && search.tab !== "runs" ? { tab: search.tab } : {}),
-        ...(search.approval ? { approval: search.approval } : {}),
-        ...(search.run ? { run: search.run } : {}),
-      },
-      replace: true,
-    });
-  return (
-    <div>
-      <PageHeader title="시스템" subtitle="오래 걸리는 작업, 승인 요청, 백업, MCP 도구 호출 기록." />
-      <Tabs<SystemTab>
-        value={tab}
-        onChange={(t) => go({ tab: t })}
-        items={[
-          { value: "runs", label: "실행" },
-          { value: "approvals", label: `승인${pending.data?.length ? ` ${pending.data.length}` : ""}` },
-          { value: "maintenance", label: "백업·유지보수" },
-          { value: "audit", label: "MCP 기록" },
-          { value: "oauth", label: "원격 연결" },
-        ]}
-      />
-      {tab === "runs" ? <RunsTab onOpen={(id) => go({ tab, run: id })} /> : null}
-      {tab === "approvals" ? <ApprovalsTab onOpen={(id) => go({ tab, approval: id })} /> : null}
-      {tab === "maintenance" ? <MaintenanceTab /> : null}
-      {tab === "audit" ? <AuditTab /> : null}
-      {tab === "oauth" ? <OAuthTab /> : null}
-      <RunSheet
-        runId={run ?? null}
-        onClose={() => go({ tab })}
-        onApproval={(id) => go({ tab: "approvals", approval: id })}
-      />
-      <ApprovalSheet
-        approvalId={approval ?? null}
-        onClose={() => go({ tab })}
-        onRun={(id) => go({ tab: "runs", run: id })}
-      />
-    </div>
   );
 }
 
 // ---------------------------------------------------------------- 실행
 
-function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
+export function RunsList({ onOpen }: { onOpen: (id: string) => void }) {
   const [status, setStatus] = useState<RunStatus | "">("");
   const live = useLiveConnected();
   const q = useQuery({
@@ -214,7 +180,7 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-function RunSheet({
+export function RunSheet({
   runId,
   onClose,
   onApproval,
@@ -351,7 +317,7 @@ function approvalTitle(a: Approval) {
   return `${ACTION_LABEL[a.action] ?? a.action}${t ? ` · ${t}` : ""}`;
 }
 
-function ApprovalsTab({ onOpen }: { onOpen: (id: string) => void }) {
+export function ApprovalsList({ onOpen }: { onOpen: (id: string) => void }) {
   const [status, setStatus] = useState<ApprovalStatus>("pending");
   const q = useQuery({
     queryKey: ["approvals", status],
@@ -393,7 +359,7 @@ function ApprovalsTab({ onOpen }: { onOpen: (id: string) => void }) {
               ))}
             </Rows>
           ) : (
-            <Quiet>{status === "pending" ? "기다리는 승인 요청이 없습니다." : "해당하는 승인이 없습니다."}</Quiet>
+            <Quiet>{status === "pending" ? "기다리는 승인 요청이 없습니다. 에이전트가 제출 같은 일을 요청하면 여기서 사람이 결정합니다." : "해당하는 승인이 없습니다."}</Quiet>
           )
         }
       </Loaded>
@@ -443,7 +409,7 @@ function SummaryDocs({ summary }: { summary: Record<string, unknown> }) {
   );
 }
 
-function ApprovalSheet({
+export function ApprovalSheet({
   approvalId,
   onClose,
   onRun,
@@ -567,7 +533,7 @@ function ApprovalSheet({
 
 // ---------------------------------------------------------------- MCP 기록
 
-function AuditTab() {
+export function AuditSection() {
   const [status, setStatus] = useState<"" | "ok" | "error">("");
   const [tool, setTool] = useState("");
   const q = useQuery({
