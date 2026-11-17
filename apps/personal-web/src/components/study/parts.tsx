@@ -1,7 +1,7 @@
 import type { Attempt, AttemptResult, Mistake, MistakeReason, ReviewGrade } from "@career-brain/client";
-import { Badge, Button, Input, Label, Select, Textarea } from "@career-brain/ui";
+import { Button, cn, Input, Label, Select, Textarea } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import { formatDate, formatDateTime } from "../../lib/dates";
 import { ATTEMPT_RESULT, GRADE, MISTAKE_REASON } from "../../lib/labels";
@@ -11,9 +11,36 @@ import { ErrorText } from "../common";
 export function useStudyInvalidate() {
   const qc = useQueryClient();
   return () => {
-    for (const key of ["study-items", "study-item", "assessments", "assessment", "mistakes", "due-reviews", "coverage", "activity", "study-settings", "workspace-settings", "claim-suggestions", "requirement-frequency", "upcoming-assessments"])
+    for (const key of [
+      "study-items",
+      "study-item",
+      "assessments",
+      "assessment",
+      "mistakes",
+      "due-reviews",
+      "coverage",
+      "activity",
+      "study-settings",
+      "workspace-settings",
+      "claim-suggestions",
+      "requirement-frequency",
+      "upcoming-assessments",
+    ])
       qc.invalidateQueries({ queryKey: [key] });
   };
+}
+
+/** 작은 버튼도 휴대폰에서는 손가락 높이(36px)를 넘게. */
+export const TAP = "max-sm:h-9";
+
+/** 얇은 구분선 목록. 상자 없이 제목 아래에 바로 둔다. */
+export function Rows({ children, className }: { children: ReactNode; className?: string }) {
+  return <ul className={cn("divide-y divide-line border-t border-line", className)}>{children}</ul>;
+}
+
+/** 비었을 때 한 줄. 목록 자리에서는 위에 구분선, 탭 바로 아래에서는 plain. */
+export function Quiet({ children, plain }: { children: ReactNode; plain?: boolean }) {
+  return <p className={cn("text-sm text-muted", !plain && "border-t border-line pt-3")}>{children}</p>;
 }
 
 export function score(a: Attempt) {
@@ -25,14 +52,16 @@ export function score(a: Attempt) {
 export function AttemptRow({ a }: { a: Attempt }) {
   const r = ATTEMPT_RESULT[a.result];
   return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[13px]">
-      <Badge tone={r.tone}>{r.label}</Badge>
-      {score(a) ? <span className="tabular-nums">{score(a)}</span> : null}
-      <span className="text-xs text-muted">
-        {formatDateTime(a.taken_at)}
-        {a.minutes ? ` · ${a.minutes}분` : ""}
-      </span>
-      {a.notes ? <span className="w-full text-xs text-muted">{a.notes}</span> : null}
+    <div className="min-w-0 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="font-medium">{r.label}</span>
+        {score(a) ? <span className="tabular-nums">{score(a)}</span> : null}
+        <span className="text-[13px] text-muted tabular-nums">
+          {formatDateTime(a.taken_at)}
+          {a.minutes ? ` · ${a.minutes}분` : ""}
+        </span>
+      </div>
+      {a.notes ? <p className="mt-0.5 text-[13px] whitespace-pre-wrap text-muted">{a.notes}</p> : null}
     </div>
   );
 }
@@ -68,7 +97,7 @@ export function AttemptForm({
   const pid = assessmentId ?? studyItemId ?? "x";
   return (
     <form
-      className="space-y-2 rounded-lg border border-line bg-surface p-3"
+      className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
         save.mutate();
@@ -77,7 +106,11 @@ export function AttemptForm({
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div>
           <Label htmlFor={`ar-${pid}`}>결과</Label>
-          <Select id={`ar-${pid}`} value={form.result} onChange={(e) => setForm({ ...form, result: e.target.value as AttemptResult })}>
+          <Select
+            id={`ar-${pid}`}
+            value={form.result}
+            onChange={(e) => setForm({ ...form, result: e.target.value as AttemptResult })}
+          >
             {(Object.keys(ATTEMPT_RESULT) as AttemptResult[]).map((k) => (
               <option key={k} value={k}>
                 {ATTEMPT_RESULT[k].label}
@@ -87,15 +120,32 @@ export function AttemptForm({
         </div>
         <div>
           <Label htmlFor={`as-${pid}`}>점수</Label>
-          <Input id={`as-${pid}`} inputMode="decimal" value={form.score} onChange={(e) => setForm({ ...form, score: e.target.value })} />
+          <Input
+            id={`as-${pid}`}
+            inputMode="decimal"
+            value={form.score}
+            onChange={(e) => setForm({ ...form, score: e.target.value })}
+          />
         </div>
         <div>
           <Label htmlFor={`am-${pid}`}>만점</Label>
-          <Input id={`am-${pid}`} inputMode="decimal" value={form.max} onChange={(e) => setForm({ ...form, max: e.target.value })} />
+          <Input
+            id={`am-${pid}`}
+            inputMode="decimal"
+            value={form.max}
+            onChange={(e) => setForm({ ...form, max: e.target.value })}
+          />
         </div>
         <div>
           <Label htmlFor={`at-${pid}`}>걸린 시간(분)</Label>
-          <Input id={`at-${pid}`} type="number" min={1} max={1440} value={form.minutes} onChange={(e) => setForm({ ...form, minutes: e.target.value })} />
+          <Input
+            id={`at-${pid}`}
+            type="number"
+            min={1}
+            max={1440}
+            value={form.minutes}
+            onChange={(e) => setForm({ ...form, minutes: e.target.value })}
+          />
         </div>
       </div>
       <Textarea
@@ -107,7 +157,7 @@ export function AttemptForm({
         onChange={(e) => setForm({ ...form, notes: e.target.value })}
       />
       <ErrorText error={save.error} />
-      <Button type="submit" size="sm" variant="primary" disabled={save.isPending}>
+      <Button type="submit" size="sm" variant="primary" className={TAP} disabled={save.isPending}>
         응시 기록
       </Button>
     </form>
@@ -146,7 +196,7 @@ export function MistakeForm({
   const pid = attemptId ?? studyItemId ?? "x";
   return (
     <form
-      className="space-y-2 rounded-lg border border-line bg-surface p-3"
+      className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
         if (form.question.trim()) save.mutate();
@@ -161,13 +211,29 @@ export function MistakeForm({
         onChange={(e) => setForm({ ...form, question: e.target.value })}
       />
       <div className="grid gap-2 sm:grid-cols-2">
-        <Input value={form.wrong} maxLength={4000} placeholder="내 답" aria-label="내 답" onChange={(e) => setForm({ ...form, wrong: e.target.value })} />
-        <Input value={form.correct} maxLength={4000} placeholder="맞는 답" aria-label="맞는 답" onChange={(e) => setForm({ ...form, correct: e.target.value })} />
+        <Input
+          value={form.wrong}
+          maxLength={4000}
+          placeholder="내 답"
+          aria-label="내 답"
+          onChange={(e) => setForm({ ...form, wrong: e.target.value })}
+        />
+        <Input
+          value={form.correct}
+          maxLength={4000}
+          placeholder="맞는 답"
+          aria-label="맞는 답"
+          onChange={(e) => setForm({ ...form, correct: e.target.value })}
+        />
       </div>
       <div className="grid gap-2 sm:grid-cols-[160px_minmax(0,1fr)]">
         <div>
           <Label htmlFor={`mr-${pid}`}>틀린 이유</Label>
-          <Select id={`mr-${pid}`} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value as MistakeReason })}>
+          <Select
+            id={`mr-${pid}`}
+            value={form.reason}
+            onChange={(e) => setForm({ ...form, reason: e.target.value as MistakeReason })}
+          >
             {(Object.keys(MISTAKE_REASON) as MistakeReason[]).map((k) => (
               <option key={k} value={k}>
                 {MISTAKE_REASON[k]}
@@ -177,12 +243,25 @@ export function MistakeForm({
         </div>
         <div>
           <Label htmlFor={`mn-${pid}`}>메모</Label>
-          <Input id={`mn-${pid}`} value={form.note} maxLength={4000} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+          <Input
+            id={`mn-${pid}`}
+            value={form.note}
+            maxLength={4000}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+          />
         </div>
       </div>
-      <p className="text-xs text-muted">적으면 내일 첫 복습이 잡힙니다. 내 기록일 뿐 시험 내용을 사실로 확정하지 않습니다.</p>
+      <p className="text-[13px] text-muted">
+        적으면 내일 첫 복습이 잡힙니다. 내 기록일 뿐 시험 내용을 사실로 확정하지 않습니다.
+      </p>
       <ErrorText error={save.error} />
-      <Button type="submit" size="sm" variant="primary" disabled={!form.question.trim() || save.isPending}>
+      <Button
+        type="submit"
+        size="sm"
+        variant="primary"
+        className={TAP}
+        disabled={!form.question.trim() || save.isPending}
+      >
         오답 추가
       </Button>
     </form>
@@ -196,7 +275,10 @@ export function ReviewCard({
   showGrade = true,
   onReviewed,
 }: {
-  m: Pick<Mistake, "id" | "question" | "wrong_answer" | "correct_answer" | "reason" | "reason_note" | "due_at" | "interval_days"> & {
+  m: Pick<
+    Mistake,
+    "id" | "question" | "wrong_answer" | "correct_answer" | "reason" | "reason_note" | "due_at" | "interval_days"
+  > & {
     status?: string;
   };
   title?: string | null;
@@ -222,38 +304,64 @@ export function ReviewCard({
     onSuccess: invalidate,
   });
   const resolved = m.status === "resolved";
+  const meta = [MISTAKE_REASON[m.reason] ?? m.reason, title, resolved ? "다 익힘" : `복습 ${formatDate(m.due_at)}`];
   return (
-    <article className="rounded-lg border border-line bg-surface p-3">
-      <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-        <Badge tone="neutral">{MISTAKE_REASON[m.reason] ?? m.reason}</Badge>
-        {title ? <span className="truncate">{title}</span> : null}
-        {resolved ? <Badge tone="ok">다 익힘</Badge> : <span>복습 {formatDate(m.due_at)}</span>}
-      </div>
+    <article className="py-4">
       <p className="text-sm leading-6 whitespace-pre-wrap">{m.question}</p>
+      <p className="truncate text-[13px] text-muted tabular-nums">{meta.filter(Boolean).join(" · ")}</p>
       {reveal || !showGrade ? (
-        <div className="mt-2 space-y-1 rounded-md bg-subtle/60 px-2.5 py-2 text-[13px]">
-          {m.wrong_answer ? <p>내 답: {m.wrong_answer}</p> : null}
-          {m.correct_answer ? <p>맞는 답: {m.correct_answer}</p> : <p className="text-muted">맞는 답을 적지 않았습니다.</p>}
-          {m.reason_note ? <p className="text-muted">메모: {m.reason_note}</p> : null}
-        </div>
+        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]">
+          {m.wrong_answer ? (
+            <>
+              <dt className="text-muted">내 답</dt>
+              <dd className="whitespace-pre-wrap">{m.wrong_answer}</dd>
+            </>
+          ) : null}
+          <dt className="text-muted">맞는 답</dt>
+          {m.correct_answer ? (
+            <dd className="whitespace-pre-wrap">{m.correct_answer}</dd>
+          ) : (
+            <dd className="text-muted">적지 않았습니다.</dd>
+          )}
+          {m.reason_note ? (
+            <>
+              <dt className="text-muted">메모</dt>
+              <dd className="whitespace-pre-wrap text-muted">{m.reason_note}</dd>
+            </>
+          ) : null}
+        </dl>
       ) : null}
-      {result ? <p className="mt-2 text-xs text-ok">{result}</p> : null}
+      {result ? <p className="mt-2 text-[13px] font-medium">{result}</p> : null}
       <ErrorText error={review.error ?? status.error} className="mt-1" />
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className={cn("mt-3 flex flex-wrap gap-1.5", !(showGrade && !resolved) && "-ml-2.5")}>
         {showGrade && !resolved ? (
           reveal ? (
             (Object.keys(GRADE) as ReviewGrade[]).map((g) => (
-              <Button key={g} size="sm" variant={g === "good" ? "primary" : "secondary"} disabled={review.isPending} onClick={() => review.mutate(g)} title={GRADE[g].hint}>
+              <Button
+                key={g}
+                size="sm"
+                variant={g === "good" ? "primary" : "secondary"}
+                className={TAP}
+                disabled={review.isPending}
+                onClick={() => review.mutate(g)}
+                title={GRADE[g].hint}
+              >
                 {GRADE[g].label}
               </Button>
             ))
           ) : (
-            <Button size="sm" onClick={() => setReveal(true)}>
+            <Button size="sm" className={TAP} onClick={() => setReveal(true)}>
               답 보기
             </Button>
           )
         ) : null}
-        <Button size="sm" variant="ghost" disabled={status.isPending} onClick={() => status.mutate(resolved ? "open" : "resolved")}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={TAP}
+          disabled={status.isPending}
+          onClick={() => status.mutate(resolved ? "open" : "resolved")}
+        >
           {resolved ? "다시 복습하기" : "다 익힘"}
         </Button>
       </div>

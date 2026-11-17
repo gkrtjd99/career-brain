@@ -1,16 +1,25 @@
 import type { ClaimKind, StudyItem, StudyItemStatus } from "@career-brain/client";
-import { Badge, Button, Input, Label, Section, Select, StatusBadge, Textarea } from "@career-brain/ui";
+import { Button, cn, Input, Label, Section, Select, StatusBadge, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
-import { AttemptForm, AttemptRow, MistakeForm, ReviewCard, useStudyInvalidate } from "../components/study/parts";
+import {
+  AttemptForm,
+  AttemptRow,
+  MistakeForm,
+  ReviewCard,
+  Rows,
+  TAP,
+  useStudyInvalidate,
+} from "../components/study/parts";
 import { api } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
 import { ATTEMPT_RESULT, ITEM_KIND, ITEM_STATUS, KIND_LABEL, REQ_FIELD } from "../lib/labels";
 
 const route = getRouteApi("/study/items/$itemId");
 const STATUSES: StudyItemStatus[] = ["planned", "in_progress", "done", "dropped"];
+const TEXT_LINK = "text-fg underline underline-offset-2 hover:text-muted";
 
 export function StudyItemPage() {
   const { itemId } = route.useParams();
@@ -29,118 +38,142 @@ function ItemView({ item }: { item: StudyItem }) {
       <PageHeader
         back={{ to: "/study", search: { tab: "items" }, label: "학습 항목" }}
         title={item.title}
-        subtitle={
-          <span className="flex flex-wrap items-center gap-1.5">
-            <Badge tone={ITEM_STATUS[item.status].tone}>{ITEM_STATUS[item.status].label}</Badge>
-            <span>{ITEM_KIND[item.kind]}</span>
-            {item.total_minutes ? <span>· 누적 {item.total_minutes}분</span> : null}
-          </span>
-        }
+        subtitle={[
+          ITEM_STATUS[item.status].label,
+          ITEM_KIND[item.kind],
+          item.total_minutes ? `누적 ${item.total_minutes}분` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       />
       {item.status === "merged" && item.merged_into_id ? (
-        <p className="mb-4 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
+        <p className="mb-6 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
           다른 항목에 합쳐졌습니다. 기록은{" "}
-          <Link to="/study/items/$itemId" params={{ itemId: item.merged_into_id }} className="text-accent hover:underline">
+          <Link to="/study/items/$itemId" params={{ itemId: item.merged_into_id }} className={TEXT_LINK}>
             합친 항목
           </Link>
           에서 이어 갑니다. 응시·경험 후보 기록은 고치지 않는 기록이라 이 항목에 남아 합친 항목에서 함께 보입니다.
         </p>
       ) : null}
-      {item.merged_from?.length ? (
-        <p className="mb-4 text-xs text-muted">
-          합쳐 온 항목: {item.merged_from.map((m) => m.title).join(", ")} (응시·경험 후보 기록은 원래 항목에 남아 여기서 함께 보입니다)
-        </p>
-      ) : null}
-      {item.requirement ? (
-        <p className="mb-4 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
-          <Link to="/study" search={{ tab: "coverage", posting: item.requirement.posting_id }} className="text-accent hover:underline">
-            {item.requirement.posting_title ?? "공고"}
-          </Link>{" "}
-          · {REQ_FIELD[item.requirement.field]}: {item.requirement.text}
-        </p>
+      {item.requirement || item.merged_from?.length ? (
+        <div className="mb-6 space-y-1 text-[13px] text-muted">
+          {item.requirement ? (
+            <p>
+              <Link
+                to="/study"
+                search={{ tab: "coverage", posting: item.requirement.posting_id }}
+                className={TEXT_LINK}
+              >
+                {item.requirement.posting_title ?? "공고"}
+              </Link>{" "}
+              · {REQ_FIELD[item.requirement.field]}: {item.requirement.text}
+            </p>
+          ) : null}
+          {item.merged_from?.length ? (
+            <p>
+              합쳐 온 항목: {item.merged_from.map((m) => m.title).join(", ")} (응시·경험 후보 기록은 원래 항목에 남아
+              여기서 함께 보입니다)
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {item.status === "merged" ? null : (
-      <>
-      <div className="mb-6 flex flex-wrap gap-1.5" role="radiogroup" aria-label="상태">
-        {STATUSES.map((s) => (
-          <Button
-            key={s}
-            size="sm"
-            role="radio"
-            aria-checked={item.status === s}
-            variant={item.status === s ? "primary" : "secondary"}
-            disabled={status.isPending}
-            onClick={() => item.status !== s && status.mutate(s)}
-          >
-            {ITEM_STATUS[s].label}
-          </Button>
-        ))}
-      </div>
-      <p className="-mt-4 mb-6 text-xs text-muted">완료해도 경험(주장)은 생기지 않습니다. 학습함과 입증함은 다릅니다.</p>
-      <ErrorText error={status.error} className="mb-3" />
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
-        <Section title={`학습 기록 ${item.sessions.length}`}>
-          <SessionForm itemId={item.id} />
-          {item.sessions.length ? (
-            <ul className="space-y-1.5">
-              {item.sessions.map((s) => (
-                <li key={s.id} className="rounded-md border border-line bg-surface px-2.5 py-2 text-[13px]">
-                  <span className="font-medium tabular-nums">{s.minutes}분</span>
-                  <span className="text-xs text-muted"> · {formatDateTime(s.started_at)}</span>
-                  {s.notes ? <p className="mt-0.5 whitespace-pre-wrap">{s.notes}</p> : null}
-                  {s.resources.length ? (
-                    <p className="mt-0.5 text-xs text-muted">
-                      자료:{" "}
-                      {s.resources.map((r, i) => (
-                        <span key={i}>
-                          {i ? ", " : ""}
-                          {r.url ? (
-                            <a href={r.url} target="_blank" rel="noreferrer noopener" className="text-accent hover:underline">
-                              {r.title}
-                            </a>
-                          ) : (
-                            r.title
-                          )}
-                        </span>
-                      ))}
-                    </p>
-                  ) : null}
-                </li>
+        <>
+          <div className="mb-10 space-y-2">
+            <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="상태">
+              {STATUSES.map((s) => (
+                <Button
+                  key={s}
+                  size="sm"
+                  role="radio"
+                  aria-checked={item.status === s}
+                  variant={item.status === s ? "primary" : "secondary"}
+                  className={TAP}
+                  disabled={status.isPending}
+                  onClick={() => item.status !== s && status.mutate(s)}
+                >
+                  {ITEM_STATUS[s].label}
+                </Button>
               ))}
-            </ul>
-          ) : null}
-        </Section>
+            </div>
+            <p className="text-[13px] text-muted">완료해도 경험(주장)은 생기지 않습니다. 학습함과 입증함은 다릅니다.</p>
+            <ErrorText error={status.error} />
+          </div>
 
-        <Section title={`연습 응시 ${item.attempts.length}`}>
-          {item.attempts.length ? (
-            <ul className="space-y-1.5">
-              {item.attempts.map((a) => (
-                <li key={a.id} className="rounded-md border border-line bg-surface px-2.5 py-2">
-                  <AttemptRow a={a} />
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <AttemptForm studyItemId={item.id} />
-        </Section>
+          <div className="grid grid-cols-1 gap-x-14 gap-y-10 lg:grid-cols-2">
+            <Section title={`학습 기록 ${item.sessions.length}`}>
+              <SessionForm itemId={item.id} />
+              {item.sessions.length ? (
+                <Rows className="mt-4">
+                  {item.sessions.map((s) => (
+                    <li key={s.id} className="py-3 text-sm">
+                      <p>
+                        <span className="font-medium tabular-nums">{s.minutes}분</span>
+                        <span className="text-[13px] text-muted tabular-nums"> · {formatDateTime(s.started_at)}</span>
+                      </p>
+                      {s.notes ? <p className="mt-0.5 whitespace-pre-wrap">{s.notes}</p> : null}
+                      {s.resources.length ? (
+                        <p className="mt-0.5 text-[13px] text-muted">
+                          자료:{" "}
+                          {s.resources.map((r, i) => (
+                            <span key={i}>
+                              {i ? ", " : ""}
+                              {r.url ? (
+                                <a href={r.url} target="_blank" rel="noreferrer noopener" className={TEXT_LINK}>
+                                  {r.title}
+                                </a>
+                              ) : (
+                                r.title
+                              )}
+                            </span>
+                          ))}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </Rows>
+              ) : null}
+            </Section>
 
-        <Section title={`오답 ${item.mistakes.length}`}>
-          {item.mistakes.map((m) => (
-            <ReviewCard key={m.id} m={m} showGrade={false} />
-          ))}
-          <MistakeForm studyItemId={item.id} />
-        </Section>
+            <Section title={`연습 응시 ${item.attempts.length}`}>
+              {item.attempts.length ? (
+                <Rows>
+                  {item.attempts.map((a) => (
+                    <li key={a.id} className="py-3">
+                      <AttemptRow a={a} />
+                    </li>
+                  ))}
+                </Rows>
+              ) : null}
+              <div className={cn(item.attempts.length > 0 && "mt-4 border-t border-line pt-4")}>
+                <AttemptForm studyItemId={item.id} />
+              </div>
+            </Section>
 
-        <Section title="경험 후보로 올리기">
-          <CandidateForm item={item} />
-        </Section>
+            <Section title={`오답 ${item.mistakes.length}`}>
+              {item.mistakes.length ? (
+                <Rows>
+                  {item.mistakes.map((m) => (
+                    <li key={m.id}>
+                      <ReviewCard m={m} showGrade={false} />
+                    </li>
+                  ))}
+                </Rows>
+              ) : null}
+              <div className={cn(item.mistakes.length > 0 && "mt-4 border-t border-line pt-4")}>
+                <MistakeForm studyItemId={item.id} />
+              </div>
+            </Section>
 
-        <Section title="합치기·지우기">
-          <MergeDelete item={item} />
-        </Section>
-      </div>
-      </>
+            <Section title="경험 후보로 올리기">
+              <CandidateForm item={item} />
+            </Section>
+
+            <Section title="합치기·지우기">
+              <MergeDelete item={item} />
+            </Section>
+          </div>
+        </>
       )}
     </div>
   );
@@ -169,8 +202,9 @@ function MergeDelete({ item }: { item: StudyItem }) {
   const others = (items.data ?? []).filter((x) => x.id !== item.id);
   return (
     <div className="space-y-3 text-[13px]">
-      <p className="text-xs text-muted">
-        같은 내용을 두 번 만들었으면 합칩니다. 학습 기록·오답은 고른 항목으로 옮기고, 응시·경험 후보 기록은 이 항목에 그대로 남아 고른 항목에서 함께 보입니다.
+      <p className="text-muted">
+        같은 내용을 두 번 만들었으면 합칩니다. 학습 기록·오답은 고른 항목으로 옮기고, 응시·경험 후보 기록은 이 항목에
+        그대로 남아 고른 항목에서 함께 보입니다.
       </p>
       <form
         className="flex flex-wrap items-end gap-2"
@@ -190,29 +224,37 @@ function MergeDelete({ item }: { item: StudyItem }) {
             ))}
           </Select>
         </div>
-        <Button type="submit" size="sm" disabled={!into || merge.isPending}>
+        <Button type="submit" size="sm" className={TAP} disabled={!into || merge.isPending}>
           이 항목을 합치기
         </Button>
       </form>
       <ErrorText error={merge.error} />
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={cn("flex flex-wrap items-center gap-2", !confirmDelete && "-ml-2.5")}>
         {confirmDelete ? (
           <>
-            <span>학습 기록 {item.sessions.length}개·오답 {item.mistakes.length}개도 함께 지웁니다.</span>
-            <Button size="sm" variant="danger" disabled={remove.isPending} onClick={() => remove.mutate()}>
+            <span>
+              학습 기록 {item.sessions.length}개·오답 {item.mistakes.length}개도 함께 지웁니다.
+            </span>
+            <Button
+              size="sm"
+              variant="danger"
+              className={TAP}
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
               지우기
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>
+            <Button size="sm" variant="ghost" className={TAP} onClick={() => setConfirmDelete(false)}>
               취소
             </Button>
           </>
         ) : (
-          <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
+          <Button size="sm" variant="ghost" className={TAP} onClick={() => setConfirmDelete(true)}>
             항목 지우기
           </Button>
         )}
       </div>
-      <p className="text-xs text-muted">응시·경험 후보·복습 기록이 있는 항목은 지우지 않습니다 (그만둠으로 두세요).</p>
+      <p className="text-muted">응시·경험 후보·복습 기록이 있는 항목은 지우지 않습니다 (그만둠으로 두세요).</p>
       <ErrorText error={remove.error} />
     </div>
   );
@@ -236,7 +278,7 @@ function SessionForm({ itemId }: { itemId: string }) {
   });
   return (
     <form
-      className="space-y-2 rounded-lg border border-line bg-surface p-3"
+      className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
         if (Number(form.minutes) > 0) save.mutate();
@@ -245,19 +287,50 @@ function SessionForm({ itemId }: { itemId: string }) {
       <div className="grid grid-cols-[100px_minmax(0,1fr)] gap-2">
         <div>
           <Label htmlFor="ss-min">분</Label>
-          <Input id="ss-min" type="number" min={1} max={1440} inputMode="numeric" value={form.minutes} onChange={(e) => setForm({ ...form, minutes: e.target.value })} />
+          <Input
+            id="ss-min"
+            type="number"
+            min={1}
+            max={1440}
+            inputMode="numeric"
+            value={form.minutes}
+            onChange={(e) => setForm({ ...form, minutes: e.target.value })}
+          />
         </div>
         <div>
           <Label htmlFor="ss-notes">메모</Label>
-          <Input id="ss-notes" value={form.notes} maxLength={4000} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <Input
+            id="ss-notes"
+            value={form.notes}
+            maxLength={4000}
+            onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          />
         </div>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Input value={form.rtitle} maxLength={300} placeholder="자료 제목 (선택)" aria-label="자료 제목" onChange={(e) => setForm({ ...form, rtitle: e.target.value })} />
-        <Input value={form.rurl} maxLength={2000} placeholder="자료 URL (선택)" aria-label="자료 URL" onChange={(e) => setForm({ ...form, rurl: e.target.value })} />
+        <Input
+          value={form.rtitle}
+          maxLength={300}
+          placeholder="자료 제목 (선택)"
+          aria-label="자료 제목"
+          onChange={(e) => setForm({ ...form, rtitle: e.target.value })}
+        />
+        <Input
+          value={form.rurl}
+          maxLength={2000}
+          placeholder="자료 URL (선택)"
+          aria-label="자료 URL"
+          onChange={(e) => setForm({ ...form, rurl: e.target.value })}
+        />
       </div>
       <ErrorText error={save.error} />
-      <Button type="submit" size="sm" variant="primary" disabled={!(Number(form.minutes) > 0) || save.isPending}>
+      <Button
+        type="submit"
+        size="sm"
+        variant="primary"
+        className={TAP}
+        disabled={!(Number(form.minutes) > 0) || save.isPending}
+      >
         학습 기록
       </Button>
     </form>
@@ -285,32 +358,33 @@ function CandidateForm({ item }: { item: StudyItem }) {
   const exps = experiences.data ?? [];
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted">
-        학습 결과를 내 경험으로 옮기고 싶을 때만 씁니다. 문장은 직접 쓰고, 주장은 “확인 필요” 상태로 들어가 브레인에서 확인해야 근거가 됩니다.
+      <p className="text-[13px] text-muted">
+        학습 결과를 내 경험으로 옮기고 싶을 때만 씁니다. 문장은 직접 쓰고, 주장은 “확인 필요” 상태로 들어가 브레인에서
+        확인해야 근거가 됩니다.
       </p>
       {item.claim_candidates.length ? (
-        <ul className="space-y-1.5">
+        <Rows>
           {item.claim_candidates.map((c) => (
-            <li key={c.claim_id} className="flex items-start gap-2 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[13px]">
+            <li key={c.claim_id} className="flex items-start gap-4 py-3 text-sm">
               <span className="min-w-0 flex-1">{c.statement}</span>
               <StatusBadge status={c.status} />
             </li>
           ))}
-        </ul>
+        </Rows>
       ) : null}
       {!ready ? (
-        <p className="text-[13px] text-warn">항목을 완료하거나 응시 기록이 있어야 올릴 수 있습니다.</p>
+        <p className="text-[13px] font-medium">항목을 완료하거나 응시 기록이 있어야 올릴 수 있습니다.</p>
       ) : !exps.length ? (
         <p className="text-[13px] text-muted">
           먼저{" "}
-          <Link to="/brain" className="text-accent hover:underline">
+          <Link to="/brain" className={TEXT_LINK}>
             브레인
           </Link>
           에 경험을 만드세요.
         </p>
       ) : (
         <form
-          className="space-y-2 rounded-lg border border-line bg-surface p-3"
+          className="space-y-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (form.experience && form.statement.trim()) save.mutate();
@@ -319,7 +393,11 @@ function CandidateForm({ item }: { item: StudyItem }) {
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
               <Label htmlFor="cc-exp">경험</Label>
-              <Select id="cc-exp" value={form.experience} onChange={(e) => setForm({ ...form, experience: e.target.value })}>
+              <Select
+                id="cc-exp"
+                value={form.experience}
+                onChange={(e) => setForm({ ...form, experience: e.target.value })}
+              >
                 <option value="">고르기</option>
                 {exps.map((x) => (
                   <option key={x.id} value={x.id}>
@@ -330,7 +408,11 @@ function CandidateForm({ item }: { item: StudyItem }) {
             </div>
             <div>
               <Label htmlFor="cc-kind">종류</Label>
-              <Select id="cc-kind" value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as ClaimKind })}>
+              <Select
+                id="cc-kind"
+                value={form.kind}
+                onChange={(e) => setForm({ ...form, kind: e.target.value as ClaimKind })}
+              >
                 {(Object.keys(KIND_LABEL) as ClaimKind[]).map((k) => (
                   <option key={k} value={k}>
                     {KIND_LABEL[k]}
@@ -360,7 +442,13 @@ function CandidateForm({ item }: { item: StudyItem }) {
             onChange={(e) => setForm({ ...form, statement: e.target.value })}
           />
           <ErrorText error={save.error} />
-          <Button type="submit" size="sm" variant="primary" disabled={!form.experience || !form.statement.trim() || save.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            variant="primary"
+            className={TAP}
+            disabled={!form.experience || !form.statement.trim() || save.isPending}
+          >
             확인 대기 주장으로 올리기
           </Button>
         </form>
