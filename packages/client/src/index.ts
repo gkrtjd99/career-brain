@@ -149,6 +149,11 @@ export function createClient({
         hiddenText?: T.HiddenTextMode;
         /** 기본 experience (c0032 전과 같음) */
         purpose?: T.SourcePurpose;
+        /** c0039: 용도를 확신하지 못함 → 받은 자료함 "확인 필요" (등급은 restricted) */
+        purposePending?: boolean;
+        purposeHint?: string;
+        /** c0039: 이 기기에서 읽은 글 (사진·스캔 PDF). 올리기와 같은 요청에 붙인다 */
+        textLayer?: T.TextLayerIn;
       } = {},
     ) => {
       const form = new FormData();
@@ -157,8 +162,18 @@ export function createClient({
       if (opts.dataClass) form.set("data_class", opts.dataClass);
       if (opts.hiddenText) form.set("hidden_text", opts.hiddenText);
       if (opts.purpose) form.set("purpose", opts.purpose);
+      if (opts.purposePending) form.set("purpose_pending", "true");
+      if (opts.purposeHint) form.set("purpose_hint", opts.purposeHint);
+      if (opts.textLayer) form.set("text_layer", JSON.stringify(opts.textLayer));
       return json<T.UploadOut>("POST", "/core/sources", { form });
     },
+    /** c0039 브레인에 넣기: 무엇인지 고르기 (모델 없이 서버 규칙) */
+    classifyIngest: (items: T.IngestClassifyItem[]) =>
+      post<T.IngestGuess[]>("/core/ingest/classify", { items }),
+    ingestCapabilities: () => get<T.IngestCapabilities>("/core/ingest/capabilities"),
+    /** 이 기기에서 읽은 글을 원본에 붙인다. 409 source_not_ready = 스캔 PDF가 아직 읽는 중 */
+    attachTextLayer: (sourceId: string, body: T.TextLayerIn) =>
+      json<T.TextLayerOut>("PUT", `/core/sources/${id(sourceId)}/text-layer`, { json: body }),
     /** 올리기 전 용도 제안 (모델 없이 파일 이름·형식·앞부분 글). 사람이 확정한다 */
     suggestPurpose: (body: { filename?: string; mime?: string; text_head?: string }) =>
       post<T.PurposeSuggestion>("/core/sources/suggest-purpose", body),

@@ -120,6 +120,9 @@ class UploadOut(BaseModel):
     # c0032: 원본의 용도·등급. 같은 파일이면 처음 원본의 용도 (증빙이면 등급은 restricted)
     purpose: str = "experience"
     data_class: str = "private"
+    # c0039: 용도 확인을 기다림 (받은 자료함 "확인 필요"), 이 기기에서 읽은 글을 붙인 블록 수
+    purpose_pending: bool = False
+    text_blocks: int = 0
 
 
 class ParseOut(BaseModel):
@@ -129,6 +132,9 @@ class ParseOut(BaseModel):
     missing_pages: list[int]
     error_code: str | None
     hidden_text: str = "keep"
+    # c0039: 읽은 길 local | device(이 기기) | model(연결된 모델) | provider, 읽은 도구
+    read_by: str | None = None
+    read_engine: str | None = None
 
 
 class VersionOut(BaseModel):
@@ -160,6 +166,9 @@ class SourceOut(BaseModel):
     # 이 원본에서 뽑은 확인 전 후보 / 이 원본을 근거로 단 확인된 주장
     pending_claims: int = 0
     confirmed_claims: int = 0
+    # c0039
+    purpose_pending: bool = False
+    purpose_hint: str | None = None
 
 
 class PurposePatch(BaseModel):
@@ -196,6 +205,8 @@ class BlockOut(BaseModel):
     ordinal: int
     origin: str
     text: str
+    # 이 기기에서 읽은 글자의 원본 그림 위 위치 [x0, y0, x1, y1] (c0039, 없으면 null)
+    bbox: list[float] | None = None
 
 
 _UNAUTHORIZED = HTTPException(
@@ -313,6 +324,9 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
 def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
     blobs = deps.blobs
     not_found = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    from career_core.interfaces.http.ingest import add_ingest_routes
+
+    add_ingest_routes(router, deps, authorize)  # c0039 브레인에 넣기
 
     @router.post("/sources", response_model=UploadOut)
     async def upload(
@@ -322,7 +336,21 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
         data_class: Annotated[str, Form()] = "private",
         hidden_text: Annotated[str, Form()] = "keep",
         purpose: Annotated[str, Form()] = "experience",
+        purpose_pending: Annotated[bool, Form()] = False,
+        purpose_hint: Annotated[str | None, Form(max_length=500)] = None,
+        # c0039: 이 기기에서 읽은 글 (JSON, ``PUT /sources/{id}/text-layer``와 같은 모양)
+        text_layer: Annotated[str | None, Form(max_length=2_000_000)] = None,
     ) -> UploadOut:
+        layer = None
+        if text_layer:
+            from pydantic import ValidationError
+
+            from career_core.interfaces.http.ingest import TextLayerIn, to_layer
+
+            try:
+                layer = to_layer(TextLayerIn.model_validate_json(text_layer))
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail="invalid_text_layer") from exc
         data = await file.read(deps.max_upload_bytes + 1)
         try:
             result = await upload_source(
@@ -337,9 +365,23 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 data_class=data_class,
                 hidden_text=hidden_text,
                 purpose=purpose,
+                purpose_pending=purpose_pending,
+                purpose_hint=purpose_hint,
+                text_layer=layer,
             )
         except UploadRejected as exc:
             raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+        if layer is not None and result.deduplicated:
+            # 같은 파일을 다시 넣음: 읽은 글이 아직 없을 때만 붙인다
+            from career_core.domain.ingest import TextLayerError
+            from career_core.usecases.ingest import attach_text_layer
+
+            try:
+                await attach_text_layer(
+                    deps.db, actor, result.source_id, layer, version_id=result.version_id
+                )
+            except TextLayerError:
+                pass
         return UploadOut(
             source_id=result.source_id,
             version_id=result.version_id,
@@ -348,6 +390,8 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
             hidden_text=result.hidden_text,
             purpose=result.purpose,
             data_class=result.data_class,
+            purpose_pending=result.purpose_pending,
+            text_blocks=result.text_blocks,
         )
 
     @router.post("/sources/suggest-purpose", response_model=SuggestPurposeOut)
@@ -414,6 +458,8 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                     missing_pages=list(r.missing_pages or []),
                     error_code=r.error_code,
                     hidden_text=r.hidden_text,
+                    read_by=sources_uc.read_by(r),
+                    read_engine=(r.text_layer or {}).get("engine"),
                 ),
             )
             for v, r in rows
@@ -446,6 +492,8 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
             extraction=extraction,
             pending_claims=counts.pending,
             confirmed_claims=counts.confirmed,
+            purpose_pending=source.purpose_pending,
+            purpose_hint=source.purpose_hint,
         )
 
     @router.get("/parse-runs/{run_id}/blocks", response_model=list[BlockOut])
@@ -463,7 +511,14 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 )
             ).scalars()
             return [
-                BlockOut(id=b.id, page=b.page, ordinal=b.ordinal, origin=b.origin, text=b.text)
+                BlockOut(
+                    id=b.id,
+                    page=b.page,
+                    ordinal=b.ordinal,
+                    origin=b.origin,
+                    text=b.text,
+                    bbox=b.bbox,
+                )
                 for b in blocks
             ]
 

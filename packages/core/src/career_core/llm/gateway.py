@@ -185,6 +185,12 @@ class ModelGateway:
     def overlay(self) -> ConfigOverlay | None:
         return self._overlay
 
+    def allows_data_class(
+        self, actor: ActorContext, endpoint: str, data_class: str, purpose: str
+    ) -> bool:
+        """이 연결로 그 등급의 자료를 보낼 수 있나 (호출·장부 기록 없이 미리 보기, c0039 브레인에 넣기)."""
+        return self._egress.allows(actor, endpoint, data_class, purpose)
+
     def reconfigure(self, config: ModelsConfig, env: Mapping[str, str] | None = None) -> None:
         """돌고 있는 게이트웨이의 설정을 바꾼다. egress 정책을 다시 만들고 클라이언트를 버린다.
 

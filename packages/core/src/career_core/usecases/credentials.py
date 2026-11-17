@@ -545,7 +545,9 @@ async def proof_flags(s: AsyncSession, source_ids: list[UUID]) -> dict[UUID, boo
     out: dict[UUID, bool] = {}
     for sid in source_ids:
         run = await _latest_run(s, sid)
-        out[sid] = bool(run) and has_resident_number(await _blocks(s, run.id))
+        # c0039: 이 기기·모델이 읽은 글은 주민등록번호를 가린 뒤 들어온다 — 가린 수로 표시한다
+        masked = bool(run and run.text_layer and run.text_layer.get("masked_resident_numbers"))
+        out[sid] = bool(run) and (masked or has_resident_number(await _blocks(s, run.id)))
     return out
 
 

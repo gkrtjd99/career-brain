@@ -257,7 +257,7 @@ function PaletteBody({ q, setQ, close }: { q: string; setQ: (q: string) => void;
         id: "do-ingest",
         section: "do",
         icon: FolderInput,
-        label: "자료 넣기",
+        label: "브레인에 넣기",
         hint: "파일·붙여넣기",
         words: "자료 넣기 올리기 업로드 파일 이력서",
         // 팔레트가 닫힌 다음 시트를 연다 (초점이 시트로 가게)

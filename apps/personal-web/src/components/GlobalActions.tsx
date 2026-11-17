@@ -6,7 +6,7 @@ import { UploadSheet } from "./UploadSheet";
 
 interface IngestContext {
   /** 자료 넣기 시트를 연다. purpose = 처음 고른 용도 (사람이 바꿀 수 있다) */
-  open: (purpose?: SourcePurpose) => void;
+  open: (purpose?: SourcePurpose, files?: File[]) => void;
   /** 경험 추가 시트를 연다 */
   openExperience: () => void;
 }
@@ -18,12 +18,16 @@ const Ctx = createContext<IngestContext | null>(null);
  * AppShell에 한 번 놓고, 화면·명령 팔레트는 useIngest()로 연다.
  */
 export function IngestProvider({ children }: { children: ReactNode }) {
-  const [upload, setUpload] = useState<{ open: boolean; purpose: SourcePurpose }>({
+  const [upload, setUpload] = useState<{ open: boolean; purpose: SourcePurpose; files: File[] | null }>({
     open: false,
     purpose: "experience",
+    files: null,
   });
   const [creating, setCreating] = useState(false);
-  const open = useCallback((purpose: SourcePurpose = "experience") => setUpload({ open: true, purpose }), []);
+  const open = useCallback(
+    (purpose: SourcePurpose = "experience", files?: File[]) => setUpload({ open: true, purpose, files: files ?? null }),
+    [],
+  );
   const openExperience = useCallback(() => setCreating(true), []);
   const value = useMemo(() => ({ open, openExperience }), [open, openExperience]);
   return (
@@ -34,6 +38,7 @@ export function IngestProvider({ children }: { children: ReactNode }) {
         key={upload.purpose}
         open={upload.open}
         purpose={upload.purpose}
+        initialFiles={upload.files}
         onClose={() => setUpload((u) => ({ ...u, open: false }))}
       />
       <Sheet open={creating} onOpenChange={setCreating} title="경험 추가">

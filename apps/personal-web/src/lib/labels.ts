@@ -607,6 +607,7 @@ export const PURPOSE_LABEL: Record<SourcePurpose, string> = {
 
 /** 받은 자료함에 올라온 이유. warn은 진하게, danger는 빨강, 나머지는 회색 */
 export const ATTENTION_LABEL: Record<SourceAttention, { label: string; tone: BadgeTone }> = {
+  purpose_unconfirmed: { label: "확인 필요", tone: "warn" },
   parse_failed: { label: "읽기 실패", tone: "danger" },
   extraction_failed: { label: "추출 실패", tone: "danger" },
   processing: { label: "읽는 중", tone: "neutral" },

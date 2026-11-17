@@ -33,6 +33,9 @@ export interface UploadOut {
   /** c0032: 원본의 용도·등급. 같은 파일이면 처음 원본의 용도 (증빙이면 등급은 restricted) */
   purpose: SourcePurpose;
   data_class: string;
+  /** c0039: 용도 확인을 기다림 (받은 자료함 "확인 필요"), 이 기기에서 읽은 글을 붙인 블록 수 */
+  purpose_pending?: boolean;
+  text_blocks?: number;
 }
 
 export type HiddenTextMode = "keep" | "exclude";
@@ -45,6 +48,7 @@ export type SourcePurpose = "experience" | "proof" | "reference";
 
 /** 받은 자료함에 올라온 이유 (앞의 것이 더 급하다). null = 다 처리됨 */
 export type SourceAttention =
+  | "purpose_unconfirmed"
   | "parse_failed"
   | "extraction_failed"
   | "processing"
@@ -79,7 +83,12 @@ export interface ParseOut {
   missing_pages: number[];
   error_code: string | null;
   hidden_text: HiddenTextMode;
+  /** c0039: 읽은 길. device = 이 기기에서 읽음, model = 연결된 모델로 읽음, local = 서버가 글자를 읽음 */
+  read_by?: ReadBy | null;
+  read_engine?: string | null;
 }
+
+export type ReadBy = "local" | "device" | "model" | "provider";
 
 export interface SourceVersion {
   id: Uuid;
@@ -102,6 +111,9 @@ export interface Source {
   /** 이 원본에서 뽑은 확인 전 후보 / 이 원본을 근거로 단 확인된 주장 */
   pending_claims: number;
   confirmed_claims: number;
+  /** c0039 */
+  purpose_pending?: boolean;
+  purpose_hint?: string | null;
 }
 
 export interface SourceListItem {
@@ -125,6 +137,66 @@ export interface SourceListItem {
   purpose: SourcePurpose;
   pending_claims: number;
   attention: SourceAttention | null;
+  /** c0039: 용도 확인 대기, 제안의 이유(걸린 낱말·resident_number·image), 읽은 길 */
+  purpose_pending?: boolean;
+  purpose_hint?: string | null;
+  read_by?: ReadBy | null;
+}
+
+// ---------------------------------------------------------------- 브레인에 넣기 (c0039)
+
+export type IngestKind = SourcePurpose | "posting" | "company";
+
+export interface IngestClassifyItem {
+  key: string;
+  filename?: string;
+  mime?: string;
+  text_head?: string;
+  url?: string;
+}
+
+export interface IngestGuess {
+  key: string;
+  kind: IngestKind;
+  confidence: "high" | "low";
+  /** 걸린 낱말 · resident_number · image · first_person · job_host · company_path … */
+  reason: string;
+  resident_number: boolean;
+  host: string | null;
+  company_hint: string | null;
+  company_id: Uuid | null;
+  company_name: string | null;
+}
+
+export interface IngestCapabilities {
+  /** 사진을 연결된 모델로 읽을 수 있는 자료 등급. 증빙은 늘 이 기기에서 읽는다 */
+  model_ocr_classes: string[];
+  model_ocr_route: string | null;
+}
+
+export interface TextLayerBlock {
+  page: number;
+  text: string;
+  /** [x0, y0, x1, y1] px (OCR이 준 것만) */
+  bbox?: [number, number, number, number] | null;
+}
+
+export interface TextLayerIn {
+  engine: string;
+  pages_total?: number;
+  blocks: TextLayerBlock[];
+  /** 보내기 전에 가린 주민등록번호 수 */
+  masked?: number;
+  version_id?: Uuid;
+}
+
+export interface TextLayerOut {
+  source_id: Uuid;
+  parse_run_id: Uuid;
+  blocks: number;
+  masked: number;
+  parse_status: string;
+  missing_pages: number[];
 }
 
 export interface Block {
@@ -133,6 +205,8 @@ export interface Block {
   ordinal: number;
   origin: string;
   text: string;
+  /** 이 기기에서 읽은 글자의 원본 그림 위 위치 [x0, y0, x1, y1] (c0039) */
+  bbox?: [number, number, number, number] | null;
 }
 
 // ---------------------------------------------------------------- brain

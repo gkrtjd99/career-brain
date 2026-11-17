@@ -89,7 +89,7 @@ apps/personal-web/src/
 
 ## 의존성
 
-런타임: `@tanstack/react-query`, `@tanstack/react-router`, `@radix-ui/react-dialog`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
+런타임: `@tanstack/react-query`, `@tanstack/react-router`, `@radix-ui/react-dialog`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 이 기기 글자 읽기(c0039): `tesseract.js` 7.0.0(+ `tesseract.js-core`), `@tesseract.js-data/kor`·`@tesseract.js-data/eng` 1.0.0 — 처음 사진을 읽을 때만 불러온다(아래 "브레인에 넣기"). 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
 
 ### 문서 편집기: Tiptap 대신 문단별 textarea
 
@@ -112,6 +112,7 @@ O07 문서는 `{id, text, origin, claim_ids}` 블록 목록이고, 저장·근�
 
 - Pretendard — SIL Open Font License 1.1 (글꼴 CSS 머리말에 고지 포함)
 - React, TanStack Query/Router, Radix UI, lucide-react, clsx, tailwind-merge, Tailwind CSS — MIT (lucide-react 는 ISC)
+- tesseract.js·tesseract.js-core — Apache-2.0, @tesseract.js-data/kor·eng(학습 데이터 `4.0.0_best_int`) — MIT. 빌드가 node_modules에서 `dist/ocr/`로 복사한다(레포에 넣지 않음)
 
 ## 화면용 조회 API
 
@@ -214,6 +215,19 @@ c0032 (원본 용도, `database.md` "원본 용도"): `POST /core/sources` 폼 `
 다른 화면의 링크: 오늘 화면 비용 줄 → `usage`, 토큰 만료 알림 "연장" → `tokens`, 승인 요청 카드·일괄 실행 진행 카드 → `runs`. 브레인 인터뷰 탭의 "실행 보기"는 옛 주소(`/system?run=`)라 넘겨 받는다.
 
 확인: 합성 데이터 mock API(로컬, 커밋 안 함)로 390px에서 탭 8개·연결 추가(구독 계정)·시험·용도 바꾸기·예산 고치기·옛 주소 이동을 보았다 (가로 넘침 없음). 실제 백엔드와는 아직 맞춰 보지 않았다.
+
+## 브레인에 넣기 (c0039, plan §9·§20)
+
+`UploadSheet`(이름·props는 예전 "자료 올리기"와 같고 `purpose?`·`initialFiles?`가 더해졌다)가 창 하나로 파일 여러 개·글·주소를 받는다. 처리 줄은 `src/lib/ingest.ts`의 바깥 상태(`useSyncExternalStore`)라 창을 닫거나 다른 화면으로 가도 이어진다(한 번에 셋, 새로 고치면 사라짐 — 저장된 것은 서버에 있다). 줄은 `components/ingest/IngestQueue.tsx`, 브레인 화면 전체 놓기는 `components/ingest/DropTarget.tsx`.
+
+- 순서: `POST /core/ingest/classify`로 고르기 → (사진) 읽기 → `POST /core/sources`(확신이 낮으면 `purpose_pending`·`purpose_hint`, 이 기기에서 읽었으면 `text_layer`를 같은 요청에) → 읽기가 끝날 때까지 원본 상세를 본다 → 확인 전 PDF·DOCX는 읽은 앞부분으로 다시 고르고 확신하면 바로 보낸다 → 경험 자료는 설정("읽은 뒤 바로 경험 후보를 뽑기", 이 브라우저에 기억, 기본 켬)에 따라 추출을 건다.
+- 주소: 공고 → `POST /core/postings`(`savePostings`), 이 공간 회사와 맞은 회사 페이지 → `importCompanyUrl`, 못 맞추면 줄 안에서 회사 이름을 받아 `createCompany({name, homepage})` 후 가져온다.
+- 이 기기 글자 읽기(`src/lib/ocr.ts`): `tesseract.js/dist/tesseract.esm.min.js`를 동적 import(별도 조각 62 kB, gzip 11 kB), `createWorker(["kor","eng"], LSTM_ONLY)`에 `workerPath`·`corePath`(WebAssembly SIMD가 되면 `simd-lstm`)·`langPath`를 이 앱 주소(`/ocr/…`)로 준다. 긴 변 2400px로 줄여 읽고 좌표는 원본 px로 되돌린다. 주민등록번호는 올리기 전에 가린다. 한 번에 하나, 60초 쉬면 worker를 끈다.
+- 정적 파일: `vite.config.ts`의 `ocrAssets()`가 개발 서버에서는 `/ocr/*`를 node_modules에서 그대로 내주고, 빌드에서는 `dist/ocr/`에 넣는다. 크기(압축 전): `worker.min.js` 111 KB, 엔진 `tesseract-core-simd-lstm.wasm.js`·`tesseract-core-lstm.wasm.js` 각 3.9 MB(gzip 약 1.5 MB, 둘 중 하나만 받는다), `kor.traineddata.gz` 1.6 MB, `eng.traineddata.gz` 3.0 MB. 첫 사진에서 약 8.6 MB(서버가 gzip하면 약 6.2 MB)를 받고 이후 브라우저 캐시를 쓴다. 첫 화면 크기에는 들어가지 않는다.
+- 읽은 길: 줄과 자료 화면의 읽기 줄에 "이 기기에서 읽음"·"연결된 모델로 읽음"(`ParseOut.read_by`·`read_engine`).
+- 받은 자료함(`SourceInbox`): `attention = purpose_unconfirmed` 줄은 제안 이유 한 줄과 용도 칩 — 칩 하나를 누르면 그 용도로 확인된다(증빙은 `restricted`, 아니면 `private`). 자료 화면의 용도 구역에는 "확인 필요." + "이대로 확인".
+- 빠진 것: DOCX "숨김 서식 글은 빼고 읽기"와 등급 고르기는 이 창에 없다(자료 화면에서 바꾼다). 스캔 PDF는 브라우저에서 쪽을 그리지 않는다(pdf.js 미도입) — "쪽 사진으로 넣어 주세요"라고 알린다.
+- 확인: 버려도 되는 DB·다른 포트에서 실제 백엔드로, 390px 폭에서 브레인 화면 놓기(안내 덮개)·파일 셋 한꺼번에(합성 자격증 canvas PNG → 이 기기에서 읽어 증빙·자격 항목 "정보처리기사", 주민등록번호 가려짐·위치 저장 / 1인칭 회고 → 경험 / 짧은 메모 → 확인 필요)·주소 둘(공고 저장, 회사 이름 받아 만들고 가져오기)·받은 자료함 한 번 눌러 확인을 보았다. 데스크톱 폭은 보지 못했다.
 
 ## 알려진 한계
 

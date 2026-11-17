@@ -75,6 +75,9 @@ class Source(Base):
     purpose: Mapped[str] = mapped_column(Text, default="experience")
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # c0039: 넣을 때 용도를 확신하지 못해 사람의 확인을 기다림 (그동안 등급은 restricted), 제안의 이유
+    purpose_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class SourceVersion(Base):
@@ -112,6 +115,8 @@ class ParseRun(Base):
     )
     # c0029: 숨김 서식 글을 블록에 넣는지 (keep) 빼는지 (exclude, DOCX만)
     hidden_text: Mapped[str] = mapped_column(Text, default="keep")
+    # c0039: 이 기기(브라우저)·연결된 모델이 읽은 글의 기록 (글은 document_blocks)
+    text_layer: Mapped[dict | None] = mapped_column(JSONB, default=None)
 
 
 class DocumentBlock(Base):
@@ -125,6 +130,8 @@ class DocumentBlock(Base):
     origin: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # c0039: OCR이 준 쪽 안 위치 [x0, y0, x1, y1] (px). 없으면 None
+    bbox: Mapped[list[int] | None] = mapped_column(JSONB, default=None)
 
 
 class Job(Base):

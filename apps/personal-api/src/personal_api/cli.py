@@ -82,13 +82,15 @@ MAX_TOKEN_LABEL = 100
 
 def build_handlers(settings: Settings, db: Database) -> dict[str, JobHandler]:
     """worker가 처리하는 작업 종류. `worker` 명령과 `serve`(내장 worker)가 같이 쓴다."""
+    gateway = build_gateway(settings, db)
     deps = ParsingDeps(
         db=db,
         blobs=LocalBlobStore(settings.blob_dir),
-        egress=ProviderEgressPolicy({}),  # 외부 제공자 미설정 = 외부 전송 없음
+        egress=ProviderEgressPolicy({}),  # 외부 파서 미설정 = 외부 전송 없음
         local_parsers=default_local_parsers(),
+        # c0039: 증빙이 아닌 사진 원본은 비전 라우트(source_ocr·job_extract_image)를 명시했을 때만 모델로
+        gateway=gateway,
     )
-    gateway = build_gateway(settings, db)
     return {
         **run_handlers(RunDeps(db=db, gateway=gateway)),
         **parsing_handlers(deps),

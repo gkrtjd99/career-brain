@@ -7,6 +7,9 @@
 - ``experience`` → 증빙·참고: 이 원본에서 뽑은 확인 전 후보(``extracted`` 주장, 남은 주장이 없는 AI 경험)는
   ``retired``로 닫고 대기 중인 추출은 실패(``purpose_changed``)로 닫는다. 이 원본을 근거로 단 확인된 주장이
   하나라도 있으면 바꾸지 않는다 (``source_has_confirmed_claims``) — 사실이 된 주장의 근거를 몰래 빼지 않는다.
+
+확인 대기(c0039, 브레인에 넣기): 넣을 때 용도를 확신하지 못하면 ``purpose_pending``으로 올리고 등급을
+``restricted``로 둔다 (증빙일 수 있다). 사람이 용도를 고르거나 그대로 확인하면(``change_purpose``) 풀린다.
 """
 
 from __future__ import annotations
@@ -70,6 +73,9 @@ class UploadResult:
     # 원본의 용도·등급. 같은 파일을 다시 올리면 처음 원본의 용도 그대로다 (바꾸려면 change_purpose).
     purpose: str = SourcePurpose.EXPERIENCE.value
     data_class: str = DataClass.PRIVATE.value
+    # c0039: 용도 확인을 기다림, 이 기기에서 읽은 글을 붙인 블록 수
+    purpose_pending: bool = False
+    text_blocks: int = 0
 
 
 _STRICTNESS = {DataClass.PUBLIC: 0, DataClass.PRIVATE: 1, DataClass.RESTRICTED: 2}
@@ -102,7 +108,11 @@ async def _existing(
             hidden_text=run[1] if run else "keep",
             purpose=source.purpose,
             data_class=source.data_class,
+            purpose_pending=bool(source.purpose_pending),
         )
+
+
+MAX_PURPOSE_HINT = 200
 
 
 async def upload_source(
@@ -118,12 +128,19 @@ async def upload_source(
     data_class: str = DataClass.PRIVATE,
     hidden_text: str = "keep",
     purpose: str | None = SourcePurpose.EXPERIENCE,
+    purpose_pending: bool = False,
+    purpose_hint: str | None = None,
+    text_layer=None,
 ) -> UploadResult:
     """``hidden_text``: ``exclude``면 숨김 서식 글을 원본 블록에서 뺀다 (DOCX만, 다른 형식은 ``keep``).
     같은 파일을 다시 올리면 처음 파싱의 값을 그대로 돌려준다 (다시 파싱하지 않는다).
 
     ``purpose``: experience(기본) | proof | reference. 증빙은 고른 등급과 상관없이 ``restricted``다.
-    같은 파일을 증빙으로 다시 올리면 등급만 올린다 (용도는 처음 원본 그대로, 결과의 ``purpose``)."""
+    같은 파일을 증빙으로 다시 올리면 등급만 올린다 (용도는 처음 원본 그대로, 결과의 ``purpose``).
+
+    c0039: ``purpose_pending``이면 받은 자료함에서 사람의 확인을 기다리고 등급은 ``restricted``다.
+    ``text_layer``(``domain.ingest.TextLayer``)는 이 기기에서 읽은 글: 사진·스캔 PDF에만, 같은 트랜잭션에서
+    붙인다 (worker가 읽기를 끝낼 때 그 쪽을 못 읽은 쪽으로 보지 않는다). 같은 파일이면 ``ingest.attach_text_layer``."""
     if not data:
         raise UploadRejected("empty", 400)
     if len(data) > max_bytes:
@@ -137,6 +154,9 @@ async def upload_source(
     except ValueError as exc:
         raise UploadRejected("invalid_purpose", 422) from exc
     dc = PURPOSE_DATA_CLASS.get(pp, dc)
+    if purpose_pending:
+        dc = DataClass.RESTRICTED
+    hint = " ".join((purpose_hint or "").split())[:MAX_PURPOSE_HINT] or None
     if hidden_text not in HIDDEN_TEXT_CHOICES:
         raise UploadRejected("invalid_hidden_text", 422)
     name = clean_filename(filename)
@@ -145,6 +165,15 @@ async def upload_source(
         hidden_text = "keep"
     sha256 = hashlib.sha256(data).hexdigest()
     ws = actor.workspace_id
+    text_blocks = 0
+
+    if text_layer is not None:
+        from career_core.domain.ingest import TextLayerError, check_text_layer
+
+        try:
+            text_layer = check_text_layer(text_layer, mime=mime)
+        except TextLayerError as exc:
+            raise UploadRejected(exc.code, 422) from exc
 
     if found := await _existing(db, ws, sha256, dc):
         return found
@@ -158,6 +187,8 @@ async def upload_source(
         data_class=dc,
         purpose=pp.value,
         created_by=actor.subject_id,
+        purpose_pending=bool(purpose_pending),
+        purpose_hint=hint,
     )
     version = SourceVersion(
         id=uuid4(),
@@ -189,6 +220,10 @@ async def upload_source(
             ):
                 s.add(row)
                 await s.flush()
+            if text_layer is not None:
+                from career_core.usecases.ingest import store_with_new_run
+
+                text_blocks = await store_with_new_run(s, ws, run, text_layer, mime)
     except IntegrityError:
         # 동시에 같은 파일이 올라온 경우: 먼저 커밋된 쪽을 돌려준다.
         if found := await _existing(db, ws, sha256, dc):
@@ -202,6 +237,8 @@ async def upload_source(
         hidden_text=hidden_text,
         purpose=pp.value,
         data_class=dc.value,
+        purpose_pending=bool(purpose_pending),
+        text_blocks=text_blocks,
     )
 
 
@@ -209,6 +246,7 @@ async def upload_source(
 
 # 받은 자료함에 올리는 이유 (앞의 것이 더 급하다). None = 다 처리됨 (기록 쪽에서 찾아 들어간다).
 ATTENTION_ORDER = (
+    "purpose_unconfirmed",  # c0039: 넣을 때 용도를 확신하지 못함 (확인 필요)
     "parse_failed",  # 읽기 실패
     "extraction_failed",  # 경험 추출 실패
     "processing",  # 읽는 중 (외부 OCR 대기 포함)
@@ -225,9 +263,12 @@ def attention_of(
     parse_status: str | None,
     extraction_status: str | None,
     pending_claims: int,
+    purpose_pending: bool = False,
 ) -> str | None:
     """받은 자료함에 둘 이유 하나. 증빙·참고는 읽기 상태만 본다 (추출하지 않는다)."""
     found: set[str] = set()
+    if purpose_pending:
+        found.add("purpose_unconfirmed")
     if parse_status is None or parse_status in (ParseStatus.PENDING, ParseStatus.WAITING_PROVIDER):
         found.add("processing")
     elif parse_status == ParseStatus.FAILED:
@@ -278,6 +319,10 @@ class SourceListItem:
     pending_claims: int = 0
     # 받은 자료함에 둘 이유 (``ATTENTION_ORDER``), 다 처리됐으면 None
     attention: str | None = None
+    # c0039: 용도 확인을 기다림, 제안의 이유, 읽은 길(local | device | model | provider)
+    purpose_pending: bool = False
+    purpose_hint: str | None = None
+    read_by: str | None = None
 
 
 def _source_runs(source_ids):
@@ -367,7 +412,13 @@ async def list_sources(
         r = runs.get(v.id) if v else None
         e = extractions.get(r.id) if r else None
         n = pending.get(src.id, 0)
-        why = attention_of(src.purpose, r.status if r else None, e.status if e else None, n)
+        why = attention_of(
+            src.purpose,
+            r.status if r else None,
+            e.status if e else None,
+            n,
+            bool(src.purpose_pending),
+        )
         if attention and why is None:
             continue
         out.append(
@@ -392,11 +443,28 @@ async def list_sources(
                 purpose=src.purpose,
                 pending_claims=n,
                 attention=why,
+                purpose_pending=bool(src.purpose_pending),
+                purpose_hint=src.purpose_hint,
+                read_by=read_by(r),
             )
         )
         if len(out) >= limit:
             break
     return out
+
+
+def read_by(run: ParseRun | None) -> str | None:
+    """읽은 길: ``device``(이 기기의 OCR) | ``model``(연결된 비전 모델) | ``provider``(외부 파서) |
+    ``local``(이 서버가 글자를 읽음). 아직 읽지 않았으면 None."""
+    if run is None:
+        return None
+    if run.text_layer and run.text_layer.get("origin") in ("device", "model"):
+        return run.text_layer["origin"]
+    if run.provider_job_id:
+        return "provider"
+    if run.status in (ParseStatus.COMPLETE, ParseStatus.PARTIAL):
+        return "local"
+    return None
 
 
 # ---------------------------------------------------------------- 용도
@@ -488,7 +556,14 @@ async def change_purpose(
             raise SourceNotFound(source_id)
         before = SourcePurpose(src.purpose)
         new_dc = forced or want_dc or DataClass(src.data_class)
-        if before == target and new_dc == src.data_class:
+        was_pending = bool(src.purpose_pending)
+        if was_pending and actor.is_human:
+            # c0039: 사람이 용도를 확인했다 (그대로여도). 확인 대기 동안의 restricted는 고른 등급으로
+            src.purpose_pending = False
+        elif was_pending:
+            new_dc = DataClass.RESTRICTED  # 에이전트는 확인하지 못한다: 대기 중엔 restricted 그대로
+        confirmed = was_pending and not src.purpose_pending
+        if before == target and new_dc == src.data_class and not confirmed:
             return PurposeChange(src.id, src.purpose, src.data_class, changed=False)
 
         if before == SourcePurpose.REFERENCE and target != SourcePurpose.REFERENCE:
@@ -564,7 +639,7 @@ async def change_purpose(
         src.data_class = new_dc.value
         if (
             target == SourcePurpose.EXPERIENCE
-            and before != SourcePurpose.EXPERIENCE
+            and (before != SourcePurpose.EXPERIENCE or (was_pending and not src.purpose_pending))
             and can_extract
         ):
             parse_run_id = await s.scalar(
