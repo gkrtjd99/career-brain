@@ -23,10 +23,12 @@ packages/client/src/
   types.ts        코어 HTTP 응답 타입 (interfaces/http 의 Pydantic 모델과 맞춤, 손으로 작성)
   index.ts        createClient({ baseUrl, getToken }) — 모든 코어 경로, ApiError(status, code)
   models.ts       연결·관리의 모델 연결 API (/core/models/…, O22). 키 값 칸이 없다 (상태·끝 4자리만)
-packages/ui/src/  Button, Badge, Card/Section/EmptyState/Spinner, Input/Textarea/Select/Label,
-                  Sheet(옆 패널, Radix Dialog), ConfirmDialog(가운데 확인 창), Highlight(원문 위치 강조), EvidenceCard/StatusBadge,
-                  MarkdownView(위키용 최소 Markdown, HTML 해석 안 함),
-                  FilterChips·Chip(목록 거르기 회색 알약)·ViewTabs(보기 바꾸기 밑줄 탭), CommandDialog(명령 팔레트 틀)
+packages/ui/src/  shadcn/ui 방식 부품 (Radix + Tailwind v4 + cva, 소스를 여기 둔다. 아래 "부품"):
+                  Button·IconButton, Badge, Card/Section/EmptyState/Spinner, Input/Textarea/Label(FIELD), Select,
+                  Checkbox·RadioGroup·Switch, Tabs·ViewTabs, Tooltip, Popover, DropdownMenu·MoreMenu, Collapsible·Disclosure,
+                  Sheet(옆 패널, Radix Dialog), ConfirmDialog(Radix AlertDialog), Toaster·toast(sonner),
+                  MonthField·DateField·TimeField·DateTimeField(+ MonthGrid·Calendar), Highlight(원문 위치 강조), EvidenceCard/StatusBadge,
+                  MarkdownView(위키용 최소 Markdown, HTML 해석 안 함), FilterChips·Chip(목록 거르기 회색 알약), CommandDialog(명령 팔레트 틀)
 apps/personal-web/src/
   router.tsx      TanStack Router (코드 기반 route, 파일 생성기 없음)
   lib/api.ts      토큰 저장, client, QueryClient (401 → 설정)
@@ -64,7 +66,30 @@ apps/personal-web/src/
 
 새 API는 없다. 화면 어디서나 자료 넣기·경험 추가 시트를 여는 일은 `useIngest().open(purpose?)` · `useIngest().openExperience()`로 한다 (AppShell이 한 번 놓음).
 
-거르기와 보기 바꾸기는 모양을 둘로만 쓴다: 목록을 거르면 회색 알약 `FilterChips`(하나 고르기, `radiogroup`, 화살표 키, 수 표시)·`Chip`(켜고 끄기, `aria-pressed`), 같은 자료를 다른 보기로 바꾸면 밑줄 탭 `ViewTabs`(`tablist`). 누르는 것은 좁은 화면 36px·넓은 화면 24px 이상(문장 안 링크는 예외)이고, 좁은 화면에서 잘리는 메타 줄은 두 줄까지 접거나 날짜를 앞에 둔다.
+거르기와 보기 바꾸기는 모양을 둘로만 쓴다: 목록을 거르면 회색 알약 `FilterChips`(하나 고르기, `radiogroup`, 화살표 키, 수 표시)·`Chip`(켜고 끄기, `aria-pressed`), 같은 자료를 다른 보기로 바꾸면 밑줄 탭 `ViewTabs`(Radix Tabs, 화살표·Home·End). 누르는 것은 좁은 화면 36px·넓은 화면 24px 이상(문장 안 링크는 예외)이고, 좁은 화면에서 잘리는 메타 줄은 두 줄까지 접거나 날짜를 앞에 둔다.
+
+## 부품
+
+`packages/ui`는 shadcn/ui(MIT)의 소스 방식을 따른다. CLI(`npx shadcn`)는 쓰지 않고, 부품 소스를 손으로 옮겨 앱 토큰(흑백·얇은 선)으로 다시 칠했다. Radix 기본 동작(키보드·초점 가두기·`aria-*`)은 그대로 두고 모양만 바꾼다. 떠 있는 층(Select 목록·Popover·DropdownMenu·Tooltip·확인 창)만 그림자를 쓰고, 열릴 때 120ms `pop-in`/`fade-in`(`motion-safe:`)만 쓴다. 모서리는 Button과 같은 `rounded-md`다.
+
+| 쓰임 | 부품 | 규칙 |
+|---|---|---|
+| 고르기 | `Select` + `SelectItem` | 네이티브 `<select>`를 쓰지 않는다. `onValueChange(string)`. 빈 값 `""`도 항목이 될 수 있다(안에서 `__empty__`로 바꿈). 좁은 화면 항목 높이 36px |
+| 켜고 끄기 | `Checkbox`(`onCheckedChange(boolean)`) | 목록 고르기·선택 사항. `Switch`는 즉시 바뀌는 설정에만(지금은 쓰는 곳 없음) |
+| 하나 고르기 | `RadioGroup` + `RadioGroupItem` | 자료 용도(`PurposeChoice`), 붙여넣기 대상, 비슷한 경험 처리 |
+| 아이콘만 있는 단추 | `IconButton({label})` | `aria-label`과 Tooltip을 함께 단다. 글자가 있는 단추에는 Tooltip을 달지 않는다. 잘린 글은 `title`을 그대로 쓴다 |
+| 더 할 일 | `MoreMenu({items})` | ⋯ 메뉴. `danger` 항목은 맨 아래 `separated`. 지우기는 메뉴 → `ConfirmDialog` |
+| 접기 | `Disclosure` | 화면 안 `<details>`를 대신한다. 내보내는 HTML 파일 안의 `<details>`는 그대로 둔다 |
+| 확인 | `ConfirmDialog` | AlertDialog. 기본 초점은 "취소", 진행 중에는 닫히지 않는다. `window.confirm`은 저장 안 한 채 나가기 두 곳에만 남긴다 |
+| 잠깐 알림 | `toast()` | 저장·삭제·복사처럼 바로 지나가는 알림. 상태(저장됨·실패·남은 할 일)는 화면 안 글로 둔다. 하나의 `Toaster`(가운데 아래, 좁은 화면은 아래 탭 위) |
+| 날짜 | `MonthField`·`DateField`·`TimeField`·`DateTimeField` | 아래 |
+
+날짜 칸은 네이티브 `type="date"·"month"`를 쓰지 않는다. 브라우저마다 "연도. 월. 일." 같은 빈 틀이 다르게 나오고, 월 단위 칸은 Safari·Firefox에 없다.
+
+- 기간(입학·졸업, 경력 시작·끝, 자격 취득·만료)은 `MonthField`: `YYYY.MM`을 바로 치거나(숫자만 치면 점을 넣는다) 달력 단추로 열두 달 판을 연다. 이력서 기간이 월 단위라 값도 `YYYY-MM`.
+- 생년월일은 `DateField calendar={false}`: `YYYY.MM.DD`를 치고 칸을 벗어날 때 검사한다. 수십 년 전 날짜는 달력을 넘기는 것보다 여덟 자리를 치는 편이 빠르다. 1900-01-01 ~ 오늘만 받는다.
+- 마감·면접 같은 가까운 날은 `DateField`(달력 있음, 일요일 시작) 또는 `DateTimeField`(날짜 + `HH:MM`, 시각을 비우면 00:00).
+- 잘못 친 값은 칸 아래에 "2024.03 처럼 넣으세요." 같은 한 줄로 알리고 저장 값은 바꾸지 않는다. API에 보내는 값 모양(`YYYY-MM`, `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`)은 그대로다.
 
 ## 화면
 
@@ -94,7 +119,7 @@ apps/personal-web/src/
 
 ## 의존성
 
-런타임: `@tanstack/react-query`, `@tanstack/react-router`, `@radix-ui/react-dialog`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 이 기기 글자 읽기(c0039): `tesseract.js` 7.0.0(+ `tesseract.js-core`), `@tesseract.js-data/kor`·`@tesseract.js-data/eng` 1.0.0 — 처음 사진을 읽을 때만 불러온다(아래 "브레인에 넣기"). 보고 있는 페이지 보내기(c0043): `defuddle` 0.19.6·`turndown` 7.2.5(MIT) — `/capture`에서만 불러온다. 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
+런타임: `@tanstack/react-query`, `@tanstack/react-router`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 부품(`packages/ui`): Radix `react-dialog`·`react-alert-dialog`·`react-select`·`react-checkbox`·`react-radio-group`·`react-switch`·`react-tabs`·`react-tooltip`·`react-popover`·`react-dropdown-menu`·`react-collapsible`(MIT), `sonner` 2(MIT, 알림), `class-variance-authority` 0.7(Apache-2.0, 변형 클래스). 이 기기 글자 읽기(c0039): `tesseract.js` 7.0.0(+ `tesseract.js-core`), `@tesseract.js-data/kor`·`@tesseract.js-data/eng` 1.0.0 — 처음 사진을 읽을 때만 불러온다(아래 "브레인에 넣기"). 보고 있는 페이지 보내기(c0043): `defuddle` 0.19.6·`turndown` 7.2.5(MIT) — `/capture`에서만 불러온다. 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
 
 ### 문서 편집기: Tiptap 대신 문단별 textarea
 
@@ -111,12 +136,13 @@ O07 문서는 `{id, text, origin, claim_ids}` 블록 목록이고, 저장·근�
 
 저장은 언제나 `base_revision` 을 보낸다. 409(`revision_conflict`)면 덮어쓰지 않고 창을 띄운다: 지금 서버 글과 비교, 내 글 버리고 최신 받기, 또는 최신 revision 위에 내 글을 새로 저장(사용자가 버튼을 눌러야 함). 같은 저장 재시도는 `idempotency_key`(문서·기준 revision·내용 해시)로 한 번만 반영된다.
 
-빌드 크기(대략): 첫 화면 JS 약 525 KB (gzip 약 166 KB), 지원 문서·지원 상세·학습 화면은 따로 나눠 처음 열 때 받는다(합계 약 81 KB, gzip 약 28 KB). CSS 약 80 KB (대부분 Pretendard `@font-face`). O07·O09 화면 전 기준은 JS 약 500 KB (gzip 약 156 KB). 글꼴은 Pretendard 동적 subset woff2(92개, 합계 약 3 MB)를 함께 내보내지만 브라우저는 화면에 나온 글자 범위의 파일만 받는다. CDN을 쓰지 않는다.
+빌드 크기(2026-11, shadcn/ui 부품 도입 뒤): 첫 화면 JS 약 878 KB (gzip 약 268 KB, 도입 전 729 KB · gzip 226 KB), 전체 JS 약 1.79 MB (gzip 549 KB), CSS 약 102 KB (gzip 25 KB). 늘어난 몫은 Radix 부품과 그 위치 계산(floating-ui)·sonner다. 그 전 기록: 첫 화면 JS 약 525 KB (gzip 약 166 KB), 지원 문서·지원 상세·학습 화면은 따로 나눠 처음 열 때 받는다(합계 약 81 KB, gzip 약 28 KB). CSS 약 80 KB (대부분 Pretendard `@font-face`). O07·O09 화면 전 기준은 JS 약 500 KB (gzip 약 156 KB). 글꼴은 Pretendard 동적 subset woff2(92개, 합계 약 3 MB)를 함께 내보내지만 브라우저는 화면에 나온 글자 범위의 파일만 받는다. CDN을 쓰지 않는다.
 
 ## 외부 자료 라이선스
 
 - Pretendard — SIL Open Font License 1.1 (글꼴 CSS 머리말에 고지 포함)
-- React, TanStack Query/Router, Radix UI, lucide-react, clsx, tailwind-merge, Tailwind CSS — MIT (lucide-react 는 ISC)
+- React, TanStack Query/Router, Radix UI, sonner, lucide-react, clsx, tailwind-merge, Tailwind CSS — MIT (lucide-react 는 ISC), class-variance-authority — Apache-2.0
+- `packages/ui`의 부품 소스는 shadcn/ui(MIT, © shadcn)를 바탕으로 고쳐 썼다
 - tesseract.js·tesseract.js-core — Apache-2.0, @tesseract.js-data/kor·eng(학습 데이터 `4.0.0_best_int`) — MIT. 빌드가 node_modules에서 `dist/ocr/`로 복사한다(레포에 넣지 않음)
 
 ## 화면용 조회 API

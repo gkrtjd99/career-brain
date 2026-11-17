@@ -1,15 +1,11 @@
-import {
-  forwardRef,
-  type InputHTMLAttributes,
-  type LabelHTMLAttributes,
-  type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
-} from "react";
+import { forwardRef, type InputHTMLAttributes, type LabelHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { cn } from "./cn";
 
-const FIELD =
+/** 입력·고르기 칸 공통 모양 (Select 트리거·날짜 칸도 같이 쓴다) */
+export const FIELD =
   "w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-fg placeholder:text-muted " +
-  "focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-accent/30 disabled:opacity-60";
+  "focus-visible:border-accent focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-accent " +
+  "disabled:cursor-not-allowed disabled:opacity-60 aria-invalid:border-danger";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...props }, ref) {
@@ -22,12 +18,6 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
     return (
       <textarea ref={ref} className={cn(FIELD, "min-h-20 py-2 leading-6", className)} {...props} />
     );
-  },
-);
-
-export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
-  function Select({ className, ...props }, ref) {
-    return <select ref={ref} className={cn(FIELD, "h-9 pr-8", className)} {...props} />;
   },
 );
 

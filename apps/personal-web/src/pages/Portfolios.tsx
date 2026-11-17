@@ -4,7 +4,7 @@ import type {
   PortfolioBundleSummary,
   PortfolioItemSummary,
 } from "@career-brain/client";
-import { Button, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Checkbox, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus } from "lucide-react";
@@ -57,7 +57,7 @@ export function PortfoliosPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="포트폴리오"
-        subtitle="경험마다 문제 → 내 역할 → 한 일 → 결과로 적고, 결과는 확인한 사실에서 고릅니다. 고른 항목을 묶어 인쇄하거나 HTML로 냅니다."
+        subtitle="결과 줄은 확인한 사실에서 고릅니다."
         actions={
           <>
             <Button size="sm" onClick={() => setImporting(true)}>
@@ -110,7 +110,7 @@ export function PortfoliosPage() {
               </ul>
             ) : (
               <p className="border-t border-line pt-3 text-[13px] text-muted">
-                묶음은 항목을 골라 순서를 정한 것입니다. 전체 묶음 하나를 만들고, 직무별·공고별 묶음은 거기서 복사합니다.
+                아직 묶음이 없습니다. 전체 묶음 하나를 만들고, 직무별 묶음은 거기서 복사합니다.
               </p>
             )
           }
@@ -131,8 +131,7 @@ export function PortfoliosPage() {
               </ul>
             ) : (
               <p className="border-t border-line pt-3 text-[13px] text-muted">
-                아직 항목이 없습니다. 경험을 하나 고르면 그 경험의 확인한 사실로 한 일·결과 줄을 채워 시작합니다. 모델이 글을 새로 쓰지
-                않습니다.
+                아직 항목이 없습니다. 경험을 고르면 확인한 사실로 한 일·결과 줄을 채웁니다.
               </p>
             )
           }
@@ -250,11 +249,11 @@ function NewItemSheet({ initial, onClose }: { initial?: string; onClose: () => v
           <Label htmlFor="pi-exp" className="mb-1">
             경험
           </Label>
-          <Select id="pi-exp" value={chosen} onChange={(e) => setExp(e.target.value)} disabled={!exps.data?.length}>
+          <Select id="pi-exp" value={chosen} onValueChange={(v) => setExp(v)} disabled={!exps.data?.length}>
             {(exps.data ?? []).map((x) => (
-              <option key={x.id} value={x.id}>
+              <SelectItem key={x.id} value={x.id}>
                 {[x.title, x.organization].filter(Boolean).join(" · ")}
-              </option>
+              </SelectItem>
             ))}
           </Select>
           {exps.data && !exps.data.length ? (
@@ -262,7 +261,7 @@ function NewItemSheet({ initial, onClose }: { initial?: string; onClose: () => v
           ) : null}
         </div>
         <label className="flex min-h-9 items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-1" checked={fill} onChange={(e) => setFill(e.target.checked)} />
+          <Checkbox className="mt-1" checked={fill} onCheckedChange={(checked) => setFill(checked)} />
           <span>
             확인한 사실로 채우기
             <span className="block text-[13px] text-muted">결과·결정은 결과 줄로, 한 일·맡은 일은 한 일 줄로 5개씩까지 넣습니다.</span>
@@ -344,10 +343,10 @@ function NewBundleSheet({
           <Label htmlFor="pb-kind" className="mb-1">
             종류
           </Label>
-          <Select id="pb-kind" value={kind} onChange={(e) => setKind(e.target.value as PortfolioBundleKind)}>
-            <option value="all">전체 (나만이 아닌 항목을 모두 넣고 시작)</option>
-            <option value="role">직무별 (전체 묶음에서)</option>
-            <option value="posting">공고별 (전체나 직무별 묶음에서)</option>
+          <Select id="pb-kind" value={kind} onValueChange={(v) => setKind(v as PortfolioBundleKind)}>
+            <SelectItem value="all">전체 (나만이 아닌 항목을 모두 넣고 시작)</SelectItem>
+            <SelectItem value="role">직무별 (전체 묶음에서)</SelectItem>
+            <SelectItem value="posting">공고별 (전체나 직무별 묶음에서)</SelectItem>
           </Select>
         </div>
         {kind !== "all" ? (
@@ -355,12 +354,12 @@ function NewBundleSheet({
             <Label htmlFor="pb-parent" className="mb-1">
               시작할 묶음
             </Label>
-            <Select id="pb-parent" value={parentId || "none"} onChange={(e) => setParent(e.target.value)}>
-              {kind === "posting" ? <option value="none">없음 (지원 준비에서 고른 항목만)</option> : null}
+            <Select id="pb-parent" value={parentId || "none"} onValueChange={(v) => setParent(v)}>
+              {kind === "posting" ? <SelectItem value="none">없음 (지원 준비에서 고른 항목만)</SelectItem> : null}
               {parents.map((p) => (
-                <option key={p.id} value={p.id}>
+                <SelectItem key={p.id} value={p.id}>
                   {BUNDLE_KIND_LABEL[p.kind]} · {p.title}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -370,12 +369,12 @@ function NewBundleSheet({
             <Label htmlFor="pb-app" className="mb-1">
               지원
             </Label>
-            <Select id="pb-app" value={appId} onChange={(e) => setAppId(e.target.value)}>
-              <option value="">잇지 않음</option>
+            <Select id="pb-app" value={appId} onValueChange={(v) => setAppId(v)}>
+              <SelectItem value="">잇지 않음</SelectItem>
               {applications.map((a) => (
-                <option key={a.id} value={a.id}>
+                <SelectItem key={a.id} value={a.id}>
                   {a.title}
-                </option>
+                </SelectItem>
               ))}
             </Select>
             <p className="mt-1 text-[13px] text-muted">

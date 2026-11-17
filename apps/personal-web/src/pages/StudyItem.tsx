@@ -1,5 +1,5 @@
 import type { ClaimKind, StudyItem, StudyItemStatus } from "@career-brain/client";
-import { Button, cn, Input, Label, Section, Select, StatusBadge, Textarea } from "@career-brain/ui";
+import { Button, cn, Input, Label, Section, Select, SelectItem, StatusBadge, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -231,12 +231,12 @@ function MergeDelete({ item }: { item: StudyItem }) {
       >
         <div className="min-w-0 flex-1">
           <Label htmlFor="mg-into">합칠 대상</Label>
-          <Select id="mg-into" value={into} onChange={(e) => setInto(e.target.value)}>
-            <option value="">고르기</option>
+          <Select id="mg-into" value={into} onValueChange={(v) => setInto(v)}>
+            <SelectItem value="">고르기</SelectItem>
             {others.map((x) => (
-              <option key={x.id} value={x.id}>
+              <SelectItem key={x.id} value={x.id}>
                 {x.title}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -412,13 +412,13 @@ function CandidateForm({ item }: { item: StudyItem }) {
               <Select
                 id="cc-exp"
                 value={form.experience}
-                onChange={(e) => setForm({ ...form, experience: e.target.value })}
+                onValueChange={(v) => setForm({ ...form, experience: v })}
               >
-                <option value="">고르기</option>
+                <SelectItem value="">고르기</SelectItem>
                 {exps.map((x) => (
-                  <option key={x.id} value={x.id}>
+                  <SelectItem key={x.id} value={x.id}>
                     {x.title}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>
@@ -427,12 +427,12 @@ function CandidateForm({ item }: { item: StudyItem }) {
               <Select
                 id="cc-kind"
                 value={form.kind}
-                onChange={(e) => setForm({ ...form, kind: e.target.value as ClaimKind })}
+                onValueChange={(v) => setForm({ ...form, kind: v as ClaimKind })}
               >
                 {(Object.keys(KIND_LABEL) as ClaimKind[]).map((k) => (
-                  <option key={k} value={k}>
+                  <SelectItem key={k} value={k}>
                     {KIND_LABEL[k]}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>
@@ -440,12 +440,12 @@ function CandidateForm({ item }: { item: StudyItem }) {
           {item.attempts.length ? (
             <div>
               <Label htmlFor="cc-att">근거로 남길 응시 (선택)</Label>
-              <Select id="cc-att" value={form.attempt} onChange={(e) => setForm({ ...form, attempt: e.target.value })}>
-                <option value="">없음</option>
+              <Select id="cc-att" value={form.attempt} onValueChange={(v) => setForm({ ...form, attempt: v })}>
+                <SelectItem value="">없음</SelectItem>
                 {item.attempts.map((a) => (
-                  <option key={a.id} value={a.id}>
+                  <SelectItem key={a.id} value={a.id}>
                     {formatDateTime(a.taken_at)} · {ATTEMPT_RESULT[a.result].label}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>

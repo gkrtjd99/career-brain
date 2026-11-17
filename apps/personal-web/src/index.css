@@ -72,6 +72,23 @@
   --color-danger-soft: var(--app-danger-soft);
 }
 
+/* 떠 있는 층(목록·메뉴·툴팁·확인 창)이 열릴 때만 짧게. 줄이기 설정이면 쓰지 않는다 (motion-safe:) */
+@theme {
+  --animate-pop-in: pop-in 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 120ms ease-out;
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -92,12 +109,14 @@
   background: var(--app-fg);
   color: var(--app-bg);
 }
-input[type="checkbox"],
-input[type="radio"],
-progress {
+progress,
+input[type="range"] {
   accent-color: var(--app-fg);
 }
-:focus-visible {
-  outline: 2px solid var(--app-fg);
-  outline-offset: 2px;
+/* 기본 초점 테두리. 부품이 utilities 로 바꿀 수 있게 base 층에 둔다 */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--app-fg);
+    outline-offset: 2px;
+  }
 }

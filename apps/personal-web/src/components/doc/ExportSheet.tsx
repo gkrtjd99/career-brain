@@ -1,10 +1,10 @@
 import type { ExportCheck, ExportFile, ExportFormat, FileCheck, Finding } from "@career-brain/client";
-import { Button, cn, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, Checkbox, cn, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, FileSearch } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
-import { int } from "../../lib/format";
+import { bytes } from "../../lib/systemLabels";
 import { EXPORT_FORMAT, FINDING, FINDING_GROUP } from "../../lib/labels";
 import { ErrorText, Loaded } from "../common";
 
@@ -81,11 +81,11 @@ export function FindingList({ findings }: { findings: Finding[] }) {
 }
 
 export function ExportFindings({ check, label }: { check: ExportCheck; label?: string }) {
-  const head = label ?? `r${check.revision}`;
+  const head = label ?? `${check.revision}번째 저장`;
   if (!check.findings.length)
     return (
       <p className="text-[13px] text-muted tabular-nums">
-        {head} · {check.filename} · {int(check.bytes)} byte · 경고 없음
+        {head} · {check.filename} · {bytes(check.bytes)} · 경고 없음
       </p>
     );
   return (
@@ -147,11 +147,11 @@ export function ExportSheet({
       <div className="space-y-3">
         <div>
           <Label htmlFor="ex-format">형식</Label>
-          <Select id="ex-format" value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+          <Select id="ex-format" value={format} onValueChange={(v) => setFormat(v as ExportFormat)}>
             {EXPORT_FORMATS.map((f) => (
-              <option key={f} value={f}>
+              <SelectItem key={f} value={f}>
                 {EXPORT_FORMAT[f]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
           {format === "html" ? (
@@ -164,11 +164,10 @@ export function ExportSheet({
         <Loaded query={q}>{(c) => <ExportFindings check={c} label={label} />}</Loaded>
         {warnings ? (
           <label className="flex items-start gap-2 text-[13px]">
-            <input
-              type="checkbox"
+            <Checkbox
               className="mt-1"
               checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
+              onCheckedChange={(checked) => setConfirmed(checked)}
             />
             <span>경고 {warnings}개를 확인했고 이대로 내보냅니다.</span>
           </label>
@@ -203,8 +202,7 @@ export function HiddenTextCheck() {
           <FileSearch size={15} className="text-muted" /> 제출할 파일 숨김 글 검사
         </h2>
         <p className="mt-1 text-[13px] text-muted">
-          다른 도구로 만든 DOCX·PDF에 숨김 서식·흰 글씨·아주 작은 글자·쪽 밖 글·심사 프로그램에 지시하는 문장이 있는지
-          봅니다. 파일은 저장하지 않고, 고치지 않습니다.
+          숨김 글씨나 심사 프로그램에 지시하는 문장이 있는지 봅니다. 파일은 저장하지 않습니다.
         </p>
       </div>
       <form

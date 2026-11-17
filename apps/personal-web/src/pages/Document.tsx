@@ -1,8 +1,8 @@
 import type { AppDocument, ClaimBrief, CountRule, RevisionConflictDetail, TextCounts } from "@career-brain/client";
-import { Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, cn, Disclosure, IconButton, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useBlocker } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
+import { AlertTriangle, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
@@ -387,7 +387,7 @@ export function DocumentEditor({
               onClick={() =>
                 save.mutate({
                   baseRevision: conflict.current_revision,
-                  reason: `r${base} 편집을 r${conflict.current_revision} 위에 다시 저장`,
+                  reason: `${base}번째에서 한 편집을 ${conflict.current_revision}번째 위에 다시 저장`,
                 })
               }
             >
@@ -422,16 +422,12 @@ export function DocumentEditor({
           focusRequest={focus}
         />
       </div>
-      <details className="group text-xs text-muted">
-        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-          <ChevronRight size={13} className="transition-transform group-open:rotate-90" />
-          쓰는 법
-        </summary>
+      <Disclosure title="쓰는 법" className="text-xs text-muted">
         <p className="mt-1 leading-5">
           Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장. 문장을
           고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 사실만 셉니다. 글이 없는 문단은 저장하지 않습니다.
         </p>
-      </details>
+      </Disclosure>
       <ErrorText error={saveError} />
     </div>
   );
@@ -685,21 +681,21 @@ function CountBar({
           세는 기준
         </button>
         {onSettings ? (
-          <Button
-            size="icon"
-            variant="ghost"
+          <IconButton
+           
+           
             className="-mr-2 ml-auto sm:h-8 sm:w-8"
             onClick={onSettings}
-            aria-label="제한·세는 기준 바꾸기"
+            label="제한·세는 기준 바꾸기"
           >
             <Settings2 size={15} />
-          </Button>
+          </IconButton>
         ) : null}
       </div>
       {open ? (
         <p className="mt-1 text-xs text-muted tabular-nums">
           {int(counts.bytes)}
-          {counts.byte_limit ? ` / ${int(counts.byte_limit)}` : ""} byte · {SPACES_RULE[counts.rule.spaces]} ·{" "}
+          {counts.byte_limit ? ` / ${int(counts.byte_limit)}` : ""}바이트 · {SPACES_RULE[counts.rule.spaces]} ·{" "}
           {NEWLINE_RULE[counts.rule.newlines]} · {counts.rule.encoding} · 공백 포함 {int(counts.chars_with_spaces)} /
           제외 {int(counts.chars_without_spaces)}
         </p>
@@ -796,25 +792,25 @@ function SettingsSheet({
         <div className="grid gap-2 sm:grid-cols-3">
           <div>
             <Label htmlFor="ds-sp">공백</Label>
-            <Select id="ds-sp" value={form.rule.spaces} onChange={(e) => rule("spaces", e.target.value)}>
-              <option value="include">공백 포함</option>
-              <option value="exclude">공백 제외</option>
+            <Select id="ds-sp" value={form.rule.spaces} onValueChange={(v) => rule("spaces", v)}>
+              <SelectItem value="include">공백 포함</SelectItem>
+              <SelectItem value="exclude">공백 제외</SelectItem>
             </Select>
           </div>
           <div>
             <Label htmlFor="ds-nl">줄바꿈</Label>
-            <Select id="ds-nl" value={form.rule.newlines} onChange={(e) => rule("newlines", e.target.value)}>
-              <option value="one">1자</option>
-              <option value="two">2자 (\r\n)</option>
-              <option value="none">세지 않음</option>
+            <Select id="ds-nl" value={form.rule.newlines} onValueChange={(v) => rule("newlines", v)}>
+              <SelectItem value="one">1자</SelectItem>
+              <SelectItem value="two">2자 (\r\n)</SelectItem>
+              <SelectItem value="none">세지 않음</SelectItem>
             </Select>
           </div>
           <div>
             <Label htmlFor="ds-enc">바이트 기준</Label>
-            <Select id="ds-enc" value={form.rule.encoding} onChange={(e) => rule("encoding", e.target.value)}>
-              <option value="utf-8">UTF-8 (한글 3byte)</option>
-              <option value="cp949">CP949 (한글 2byte)</option>
-              <option value="euc-kr">EUC-KR</option>
+            <Select id="ds-enc" value={form.rule.encoding} onValueChange={(v) => rule("encoding", v)}>
+              <SelectItem value="utf-8">UTF-8 (한글 3byte)</SelectItem>
+              <SelectItem value="cp949">CP949 (한글 2byte)</SelectItem>
+              <SelectItem value="euc-kr">EUC-KR</SelectItem>
             </Select>
           </div>
         </div>
@@ -887,7 +883,7 @@ function HistoryPanel({
                 >
                   <History size={14} className="mt-0.5 shrink-0 text-muted" />
                   <span className="min-w-0 flex-1">
-                    <span className="font-medium tabular-nums">r{r.revision_no}</span> ·{" "}
+                    <span className="font-medium tabular-nums">{r.revision_no}번째 저장</span> ·{" "}
                     {REVISION_ORIGIN[r.origin] ?? r.origin}
                     {r.revision_no === current ? <span className="text-muted"> · 최신</span> : null}
                     <span className="block text-xs text-muted tabular-nums">
@@ -927,7 +923,7 @@ function RevisionSheet({
     <Sheet
       open={revision !== null}
       onOpenChange={(o) => !o && onClose()}
-      title={`r${revision ?? ""} 보기`}
+      title={`${revision ?? ""}번째 저장`}
       description="저장된 revision 은 바뀌지 않습니다."
       width="lg"
     >

@@ -4,7 +4,7 @@ import { cn } from "./cn";
 /*
  * 목록 거르기와 보기 바꾸기의 두 모양 (plan §13):
  * - FilterChips / Chip: 목록을 거르는 회색 알약. 고른 것만 검정으로 채운다.
- * - ViewTabs: 같은 자료를 다른 보기로 바꾸는 밑줄 탭.
+ * - ViewTabs (Tabs.tsx): 같은 자료를 다른 보기로 바꾸는 밑줄 탭.
  */
 
 const CHIP =
@@ -92,66 +92,6 @@ export function FilterChips<T>({ label, value, onChange, items, className }: Fil
           >
             {it.label}
             {it.count !== undefined && it.count !== null ? <ChipCount on={on}>{it.count}</ChipCount> : null}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-export interface ViewTabsProps<T extends string> {
-  value: T;
-  onChange: (value: T) => void;
-  items: { value: T; label: ReactNode }[];
-  /** 탭 무리 이름 */
-  label?: string;
-  className?: string;
-}
-
-/** 보기 바꾸기 밑줄 탭 (role=tablist). 화살표 키로 옮긴다. 좁은 화면에서는 가로로 밀어 본다. */
-export function ViewTabs<T extends string>({ value, onChange, items, label, className }: ViewTabsProps<T>) {
-  const ref = useRef<HTMLDivElement>(null);
-  const selected = Math.max(
-    0,
-    items.findIndex((it) => it.value === value),
-  );
-  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    const edge = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : null;
-    if (!step && edge === null) return;
-    e.preventDefault();
-    const next = edge ?? (selected + step + items.length) % items.length;
-    onChange(items[next]!.value);
-    ref.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
-  };
-  return (
-    <div
-      ref={ref}
-      role="tablist"
-      aria-label={label}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "flex gap-0.5 overflow-x-auto overflow-y-hidden border-b border-line [scrollbar-width:none] sm:gap-1",
-        className,
-      )}
-    >
-      {items.map((it) => {
-        const on = it.value === value;
-        return (
-          <button
-            key={it.value}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            tabIndex={on ? 0 : -1}
-            onClick={() => onChange(it.value)}
-            className={cn(
-              "-mb-px inline-flex h-10 shrink-0 items-center border-b-2 px-2 text-sm whitespace-nowrap tabular-nums sm:px-3",
-              "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
-              on ? "border-fg font-medium text-fg" : "border-transparent text-muted transition-colors duration-150 hover:text-fg",
-            )}
-          >
-            {it.label}
           </button>
         );
       })}

@@ -122,8 +122,8 @@ function DocumentSettingsSection() {
         <div className="space-y-2">
           <h3 className="text-sm font-medium">본인 연락처</h3>
           <p className="text-[13px] text-muted">
-            제출 전 재검사는 주민등록번호, 본인 것이 아닌 전화번호·이메일, 대외비 표시를 경고합니다. 여기 적은 내
-            연락처는 경고하지 않습니다. 이 값은 이 작업 공간의 데이터베이스에만 저장합니다.
+            제출 전 재검사는 주민등록번호, 남의 전화번호·이메일, 대외비 표시를 경고합니다. 여기 적은 내 연락처는
+            경고하지 않습니다.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <div>

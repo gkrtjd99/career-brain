@@ -246,7 +246,7 @@ function PaletteBody({ q, setQ, close }: { q: string; setQ: (q: string) => void;
         section: "do",
         icon: Link2,
         label: "공고 추가",
-        hint: "URL 붙여넣기",
+        hint: "주소 붙여넣기",
         words: "공고 추가 url 링크 채용 저장",
         run: go(() => {
           void navigate({ to: "/postings" });

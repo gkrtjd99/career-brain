@@ -1,5 +1,5 @@
 import { ANSWER_ASSET_KINDS, type AnswerAssetKind, type AnswerAssetSummary } from "@career-brain/client";
-import { Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
+import { Button, cn, Input, Label, Select, SelectItem, Sheet } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
@@ -24,7 +24,7 @@ export function AnswersPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="공통 답변"
-        subtitle="1분 자기소개·지원 동기 틀처럼 여러 지원에 다시 쓰는 글입니다. 지원서에 넣으면 쓴 곳이 남습니다."
+        subtitle="여러 지원에 다시 쓰는 글입니다."
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
             <Plus size={15} /> 답변 추가
@@ -132,11 +132,11 @@ function NewAnswerSheet({ open, onClose }: { open: boolean; onClose: () => void 
           <Label htmlFor="na-kind" className="mb-1">
             종류
           </Label>
-          <Select id="na-kind" value={kind} onChange={(e) => setKind(e.target.value as AnswerAssetKind)}>
+          <Select id="na-kind" value={kind} onValueChange={(v) => setKind(v as AnswerAssetKind)}>
             {ANSWER_ASSET_KINDS.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {ANSWER_KIND_LABEL[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>

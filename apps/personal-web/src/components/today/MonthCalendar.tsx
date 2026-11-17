@@ -1,4 +1,4 @@
-import { cn } from "@career-brain/ui";
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { AgendaEvent, AgendaKind } from "../../lib/agenda";
@@ -97,22 +97,32 @@ function Header({
             오늘로
           </button>
         ) : null}
-        <button
-          type="button"
-          aria-label="이전"
-          onClick={onPrev}
-          className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <button
-          type="button"
-          aria-label="다음"
-          onClick={onNext}
-          className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
-        >
-          <ChevronRight size={16} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="이전 달"
+              onClick={onPrev}
+              className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
+            >
+              <ChevronLeft size={16} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>이전 달</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label="다음 달"
+              onClick={onNext}
+              className="inline-flex size-9 items-center justify-center rounded-md text-muted hover:bg-subtle/60 hover:text-fg md:size-7"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>다음 달</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );

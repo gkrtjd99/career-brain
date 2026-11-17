@@ -6,7 +6,7 @@ import {
   type ProfileDetails,
   type ProfileDetailsPatch,
 } from "@career-brain/client";
-import { Button, cn, Input, Label, Select } from "@career-brain/ui";
+import { Button, Checkbox, cn, Collapsible, CollapsibleContent, CollapsibleTrigger, Input, Label, MonthField, Select, SelectItem, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -26,7 +26,7 @@ export function ProfileDetailsSection() {
         더 적어 둘 것 <span className="font-normal text-muted">선택</span>
       </h2>
       <p className="mt-0.5 text-[13px] text-muted">
-        지원서 양식에 자주 묻는 칸입니다. 이 칸은 모델과 연결한 AI 에이전트에 보내지 않습니다.
+        모델과 AI 에이전트에 보내지 않습니다.
       </p>
       <Loaded query={q}>{(d) => <DetailsForm initial={d} />}</Loaded>
     </section>
@@ -97,10 +97,8 @@ function bodyOf(v: Values): ProfileDetailsPatch {
 function DetailsForm({ initial }: { initial: ProfileDetails }) {
   const qc = useQueryClient();
   const [v, setV] = useState(() => valuesOf(initial));
-  const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(bodyOf(v)) !== JSON.stringify(bodyOf(valuesOf(initial)));
   const set = (patch: Partial<Values>) => {
-    setSaved(false);
     setV((prev) => ({ ...prev, ...patch }));
   };
   const save = useMutation({
@@ -108,7 +106,7 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
     onSuccess: (d) => {
       qc.setQueryData(["profile", "details"], d);
       setV(valuesOf(d)); // 서버가 정리한 값 (복무 칸 비우기 등)
-      setSaved(true);
+      toast("저장했습니다.");
     },
   });
   const serving = v.military_status === "served" || v.military_status === "serving";
@@ -154,13 +152,13 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
               <Select
                 id="pd-mil"
                 value={v.military_status}
-                onChange={(e) => set({ military_status: e.target.value as MilitaryStatus | "" })}
+                onValueChange={(v) => set({ military_status: v as MilitaryStatus | "" })}
               >
-                <option value="">적지 않음</option>
+                <SelectItem value="">적지 않음</SelectItem>
                 {MILITARY_STATUSES.map((s) => (
-                  <option key={s} value={s}>
+                  <SelectItem key={s} value={s}>
                     {MILITARY_LABEL[s]}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </div>
@@ -200,22 +198,18 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
               </div>
               <div>
                 <Label htmlFor="pd-start">입대</Label>
-                <Input
+                <MonthField
                   id="pd-start"
-                  type="month"
                   value={v.military_started_on}
-                  onChange={(e) => set({ military_started_on: e.target.value })}
-                  className="tabular-nums"
+                  onChange={(value) => set({ military_started_on: value })}
                 />
               </div>
               <div>
                 <Label htmlFor="pd-end">{v.military_status === "serving" ? "전역 예정" : "전역"}</Label>
-                <Input
+                <MonthField
                   id="pd-end"
-                  type="month"
                   value={v.military_ended_on}
-                  onChange={(e) => set({ military_ended_on: e.target.value })}
-                  className="tabular-nums"
+                  onChange={(value) => set({ military_ended_on: value })}
                 />
               </div>
             </div>
@@ -230,11 +224,11 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
               <Select
                 id="pd-veteran"
                 value={v.veteran}
-                onChange={(e) => set({ veteran: e.target.value as Values["veteran"] })}
+                onValueChange={(v) => set({ veteran: v as Values["veteran"] })}
               >
-                <option value="">적지 않음</option>
-                <option value="yes">대상</option>
-                <option value="no">비대상</option>
+                <SelectItem value="">적지 않음</SelectItem>
+                <SelectItem value="yes">대상</SelectItem>
+                <SelectItem value="no">비대상</SelectItem>
               </Select>
             </div>
             <div>
@@ -242,11 +236,11 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
               <Select
                 id="pd-disability"
                 value={v.disability}
-                onChange={(e) => set({ disability: e.target.value as Values["disability"] })}
+                onValueChange={(v) => set({ disability: v as Values["disability"] })}
               >
-                <option value="">적지 않음</option>
-                <option value="yes">있음</option>
-                <option value="no">없음</option>
+                <SelectItem value="">적지 않음</SelectItem>
+                <SelectItem value="yes">있음</SelectItem>
+                <SelectItem value="no">없음</SelectItem>
               </Select>
             </div>
           </div>
@@ -267,17 +261,14 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
             <div className="flex flex-wrap gap-x-4">
               {EMPLOYMENT_TYPES.map((t) => (
                 <label key={t} className="flex min-h-9 items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={v.employment_types.includes(t)}
-                    onChange={(e) =>
-                      set({
-                        employment_types: e.target.checked
+                    onCheckedChange={(checked) => set({
+                        employment_types: checked
                           ? EMPLOYMENT_TYPES.filter((x) => x === t || v.employment_types.includes(x))
                           : v.employment_types.filter((x) => x !== t),
                       })
                     }
-                    className="size-4 accent-[var(--app-fg)]"
                   />
                   {EMPLOYMENT_LABEL[t]}
                 </label>
@@ -331,11 +322,7 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
           <p role="alert" className="text-[13px] text-danger">
             {meErrorText(save.error) ?? errorText(save.error)}
           </p>
-        ) : saved && !dirty ? (
-          <p role="status" className="text-[13px] text-muted">
-            저장했습니다.
-          </p>
-        ) : null}
+) : null}
       </div>
     </form>
   );
@@ -343,18 +330,22 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
 
 function Group({ title, summary, children }: { title: string; summary: string | null; children: ReactNode }) {
   return (
-    <details className="group">
-      <summary
+    <Collapsible className="group/group">
+      <CollapsibleTrigger
         className={cn(
-          "-mx-2 flex min-h-11 cursor-pointer list-none items-center gap-3 rounded-md px-2 py-2.5",
-          "transition-colors duration-150 hover:bg-subtle/60 [&::-webkit-details-marker]:hidden",
+          "-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-md px-2 py-2.5 text-left",
+          "transition-colors duration-150 hover:bg-subtle/60",
         )}
       >
         <span className="text-sm font-medium">{title}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-muted">{summary ?? "적지 않음"}</span>
-        <ChevronRight size={16} className="shrink-0 text-muted transition-transform group-open:rotate-90" />
-      </summary>
-      <div className="space-y-3 pt-1 pb-4">{children}</div>
-    </details>
+        <ChevronRight
+          size={16}
+          aria-hidden
+          className="shrink-0 text-muted transition-transform group-data-[state=open]/group:rotate-90"
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-3 pt-1 pb-4">{children}</CollapsibleContent>
+    </Collapsible>
   );
 }

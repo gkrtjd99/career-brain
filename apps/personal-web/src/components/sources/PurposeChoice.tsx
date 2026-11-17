@@ -1,5 +1,6 @@
 import type { SourcePurpose } from "@career-brain/client";
-import { cn } from "@career-brain/ui";
+import { cn, RadioGroup, RadioGroupItem } from "@career-brain/ui";
+import { useId } from "react";
 import { PURPOSE_OPTIONS } from "../../lib/labels";
 
 /**
@@ -22,10 +23,20 @@ export function PurposeChoice({
   /** 위에 같은 제목이 있으면 화면에서만 숨긴다 (읽기 프로그램은 그대로 읽는다) */
   hideLegend?: boolean;
 }) {
+  const legend = useId();
   return (
-    <fieldset disabled={disabled}>
-      <legend className={hideLegend ? "sr-only" : "mb-1.5 text-sm font-medium"}>용도</legend>
-      <div className="divide-y divide-line border-y border-line">
+    <div>
+      <div id={legend} className={hideLegend ? "sr-only" : "mb-1.5 text-sm font-medium"}>
+        용도
+      </div>
+      <RadioGroup
+        name={name}
+        value={value}
+        onValueChange={(v) => onChange(v as SourcePurpose)}
+        disabled={disabled}
+        aria-labelledby={legend}
+        className="gap-0 divide-y divide-line border-y border-line"
+      >
         {PURPOSE_OPTIONS.map((o) => (
           <div key={o.value} className="py-0.5">
             <label
@@ -35,14 +46,7 @@ export function PurposeChoice({
                 disabled && "cursor-default opacity-60 hover:bg-transparent",
               )}
             >
-              <input
-                type="radio"
-                name={name}
-                value={o.value}
-                checked={value === o.value}
-                onChange={() => onChange(o.value)}
-                className="mt-1 size-4 shrink-0 accent-fg focus-visible:outline-none"
-              />
+              <RadioGroupItem value={o.value} className="mt-0.5 focus-visible:outline-none" />
               <span className="min-w-0">
                 <span className={cn("text-sm", value === o.value ? "font-semibold" : "font-medium")}>{o.label}</span>
                 {suggested === o.value ? <span className="ml-1.5 text-[13px] text-muted">추천</span> : null}
@@ -51,7 +55,7 @@ export function PurposeChoice({
             </label>
           </div>
         ))}
-      </div>
-    </fieldset>
+      </RadioGroup>
+    </div>
   );
 }

@@ -1,5 +1,5 @@
 import type { Company, CompanyFact, CompanyPage as CompanySourcePage } from "@career-brain/client";
-import { Button, cn, ConfirmDialog, Input, Label, Section, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import { Button, cn, ConfirmDialog, IconButton, Input, Label, Section, Sheet, Spinner, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
@@ -99,7 +99,7 @@ function CompanyView({ c }: { c: Company }) {
               <h2 className="text-[15px] font-semibold">
                 확인할 항목 <span className="font-normal text-muted tabular-nums">{candidates.length}</span>
               </h2>
-              <p className="mt-0.5 text-[13px] text-muted">모델이 원문에서 고른 후보입니다. 인용이 맞으면 확인합니다.</p>
+              <p className="mt-0.5 text-[13px] text-muted">인용이 맞으면 확인합니다.</p>
               <FactList facts={candidates} c={c} showKind onOpenPage={setPageId} />
             </section>
           ) : null}
@@ -261,9 +261,7 @@ function FactItem({
             {f.stale ? (
               <>
                 <span aria-hidden>·</span>
-                <span className="font-semibold text-fg" title="기준일이나 가져온 날이 1년이 넘었습니다">
-                  오래됨
-                </span>
+                <span className="font-semibold text-fg">1년 넘은 정보</span>
               </>
             ) : null}
           </div>
@@ -274,18 +272,18 @@ function FactItem({
               확인
             </Button>
           ) : null}
-          <Button size="icon" variant="ghost" aria-label="항목 수정" onClick={() => setEditing(true)}>
+          <IconButton label="항목 수정" onClick={() => setEditing(true)}>
             <Pencil size={14} />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label="항목 삭제"
+          </IconButton>
+          <IconButton
+           
+           
+            label="항목 삭제"
             onClick={() => remove.mutate()}
             disabled={remove.isPending}
           >
             <Trash2 size={14} />
-          </Button>
+          </IconButton>
         </div>
       </div>
       <ErrorText error={confirm.error ?? remove.error} className="mt-1" />
@@ -467,6 +465,7 @@ function PageSheet({ companyId, pageId, onClose }: { companyId: string; pageId: 
       invalidate();
       setPicked("");
       setFormKey((k) => k + 1);
+      toast("항목을 추가했습니다.");
     },
   });
   const pick = () => {
@@ -520,7 +519,6 @@ function PageSheet({ companyId, pageId, onClose }: { companyId: string; pageId: 
                 error={add.error}
                 onSubmit={(v) => add.mutate(v)}
               />
-              {add.isSuccess ? <p className="mt-2 text-[13px] text-muted" role="status">항목을 추가했습니다.</p> : null}
             </section>
           </div>
         )}

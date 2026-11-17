@@ -1,5 +1,5 @@
 import type { ExperienceIn, ExperienceKind, ExperienceStructure } from "@career-brain/client";
-import { Button, Input, Label, Select } from "@career-brain/ui";
+import { Button, Checkbox, Input, Label, MonthField, Select, SelectItem } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -127,11 +127,11 @@ export function ExperienceForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <Label htmlFor="exp-kind">종류</Label>
-          <Select id="exp-kind" value={v.kind} onChange={(e) => set("kind", e.target.value as ExperienceKind)}>
+          <Select id="exp-kind" value={v.kind} onValueChange={(v) => set("kind", v as ExperienceKind)}>
             {EXPERIENCE_KINDS.map((k) => (
-              <option key={k} value={k}>
+              <SelectItem key={k} value={k}>
                 {EXPERIENCE_KIND_LABEL[k]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -141,14 +141,14 @@ export function ExperienceForm({
             id="exp-parent"
             value={v.parent_id}
             disabled={hasChildren}
-            onChange={(e) => set("parent_id", e.target.value)}
+            onValueChange={(v) => set("parent_id", v)}
           >
-            <option value="">없음 (맨 위)</option>
+            <SelectItem value="">없음 (맨 위)</SelectItem>
             {options.map((p) => (
-              <option key={p.id} value={p.id}>
+              <SelectItem key={p.id} value={p.id}>
                 {p.title}
                 {p.organization ? ` · ${p.organization}` : ""}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </div>
@@ -167,37 +167,31 @@ export function ExperienceForm({
             <Label htmlFor="exp-start" className="sr-only">
               시작 달
             </Label>
-            <Input
+            <MonthField
               id="exp-start"
-              type="month"
               value={v.started_on}
-              onChange={(e) => set("started_on", e.target.value)}
+              onChange={(value) => set("started_on", value)}
               aria-label="시작 달"
-              className="tabular-nums"
             />
           </div>
           <div>
             <Label htmlFor="exp-end" className="sr-only">
               끝 달
             </Label>
-            <Input
+            <MonthField
               id="exp-end"
-              type="month"
               value={v.ongoing ? "" : v.ended_on}
               disabled={v.ongoing}
               min={v.started_on || undefined}
-              onChange={(e) => set("ended_on", e.target.value)}
+              onChange={(value) => set("ended_on", value)}
               aria-label="끝 달"
-              className="tabular-nums"
             />
           </div>
         </div>
         <label className="flex min-h-9 items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            className="size-4 shrink-0 accent-fg"
+          <Checkbox
             checked={v.ongoing}
-            onChange={(e) => set("ongoing", e.target.checked)}
+            onCheckedChange={(checked) => set("ongoing", checked)}
           />
           진행 중
         </label>

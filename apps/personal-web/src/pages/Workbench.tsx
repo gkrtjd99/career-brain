@@ -3,14 +3,13 @@
 // 좁은 화면: 문항 고르기 → 쓸 경험 → 쓰기 → 검사(아래 시트) 단계와 아래에 붙는 버튼 줄.
 // 문서 URL은 작업대에서 그 문서를 고른 화면이다 (예전 링크가 그대로 맞는다).
 import type { AppDocument, Application, ApplicationChecks, ApplicationPrep, DocumentSummary } from "@career-brain/client";
-import { Button, cn, EmptyState, Sheet } from "@career-brain/ui";
+import { Button, cn, Disclosure, EmptyState, MoreMenu, Sheet } from "@career-brain/ui";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { getRouteApi, Link, Navigate } from "@tanstack/react-router";
-import { ChevronRight, Lock, Plus, Save } from "lucide-react";
+import { Lock, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Loaded, PageHeader, Tabs } from "../components/common";
 import { CompanyPanel } from "../components/doc/CompanyPanel";
-import { MoreMenu } from "../components/doc/MoreMenu";
 import { docLabel, PrepPanel, prepKey } from "../components/doc/PrepPanel";
 import { api } from "../lib/api";
 import { daysLeft, ddayLabel, formatDeadline } from "../lib/dates";
@@ -207,21 +206,22 @@ function Frame({
       ) : null}
       {parts.checks}
       {parts.editable ? (
-        <details
-          className="group border-t border-line pt-4 text-[13px]"
+        <Disclosure
+          title={
+            <>
+              AI 수정안 <span className="ml-1 font-normal text-muted">쓴 문장을 다듬기만 합니다</span>
+            </>
+          }
           open={suggestOpen}
-          onToggle={(e) => setSuggestOpen((e.target as HTMLDetailsElement).open)}
+          onOpenChange={setSuggestOpen}
+          tone="strong"
+          className="border-t border-line pt-4 text-[13px]"
         >
-          <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 font-medium hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-            <ChevronRight size={14} className="text-muted transition-transform group-open:rotate-90" />
-            AI 수정안
-            <span className="font-normal text-muted">(쓴 문장을 다듬기만, 요청할 때만)</span>
-          </summary>
           <div className="mt-3 space-y-4">
             <div>{parts.batch}</div>
             {parts.suggestions}
           </div>
-        </details>
+        </Disclosure>
       ) : null}
     </div>
   ) : null;

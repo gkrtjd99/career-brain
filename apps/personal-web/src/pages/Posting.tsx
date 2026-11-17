@@ -9,7 +9,7 @@ import {
   type PostingValue,
   type PostingVersion,
 } from "@career-brain/client";
-import { Badge, Button, cn, Highlight, Input, Section, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import { Badge, Button, Checkbox, cn, DateField, Highlight, IconButton, Input, Section, Sheet, Spinner, Textarea, TimeField, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Archive, ExternalLink, FileText, PenLine, RefreshCw, Trash2, Plus } from "lucide-react";
@@ -221,6 +221,7 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
     onSuccess: () => {
       setPicked(new Set());
       qc.invalidateQueries({ queryKey: ["postings"] });
+      toast("가져오기를 요청했습니다. 공고 목록에 나타납니다.");
     },
   });
   if (run.status === "pending")
@@ -261,7 +262,7 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
       <section>
         <h2 className="mb-1 text-[15px] font-semibold">저장할 공고 고르기</h2>
         <p className="mb-3 text-[13px] text-muted">
-          공고 목록 페이지입니다. 목록을 따라가지 않으니, 저장할 공고를 골라 주세요.
+          공고 목록 페이지입니다. 저장할 공고를 고르세요.
           {run.candidates.length ? ` (후보 ${run.candidates.length}개)` : ""}
         </p>
         {run.candidates.length ? (
@@ -270,13 +271,12 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
               {run.candidates.map((c) => (
                 <li key={c.url}>
                   <label className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 shrink-0 accent-fg"
+                    <Checkbox
+                      className="mt-0.5"
                       checked={picked.has(c.url)}
-                      onChange={(e) => {
+                      onCheckedChange={(checked) => {
                         const next = new Set(picked);
-                        if (e.target.checked) next.add(c.url);
+                        if (checked) next.add(c.url);
                         else next.delete(c.url);
                         setPicked(next);
                       }}
@@ -299,7 +299,6 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
           >
             선택한 {picked.size}건 가져오기
           </Button>
-          {save.isSuccess ? <span className="text-[13px]">요청했습니다. 공고 목록에서 확인하세요.</span> : null}
           {picked.size > 20 ? <span className="text-[13px] font-medium">한 번에 20건까지</span> : null}
           {posting.status !== "archived" ? (
             <span className="text-[13px] text-muted">이 목록 항목은 보관해도 됩니다.</span>
@@ -373,7 +372,7 @@ function Versions({ p, onOpen }: { p: Posting; onOpen: (id: string) => void }) {
               className="-mx-2 block w-[calc(100%+1rem)] rounded-md px-2 py-2.5 text-left transition-colors duration-150 hover:bg-subtle/60"
             >
               <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                <span className="font-medium tabular-nums">v{v.version_no}</span>
+                <span className="font-medium tabular-nums">{v.version_no}번째 가져옴</span>
                 <span className="text-muted tabular-nums">{formatDateTime(v.created_at)}</span>
                 {v.id === p.confirmed_version_id ? (
                   <span className="text-muted">· 확정 기준</span>
@@ -476,7 +475,10 @@ function ReviewForm({
 
   const confirm = useMutation({
     mutationFn: () => api.confirmPosting(p.id, payload),
-    onSuccess: onSaved,
+    onSuccess: () => {
+      toast("저장했습니다.");
+      onSaved();
+    },
   });
   useEffect(() => confirm.reset(), [draft]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -493,12 +495,12 @@ function ReviewForm({
       title={p.status === "draft" ? "추출 결과 확인" : "공고 내용"}
       action={
         <span className="text-[13px] text-muted tabular-nums">
-          {version ? `v${version.version_no} 기준` : "직접 입력"}
+          {version ? `${version.version_no}번째 원문 기준` : "직접 입력"}
         </span>
       }
     >
       <p className="text-[13px] text-muted">
-        항목마다 원문 근거를 확인하세요. 원문에서 못 찾은 값은 비워 두었고, 수정한 값은 근거가 “직접 입력”이 됩니다.
+        원문에서 못 찾은 값은 비워 두었습니다.
       </p>
       <form
         className="mt-3 divide-y divide-line border-t border-line"
@@ -532,11 +534,6 @@ function ReviewForm({
             </Button>
           ) : null}
           {titleEmpty ? <span className="text-[13px] font-medium">공고명은 꼭 있어야 합니다.</span> : null}
-          {confirm.isSuccess ? (
-            <span role="status" className="text-[13px] text-muted">
-              저장했습니다.
-            </span>
-          ) : null}
           <ErrorText error={confirm.error} />
         </div>
       </form>
@@ -650,7 +647,7 @@ function FieldRow({
         {field === "questions" ? (
           <QuestionsEditor value={value as EssayQuestion[]} onChange={onChange} />
         ) : field === "deadline" || field === "opens_at" ? (
-          <DateField
+          <WhenField
             id={id}
             value={value as string}
             onChange={onChange}
@@ -705,7 +702,7 @@ function splitWhen(value: string): { date: string; time: string; always: boolean
   return local ? { date: local.slice(0, 10), time: local.slice(11, 16), always: false } : { date: "", time: "", always: false };
 }
 
-function DateField({
+function WhenField({
   id,
   value,
   onChange,
@@ -724,30 +721,26 @@ function DateField({
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <div className="flex gap-2">
-        <Input
+        <DateField
           id={id}
-          type="date"
           value={w.date}
           disabled={w.always}
-          onChange={(e) => set({ date: e.target.value, time: e.target.value ? w.time : "" })}
+          onChange={(value) => set({ date: value, time: value ? w.time : "" })}
           className="w-40"
         />
-        <Input
-          type="time"
+        <TimeField
           value={w.time}
           disabled={w.always || !w.date}
-          onChange={(e) => set({ time: e.target.value })}
+          onChange={(value) => set({ time: value })}
           aria-label={`${FIELD_LABEL[id.slice(3) as PostingField] ?? ""} 시각 (선택)`}
           className="w-28"
         />
       </div>
       {allowAlways ? (
         <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            className="h-4 w-4 accent-fg"
+          <Checkbox
             checked={w.always}
-            onChange={(e) => set({ always: e.target.checked, date: e.target.checked ? "" : w.date, time: "" })}
+            onCheckedChange={(checked) => set({ always: checked, date: checked ? "" : w.date, time: "" })}
           />
           상시 채용
         </label>
@@ -779,14 +772,14 @@ function QuestionsEditor({ value, onChange }: { value: EssayQuestion[]; onChange
               placeholder="글자 수"
               aria-label={`문항 ${i + 1} 글자 수`}
             />
-            <Button
-              variant="ghost"
+            <IconButton
+             
               className="w-full"
-              aria-label={`문항 ${i + 1} 빼기`}
+              label={`문항 ${i + 1} 빼기`}
               onClick={() => onChange(value.filter((_, j) => j !== i))}
             >
               <Trash2 size={14} />
-            </Button>
+            </IconButton>
           </div>
         </div>
       ))}
@@ -835,7 +828,7 @@ function EvidenceSheet({
       open={!!target}
       onOpenChange={(o) => !o && onClose()}
       title={target ? `${FIELD_LABEL[target.field]} 근거` : "근거"}
-      description={`v${version.version_no} 원문 · ${formatDateTime(version.created_at)}`}
+      description={`${version.version_no}번째 원문 · ${formatDateTime(version.created_at)}`}
       width="lg"
     >
       {spans.length > 1 ? (

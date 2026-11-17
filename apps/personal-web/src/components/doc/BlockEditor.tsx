@@ -1,5 +1,5 @@
 import type { ClaimBrief, DocBlock, Finding, SpanIn } from "@career-brain/client";
-import { Badge, Button, cn, StatusBadge } from "@career-brain/ui";
+import { Badge, Button, cn, IconButton, StatusBadge, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { Link2, Plus, Quote, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { FINDING, FINDING_GROUP } from "../../lib/labels";
@@ -328,13 +328,18 @@ export function BlockEditor({
                       {c?.statement ?? "불러오는 중"}
                     </span>
                     {!readOnly ? (
-                      <button
-                        aria-label={`근거 연결 해제: ${c?.statement ?? cid}`}
-                        className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
-                        onClick={() => update(i, { claim_ids: b.claim_ids.filter((x) => x !== cid) })}
-                      >
-                        <X size={12} />
-                      </button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            aria-label={`근거 연결 해제: ${c?.statement ?? cid}`}
+                            className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
+                            onClick={() => update(i, { claim_ids: b.claim_ids.filter((x) => x !== cid) })}
+                          >
+                            <X size={12} />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>근거 연결 해제</TooltipContent>
+                      </Tooltip>
                     ) : null}
                   </span>
                 );
@@ -351,13 +356,18 @@ export function BlockEditor({
                   </span>
                   <span className="shrink-0 py-0.5 text-muted">근거 {sp.claim_ids.length}</span>
                   {!readOnly ? (
-                    <button
-                      aria-label={`문장 근거 해제: ${sp.quote.slice(0, 40)}`}
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
-                      onClick={() => unlinkSpan(i, b, si)}
-                    >
-                      <X size={12} />
-                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={`문장 근거 해제: ${sp.quote.slice(0, 40)}`}
+                          className="grid h-9 w-9 shrink-0 place-items-center rounded text-muted hover:text-danger sm:h-6 sm:w-6"
+                          onClick={() => unlinkSpan(i, b, si)}
+                        >
+                          <X size={12} />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>문장 근거 해제</TooltipContent>
+                    </Tooltip>
                   ) : null}
                 </span>
               ))}
@@ -424,14 +434,14 @@ export function BlockEditor({
                     <Link2 size={14} /> 근거
                   </Button>
                   {blocks.length > 1 ? (
-                    <Button
+                    <IconButton
                       size="sm"
-                      variant="ghost"
-                      aria-label={`문단 ${i + 1} 삭제`}
+                     
+                      label={`문단 ${i + 1} 삭제`}
                       onClick={() => onChange(blocks.filter((_, j) => j !== i))}
                     >
                       <Trash2 size={14} />
-                    </Button>
+                    </IconButton>
                   ) : null}
                 </span>
               ) : null}

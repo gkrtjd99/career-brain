@@ -2,9 +2,8 @@
 // 단어 일치 기준선 옆에 "이 문서만 읽었을 때 요건 근거가 보이는가"와 문서 속 인용을 보인다.
 // 판정은 저장·검사 결과를 바꾸지 않는다. 같은 요건·같은 글이면 서버 캐시(c0022)에서 꺼내 다시 돈을 쓰지 않는다.
 import type { JudgeVerdict, VisibilityJudge } from "@career-brain/client";
-import { Button, cn, type BadgeTone } from "@career-brain/ui";
+import { Button, cn, Disclosure, type BadgeTone } from "@career-brain/ui";
 import { useMutation } from "@tanstack/react-query";
-import { ChevronRight, Sparkles } from "lucide-react";
 import { ErrorText } from "../common";
 import { api } from "../../lib/api";
 import { usd } from "../../lib/format";
@@ -26,9 +25,9 @@ const STATUS: Record<string, string> = {
 };
 
 const NOTE: Record<string, string> = {
-  no_route: "판정 모델을 연결하지 않았습니다 (연결·관리에서 judge_visibility)",
-  egress_scope_required: "이 연결에는 외부 모델로 보낼 권한이 없습니다",
-  quote_not_found: "모델이 준 인용을 문서에서 찾지 못해 '판단 어려움'으로 내렸습니다",
+  no_route: "AI를 연결하지 않았습니다. 연결·관리의 용도별 모델에서 고릅니다.",
+  egress_scope_required: "이 연결은 문서를 밖으로 보낼 수 없습니다.",
+  quote_not_found: "AI가 든 인용을 문서에서 찾지 못해 '판단 어려움'으로 두었습니다.",
 };
 
 interface SavedBlock {
@@ -78,30 +77,25 @@ export function VisibilityJudgePanel({
   const res: VisibilityJudge | undefined = run.data;
   return (
     <section className="mt-8 space-y-2">
-      <h3 className="sr-only">판정 모델 의견 (참고)</h3>
+      <h3 className="sr-only">AI 의견 (참고)</h3>
       <Button size="sm" disabled={run.isPending} onClick={() => run.mutate()}>
-        <Sparkles size={13} /> {run.isPending ? "확인하는 중" : res ? "판정 모델로 다시 확인" : "판정 모델로 확인"}
+        {run.isPending ? "확인하는 중" : res ? "AI로 다시 확인" : "AI로 확인"}
       </Button>
-      <details className="group text-xs text-muted">
-        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-          <ChevronRight size={13} className="transition-transform group-open:rotate-90" />
-          무엇을 보내나요
-        </summary>
+      <Disclosure title="무엇을 보내나요" className="text-xs text-muted">
         <p className="mt-1 leading-5">
           저장한 글을 외부 모델에 보내 “이 문서만 읽고 요건 근거가 보이는가”를 묻습니다. 참고 의견일 뿐 검사 결과를
           바꾸지 않습니다. 이 기기 밖으로 보내지 않는 근거가 연결된 문단은 보내지 않습니다.
           {dirty ? " 저장하지 않은 편집은 보내지 않습니다." : ""}
         </p>
-      </details>
+      </Disclosure>
       <ErrorText error={run.error} />
       {res ? (
         <>
           <p className="text-xs text-muted tabular-nums">
             {STATUS[res.judge.status] ?? res.judge.status}
             {res.judge.note ? ` — ${NOTE[res.judge.note] ?? res.judge.note}` : ""}
-            {res.judge.model ? ` · ${res.judge.model}` : ""}
-            {res.judge.calls ? ` · 호출 ${res.judge.calls}회` : ""}
-            {res.judge.cached ? ` · 캐시 ${res.judge.cached}회(비용 없음)` : ""}
+            {res.judge.calls ? ` · ${res.judge.calls}번 물음` : ""}
+            {res.judge.cached ? ` · 저장해 둔 의견 ${res.judge.cached}개(비용 없음)` : ""}
             {res.judge.cost_usd && res.judge.calls ? ` · ${usd(res.judge.cost_usd)}` : ""}
             {res.judge.cost_basis === "list_price_equivalent" ? " (구독 환산)" : ""}
             {res.blocks_withheld ? ` · 보내지 않은 문단 ${res.blocks_withheld}개` : ""}
@@ -118,7 +112,7 @@ export function VisibilityJudgePanel({
                   <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-muted">
                     {v ? (
                       <span className={cn(toneText(VERDICT[v.verdict].tone))}>
-                        판정 모델: {VERDICT[v.verdict].label}
+                        AI 의견: {VERDICT[v.verdict].label}
                       </span>
                     ) : null}
                     <span>

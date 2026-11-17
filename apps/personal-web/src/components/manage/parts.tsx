@@ -1,7 +1,7 @@
 // 연결·관리 탭들이 같이 쓰는 작은 조각. 상자 없이 얇은 선과 여백으로만 나눈다.
-import { Button } from "@career-brain/ui";
+import { Button, toast } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ApiError, api } from "../../lib/api";
 import { errorText } from "../common";
 
@@ -35,19 +35,15 @@ export function useConnectionTest(name: string | null) {
 
 /** 글을 복사하는 작은 버튼 */
 export function CopyButton({ text, label = "복사" }: { text: string; label?: string }) {
-  const [done, setDone] = useState(false);
   return (
     <Button
       size="sm"
       variant="ghost"
       onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => {
-          setDone(true);
-          window.setTimeout(() => setDone(false), 1500);
-        });
+        void navigator.clipboard?.writeText(text).then(() => toast("복사했습니다."));
       }}
     >
-      {done ? "복사함" : label}
+      {label}
     </Button>
   );
 }

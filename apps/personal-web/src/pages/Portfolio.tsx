@@ -1,5 +1,5 @@
 import type { PortfolioBundle, PortfolioCheck, PortfolioFormat, Finding } from "@career-brain/client";
-import { Button, cn, ConfirmDialog, Input, Label, Select, Sheet, Textarea, ViewTabs } from "@career-brain/ui";
+import { Button, cn, ConfirmDialog, IconButton, Input, Label, Select, SelectItem, Sheet, Textarea, ViewTabs } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp, Download, Plus, Printer, Trash2 } from "lucide-react";
@@ -205,29 +205,29 @@ function Editor({ b }: { b: PortfolioBundle }) {
                         </p>
                       ) : null}
                     </div>
-                    <Button size="icon" variant="ghost" aria-label="위로" title="위로" disabled={busy || i === 0} onClick={() => move(i, i - 1)}>
+                    <IconButton label="위로" disabled={busy || i === 0} onClick={() => move(i, i - 1)}>
                       <ArrowUp size={15} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="아래로"
-                      title="아래로"
+                    </IconButton>
+                    <IconButton
+                     
+                     
+                      label="아래로"
+                     
                       disabled={busy || i === b.items.length - 1}
                       onClick={() => move(i, i + 1)}
                     >
                       <ArrowDown size={15} />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      aria-label="묶음에서 빼기"
-                      title="묶음에서 빼기"
+                    </IconButton>
+                    <IconButton
+                     
+                     
+                      label="묶음에서 빼기"
+                     
                       disabled={busy}
                       onClick={() => order.mutate(ids.filter((y) => y !== x.item.id))}
                     >
                       <Trash2 size={15} />
-                    </Button>
+                    </IconButton>
                   </li>
                 ))}
               </ol>
@@ -448,12 +448,12 @@ function ExportSheet({ b, onClose, onPrint }: { b: PortfolioBundle; onClose: () 
                 <Label htmlFor="pf-resume" className="mb-1">
                   함께 넣을 이력서
                 </Label>
-                <Select id="pf-resume" value={resume} onChange={(e) => setResume(e.target.value)}>
-                  <option value="">넣지 않음</option>
+                <Select id="pf-resume" value={resume} onValueChange={(v) => setResume(v)}>
+                  <SelectItem value="">넣지 않음</SelectItem>
                   {(resumes.data ?? []).map((r) => (
-                    <option key={r.id} value={r.id}>
+                    <SelectItem key={r.id} value={r.id}>
                       {RESUME_KIND_LABEL[r.kind]} · {r.title}
-                    </option>
+                    </SelectItem>
                   ))}
                 </Select>
                 <p className="mt-1 text-[13px] text-muted">

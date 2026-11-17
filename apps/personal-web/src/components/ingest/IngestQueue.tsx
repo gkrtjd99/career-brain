@@ -1,5 +1,5 @@
 import type { IngestKind } from "@career-brain/client";
-import { Button, cn, Input, Spinner } from "@career-brain/ui";
+import { Button, cn, Input, Spinner, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { Link } from "@tanstack/react-router";
 import { X } from "lucide-react";
 import { useState } from "react";
@@ -74,14 +74,19 @@ function Row({ it, onNavigate }: { it: IngestItem; onNavigate: () => void }) {
         </div>
         <Destination it={it} onNavigate={onNavigate} />
         {!busy ? (
-          <button
-            type="button"
-            onClick={() => removeItem(it.id)}
-            className="-mr-1.5 inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle hover:text-fg sm:size-8"
-            aria-label={`${it.name} 목록에서 빼기`}
-          >
-            <X size={15} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => removeItem(it.id)}
+                className="-mr-1.5 inline-flex size-9 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle hover:text-fg sm:size-8"
+                aria-label={`${it.name} 목록에서 빼기`}
+              >
+                <X size={15} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>목록에서 빼기</TooltipContent>
+          </Tooltip>
         ) : null}
       </div>
 

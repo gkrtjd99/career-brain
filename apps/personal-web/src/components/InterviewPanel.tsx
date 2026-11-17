@@ -1,8 +1,7 @@
 import type { ClaimKind, Contribution, InterviewQuestion } from "@career-brain/client";
-import { Button, cn, EmptyState, Label, Select, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, cn, EmptyState, Label, Select, SelectItem, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
@@ -87,7 +86,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
             </p>
             <div className="flex gap-1.5">
               <Button size="sm" onClick={() => ai.mutate()} disabled={ai.isPending || iv.status !== "open"}>
-                <Sparkles size={14} /> AI 보충 질문
+                AI 보충 질문
               </Button>
               <Button size="sm" variant="ghost" onClick={() => start.mutate()} disabled={start.isPending}>
                 새 인터뷰
@@ -97,7 +96,7 @@ export function InterviewPanel({ experienceId }: { experienceId: string }) {
           <ErrorText error={ai.error} />
           {iv.questions.some((x) => x.run_id) ? (
             <label className="flex min-h-9 items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={byRun} onChange={(e) => setByRun(e.target.checked)} />
+              <Checkbox checked={byRun} onCheckedChange={(checked) => setByRun(checked)} />
               실행별로 묶기
             </label>
           ) : null}
@@ -157,7 +156,6 @@ function RunLink({ runId }: { runId: string }) {
       to="/system"
       search={{ run: runId }}
       className="text-xs font-normal text-muted underline underline-offset-2 hover:text-fg"
-      title="시스템 화면에서 이 실행 보기"
     >
       실행 보기
     </Link>
@@ -218,7 +216,6 @@ function QuestionCard({
               to="/system"
               search={{ run: question.run_id }}
               className="underline underline-offset-2 hover:text-fg"
-              title="이 질문을 만든 실행 기록"
             >
               실행 기록
             </Link>
@@ -249,7 +246,7 @@ function QuestionCard({
           />
           {answer.trim() ? (
             <label className="flex min-h-9 items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={makeClaim} onChange={(e) => setMakeClaim(e.target.checked)} />
+              <Checkbox checked={makeClaim} onCheckedChange={(checked) => setMakeClaim(checked)} />
               사실로 저장
             </label>
           ) : null}
@@ -266,11 +263,11 @@ function QuestionCard({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <Label htmlFor={`k-${question.id}`}>종류</Label>
-                  <Select id={`k-${question.id}`} value={kind} onChange={(e) => setKind(e.target.value as ClaimKind)}>
+                  <Select id={`k-${question.id}`} value={kind} onValueChange={(v) => setKind(v as ClaimKind)}>
                     {(Object.keys(KIND_LABEL) as ClaimKind[]).map((k) => (
-                      <option key={k} value={k}>
+                      <SelectItem key={k} value={k}>
                         {KIND_LABEL[k]}
-                      </option>
+                      </SelectItem>
                     ))}
                   </Select>
                 </div>
@@ -279,11 +276,11 @@ function QuestionCard({
                   <Select
                     id={`c-${question.id}`}
                     value={contribution}
-                    onChange={(e) => setContribution(e.target.value as Contribution)}
+                    onValueChange={(v) => setContribution(v as Contribution)}
                   >
-                    <option value="personal">본인</option>
-                    <option value="team">팀</option>
-                    <option value="unknown">모름</option>
+                    <SelectItem value="personal">본인</SelectItem>
+                    <SelectItem value="team">팀</SelectItem>
+                    <SelectItem value="unknown">모름</SelectItem>
                   </Select>
                 </div>
               </div>

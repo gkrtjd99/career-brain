@@ -8,7 +8,7 @@ import {
   type EducationStatus,
   type ExtraMajorKind,
 } from "@career-brain/client";
-import { Button, ConfirmDialog, Input, Label, Select, Sheet, Textarea } from "@career-brain/ui";
+import { Button, Checkbox, ConfirmDialog, Input, Label, MonthField, Select, SelectItem, Sheet, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
@@ -158,11 +158,11 @@ function EducationForm({ education: e, onDone }: { education: Education | null; 
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="학위 과정" htmlFor="ed-degree">
-          <Select id="ed-degree" value={d.degree} onChange={(ev) => set({ degree: ev.target.value as Degree })}>
+          <Select id="ed-degree" value={d.degree} onValueChange={(v) => set({ degree: v as Degree })}>
             {DEGREES.map((v) => (
-              <option key={v} value={v}>
+              <SelectItem key={v} value={v}>
                 {DEGREE_LABEL[v]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
@@ -170,12 +170,12 @@ function EducationForm({ education: e, onDone }: { education: Education | null; 
           <Select
             id="ed-status"
             value={d.status}
-            onChange={(ev) => set({ status: ev.target.value as EducationStatus })}
+            onValueChange={(v) => set({ status: v as EducationStatus })}
           >
             {EDUCATION_STATUSES.map((v) => (
-              <option key={v} value={v}>
+              <SelectItem key={v} value={v}>
                 {EDUCATION_STATUS_LABEL[v]}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
@@ -199,13 +199,13 @@ function EducationForm({ education: e, onDone }: { education: Education | null; 
                 id="ed-extra-kind"
                 value={d.extra_major_kind}
                 disabled={!d.extra_major.trim()}
-                onChange={(ev) => set({ extra_major_kind: ev.target.value as ExtraMajorKind | "" })}
+                onValueChange={(v) => set({ extra_major_kind: v as ExtraMajorKind | "" })}
               >
-                <option value="">고르기</option>
+                <SelectItem value="">고르기</SelectItem>
                 {(["double", "minor"] as const).map((v) => (
-                  <option key={v} value={v}>
+                  <SelectItem key={v} value={v}>
                     {EXTRA_MAJOR_LABEL[v]}
-                  </option>
+                  </SelectItem>
                 ))}
               </Select>
             </Field>
@@ -214,30 +214,24 @@ function EducationForm({ education: e, onDone }: { education: Education | null; 
       )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="입학" htmlFor="ed-in">
-          <Input
+          <MonthField
             id="ed-in"
-            type="month"
             value={d.entered_on}
-            onChange={(ev) => set({ entered_on: ev.target.value })}
-            className="tabular-nums"
+            onChange={(value) => set({ entered_on: value })}
           />
         </Field>
         <Field label={d.status === "expected" ? "졸업 예정" : "졸업"} htmlFor="ed-out">
-          <Input
+          <MonthField
             id="ed-out"
-            type="month"
             value={d.graduated_on}
-            onChange={(ev) => set({ graduated_on: ev.target.value })}
-            className="tabular-nums"
+            onChange={(value) => set({ graduated_on: value })}
           />
         </Field>
       </div>
       <label className="flex min-h-9 items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={d.transferred}
-          onChange={(ev) => set({ transferred: ev.target.checked })}
-          className="size-4 accent-[var(--app-fg)]"
+          onCheckedChange={(checked) => set({ transferred: checked })}
         />
         편입
       </label>
@@ -253,32 +247,32 @@ function EducationForm({ education: e, onDone }: { education: Education | null; 
           />
         </Field>
         <Field label="만점" htmlFor="ed-scale">
-          <Select id="ed-scale" value={d.gpa_scale} onChange={(ev) => set({ gpa_scale: ev.target.value })}>
+          <Select id="ed-scale" value={d.gpa_scale} onValueChange={(v) => set({ gpa_scale: v })}>
             {GPA_SCALES.map((s) => (
-              <option key={s} value={String(s)}>
+              <SelectItem key={s} value={String(s)}>
                 {s === 100 ? "100" : s.toFixed(1)}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
       </div>
       <Field label="증빙 서류" htmlFor="ed-source">
-        <Select id="ed-source" value={d.source_id} onChange={(ev) => set({ source_id: ev.target.value })}>
-          <option value="">없음</option>
+        <Select id="ed-source" value={d.source_id} onValueChange={(v) => set({ source_id: v })}>
+          <SelectItem value="">없음</SelectItem>
           {(proofs.data ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
+            <SelectItem key={p.id} value={p.id}>
               {p.title}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </Field>
       <Field label="이어진 경험" htmlFor="ed-exp">
-        <Select id="ed-exp" value={d.experience_id} onChange={(ev) => set({ experience_id: ev.target.value })}>
-          <option value="">없음</option>
+        <Select id="ed-exp" value={d.experience_id} onValueChange={(v) => set({ experience_id: v })}>
+          <SelectItem value="">없음</SelectItem>
           {(experiences.data ?? []).map((x) => (
-            <option key={x.id} value={x.id}>
+            <SelectItem key={x.id} value={x.id}>
               {x.title}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </Field>

@@ -1,7 +1,6 @@
-import { Button } from "@career-brain/ui";
+import { Button, Disclosure } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
 import { ErrorText } from "../common";
@@ -63,9 +62,8 @@ export function McpTab({ isAdmin }: { isAdmin: boolean }) {
           <Code text={`[mcp_servers.career-brain]\nurl = "${url}"\nbearer_token_env_var = "CAREER_API_TOKEN"`} />
           <Code text={`export CAREER_API_TOKEN=${t}`} />
         </Example>
-        <details className="group">
-          <Summary>다른 클라이언트 (Cursor, Claude Desktop)</Summary>
-          <div className="mt-4 space-y-6">
+        <Disclosure title="다른 클라이언트 (Cursor, Claude Desktop)">
+          <div className="mt-2 space-y-6">
             <Example name="Cursor" where="~/.cursor/mcp.json">
               <Code
                 text={JSON.stringify(
@@ -94,7 +92,7 @@ export function McpTab({ isAdmin }: { isAdmin: boolean }) {
               <p className="text-[13px] text-muted">/path/to/career-brain을 이 저장소 경로로 바꾸세요.</p>
             </Example>
           </div>
-        </details>
+        </Disclosure>
       </Block>
 
       <Block title="권한">
@@ -116,23 +114,13 @@ export function McpTab({ isAdmin }: { isAdmin: boolean }) {
       </Block>
 
       {isAdmin ? (
-        <details className="group border-t border-line pt-6">
-          <Summary>원격 연결 (OAuth) — 토큰 대신 로그인으로 붙는 클라이언트용</Summary>
-          <div className="mt-6">
+        <Disclosure title="원격 연결 (OAuth)" className="border-t border-line pt-6">
+          <div className="mt-4">
             <OAuthTab />
           </div>
-        </details>
+        </Disclosure>
       ) : null}
     </div>
-  );
-}
-
-function Summary({ children }: { children: ReactNode }) {
-  return (
-    <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 text-[13px] text-muted hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
-      <ChevronRight size={14} aria-hidden className="transition-transform duration-150 group-open:rotate-90" />
-      {children}
-    </summary>
   );
 }
 

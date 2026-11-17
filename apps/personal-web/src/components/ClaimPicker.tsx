@@ -1,5 +1,5 @@
 import type { ClaimStatus, SearchHit } from "@career-brain/client";
-import { Button, Input, Sheet, STATUS_LABEL, type VerificationStatus } from "@career-brain/ui";
+import { Button, IconButton, Input, Sheet, STATUS_LABEL, type VerificationStatus } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, Search as SearchIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -70,9 +70,9 @@ export function ClaimPicker({
           maxLength={500}
           autoFocus
         />
-        <Button type="submit" variant="primary" aria-label="검색">
+        <IconButton type="submit" variant="primary" label="검색">
           <SearchIcon size={16} />
-        </Button>
+        </IconButton>
       </form>
       {!q ? (
         <p className="text-sm text-muted">문단 내용과 관련된 낱말로 확인한 사실을 찾습니다.</p>

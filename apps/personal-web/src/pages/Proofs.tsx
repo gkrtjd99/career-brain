@@ -34,7 +34,7 @@ export function ProofsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="증빙 서류"
-        subtitle="자격증·성적표·증명서 사본입니다. 원본을 그대로 보관하고 외부 모델에 보내지 않습니다."
+        subtitle="이 기기 밖으로 보내지 않습니다."
         actions={
           <Button variant="primary" onClick={() => ingest.open("proof")}>
             <Upload size={15} /> 증빙 넣기

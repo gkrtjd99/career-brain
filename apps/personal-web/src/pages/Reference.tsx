@@ -1,8 +1,8 @@
 import type { PiiReport, Reference, ReferenceNote } from "@career-brain/client";
-import { Button, ConfirmDialog, Section, Sheet, Spinner } from "@career-brain/ui";
+import { Button, ConfirmDialog, IconButton, Section, Sheet, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import {
@@ -77,9 +77,9 @@ function ReferenceView({ r }: { r: Reference }) {
             <Button onClick={() => setEditing(true)}>
               <Pencil size={14} /> 수정
             </Button>
-            <Button variant="ghost" size="icon" aria-label="참고 글 삭제" onClick={() => setDeleting(true)}>
+            <IconButton label="참고 글 삭제" onClick={() => setDeleting(true)}>
               <Trash2 size={14} />
-            </Button>
+            </IconButton>
           </>
         }
       />
@@ -92,7 +92,7 @@ function ReferenceView({ r }: { r: Reference }) {
               <h2 className="text-[15px] font-semibold">구조 메모</h2>
               <div className="flex items-center gap-1">
                 <Button size="sm" variant="ghost" onClick={() => suggest.mutate()} disabled={suggest.isPending}>
-                  {suggest.isPending ? <Spinner /> : <Sparkles size={14} />} 메모 후보 만들기
+                  {suggest.isPending ? <Spinner /> : null}메모 후보 만들기
                 </Button>
                 <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
                   <Plus size={14} /> 메모 추가
@@ -116,7 +116,7 @@ function ReferenceView({ r }: { r: Reference }) {
                 <h3 className="text-sm font-semibold">
                   확인할 메모 <span className="font-normal text-muted tabular-nums">{candidates.length}</span>
                 </h3>
-                <p className="mt-0.5 text-[13px] text-muted">모델이 만든 후보입니다. 글과 맞으면 확인합니다.</p>
+                <p className="mt-0.5 text-[13px] text-muted">글과 맞으면 확인합니다.</p>
                 <NoteList notes={candidates} referenceId={r.id} />
               </div>
             ) : null}
@@ -305,12 +305,12 @@ function NoteItem({ n, referenceId }: { n: ReferenceNote; referenceId: string })
               확인
             </Button>
           ) : null}
-          <Button size="icon" variant="ghost" aria-label="메모 수정" onClick={() => setEditing(true)}>
+          <IconButton label="메모 수정" onClick={() => setEditing(true)}>
             <Pencil size={14} />
-          </Button>
-          <Button size="icon" variant="ghost" aria-label="메모 삭제" onClick={() => remove.mutate()} disabled={remove.isPending}>
+          </IconButton>
+          <IconButton label="메모 삭제" onClick={() => remove.mutate()} disabled={remove.isPending}>
             <Trash2 size={14} />
-          </Button>
+          </IconButton>
         </div>
       </div>
       <ErrorText error={confirm.error ?? remove.error} className="mt-1" />

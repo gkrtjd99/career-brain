@@ -1,5 +1,5 @@
 import type { Credential, CredentialField, CredentialIn, CredentialKind } from "@career-brain/client";
-import { Button, ConfirmDialog, Input, Label, Select, Sheet, Textarea } from "@career-brain/ui";
+import { Button, ConfirmDialog, DateField, Input, Label, Select, SelectItem, Sheet, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api } from "../../lib/api";
@@ -170,12 +170,12 @@ function CredentialForm({
     >
       <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3">
         <Field label="종류" htmlFor="cr-kind">
-          <Select id="cr-kind" value={d.kind} onChange={(e) => set({ kind: e.target.value as CredentialKind })}>
+          <Select id="cr-kind" value={d.kind} onValueChange={(v) => set({ kind: v as CredentialKind })}>
             {/* 학력은 학력 화면에서 적는다 (옛 학력 기록만 이 종류로 보인다) */}
             {CREDENTIAL_KIND_OPTIONS.filter((o) => o.value !== "degree" || c?.kind === "degree").map((o) => (
-              <option key={o.value} value={o.value}>
+              <SelectItem key={o.value} value={o.value}>
                 {o.label}
-              </option>
+              </SelectItem>
             ))}
           </Select>
         </Field>
@@ -229,10 +229,10 @@ function CredentialForm({
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label={d.kind === "language" ? "응시일" : "취득일"} htmlFor="cr-acquired" hint={hint("acquired_on")}>
-          <Input id="cr-acquired" type="date" value={d.acquired_on} onChange={(e) => set({ acquired_on: e.target.value })} />
+          <DateField id="cr-acquired" value={d.acquired_on} onChange={(value) => set({ acquired_on: value })} />
         </Field>
         <Field label="만료일" htmlFor="cr-expires" hint={hint("expires_on")}>
-          <Input id="cr-expires" type="date" value={d.expires_on} onChange={(e) => set({ expires_on: e.target.value })} />
+          <DateField id="cr-expires" value={d.expires_on} onChange={(value) => set({ expires_on: value })} />
         </Field>
       </div>
       {d.kind === "language" && !d.expires_on ? (
@@ -243,10 +243,10 @@ function CredentialForm({
       {periodKinds.includes(d.kind) || d.started_on || d.ended_on ? (
         <div className="grid grid-cols-2 gap-3">
           <Field label="시작일" htmlFor="cr-start" hint={hint("started_on")}>
-            <Input id="cr-start" type="date" value={d.started_on} onChange={(e) => set({ started_on: e.target.value })} />
+            <DateField id="cr-start" value={d.started_on} onChange={(value) => set({ started_on: value })} />
           </Field>
           <Field label="종료일" htmlFor="cr-end" hint={hint("ended_on")}>
-            <Input id="cr-end" type="date" value={d.ended_on} onChange={(e) => set({ ended_on: e.target.value })} />
+            <DateField id="cr-end" value={d.ended_on} onChange={(value) => set({ ended_on: value })} />
           </Field>
         </div>
       ) : null}
@@ -267,22 +267,22 @@ function CredentialForm({
         ) : null}
       </div>
       <Field label="증빙 서류" htmlFor="cr-source">
-        <Select id="cr-source" value={d.source_id} onChange={(e) => set({ source_id: e.target.value })}>
-          <option value="">없음</option>
+        <Select id="cr-source" value={d.source_id} onValueChange={(v) => set({ source_id: v })}>
+          <SelectItem value="">없음</SelectItem>
           {(proofs.data ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
+            <SelectItem key={p.id} value={p.id}>
               {p.title}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </Field>
       <Field label="이어진 경험" htmlFor="cr-exp">
-        <Select id="cr-exp" value={d.experience_id} onChange={(e) => set({ experience_id: e.target.value })}>
-          <option value="">없음</option>
+        <Select id="cr-exp" value={d.experience_id} onValueChange={(v) => set({ experience_id: v })}>
+          <SelectItem value="">없음</SelectItem>
           {(experiences.data ?? []).map((x) => (
-            <option key={x.id} value={x.id}>
+            <SelectItem key={x.id} value={x.id}>
               {x.title}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </Field>

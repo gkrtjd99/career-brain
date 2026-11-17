@@ -53,7 +53,7 @@ export function ManagePage() {
 
   return (
     <div>
-      <PageHeader title="연결·관리" subtitle="모델 연결, 사용량, 에이전트, 작업, 토큰, 백업과 설정." />
+      <PageHeader title="연결·관리" />
       <Tabs<ManageTab>
         value={tab}
         onChange={(t) => go({ tab: t })}

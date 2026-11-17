@@ -1,5 +1,5 @@
 import { COMPANY_FACT_KINDS, type CompanyFactKind } from "@career-brain/client";
-import { Button, Input, Label, Select, Textarea } from "@career-brain/ui";
+import { Button, Input, Label, Select, SelectItem, Textarea } from "@career-brain/ui";
 import { useEffect, useState, type FormEvent } from "react";
 import { FACT_KIND_LABEL } from "../../lib/companies";
 import { ErrorText } from "../common";
@@ -49,12 +49,12 @@ export function FactForm({
         <Select
           id="fact-kind"
           value={v.kind}
-          onChange={(e) => setV({ ...v, kind: e.target.value as CompanyFactKind })}
+          onValueChange={(next) => setV({ ...v, kind: next as CompanyFactKind })}
         >
           {COMPANY_FACT_KINDS.map((k) => (
-            <option key={k} value={k}>
+            <SelectItem key={k} value={k}>
               {FACT_KIND_LABEL[k]}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>

@@ -1,17 +1,5 @@
 import type { Approval, ApprovalChange, ApprovalStatus, RunStatus } from "@career-brain/client";
-import {
-  Badge,
-  Button,
-  Chip,
-  ConfirmDialog,
-  FilterChips,
-  Label,
-  Section,
-  Select,
-  Sheet,
-  Spinner,
-  Textarea,
-} from "@career-brain/ui";
+import { Badge, Button, Chip, ConfirmDialog, FilterChips, Label, Section, Select, SelectItem, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import type { BadgeTone } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
@@ -154,15 +142,15 @@ export function RunsList({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="space-y-4">
       <Select
         value={status}
-        onChange={(e) => setStatus(e.target.value as RunStatus | "")}
+        onValueChange={(v) => setStatus(v as RunStatus | "")}
         className="w-auto"
         aria-label="상태"
       >
-        <option value="">모든 상태</option>
+        <SelectItem value="">모든 상태</SelectItem>
         {(Object.keys(RUN_STATUS) as RunStatus[]).map((s) => (
-          <option key={s} value={s}>
+          <SelectItem key={s} value={s}>
             {RUN_STATUS[s].label}
-          </option>
+          </SelectItem>
         ))}
       </Select>
       <Loaded query={q}>
@@ -343,14 +331,14 @@ export function ApprovalsList({ onOpen }: { onOpen: (id: string) => void }) {
     <div className="space-y-4">
       <Select
         value={status}
-        onChange={(e) => setStatus(e.target.value as ApprovalStatus)}
+        onValueChange={(v) => setStatus(v as ApprovalStatus)}
         className="w-auto"
         aria-label="상태"
       >
         {(Object.keys(APPROVAL_STATUS) as ApprovalStatus[]).map((s) => (
-          <option key={s} value={s}>
+          <SelectItem key={s} value={s}>
             {APPROVAL_STATUS[s].label}
-          </option>
+          </SelectItem>
         ))}
       </Select>
       <Loaded query={q}>
@@ -559,7 +547,7 @@ export function AuditSection() {
   return (
     <div className="space-y-4">
       <p className="text-[13px] text-muted">
-        MCP 도구 호출마다 도구·결과·걸린 시간·인자 해시만 남깁니다. 인자 원문은 저장하지 않습니다.
+        도구 호출마다 도구·결과·걸린 시간만 남깁니다. 보낸 내용은 저장하지 않습니다.
       </p>
       <Loaded query={q}>
         {(page) => (

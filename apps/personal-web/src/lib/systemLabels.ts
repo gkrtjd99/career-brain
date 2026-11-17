@@ -139,7 +139,7 @@ export function changeValue(v: unknown): string {
 
 export function bytes(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  if (n < 1024) return `${n} B`;
+  if (n < 1024) return n ? "1 KB" : "0 KB";
   const units = ["KB", "MB", "GB", "TB"];
   let v = n / 1024;
   let i = 0;

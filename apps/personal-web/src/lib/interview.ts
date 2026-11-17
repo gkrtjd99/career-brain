@@ -81,21 +81,21 @@ export function interviewNote(note: string): string | null {
     case "no_submission":
       return "제출본이 없어 제출한 글에서 나온 질문은 없습니다.";
     case "model_not_allowed":
-      return "모델 없이 정해진 질문과 검색 순위로 만들었습니다.";
+      return "AI 없이 기본 질문으로 만들었습니다.";
     case "model_denied":
-      return "모델 연결이 없어 정해진 질문과 검색 순위로 만들었습니다.";
+      return "AI 연결이 없어 기본 질문으로 만들었습니다.";
     case "model_error":
-      return "모델이 답하지 않아 정해진 질문으로 만들었습니다.";
+      return "AI가 답하지 않아 기본 질문으로 만들었습니다.";
     case "model_invalid_output":
-      return "모델 답을 읽지 못해 정해진 질문으로 만들었습니다.";
+      return "AI 답을 읽지 못해 기본 질문으로 만들었습니다.";
     case "model_dropped":
-      return `모델이 후보 밖에서 고른 ${arg}개는 뺐습니다.`;
+      return null;
     case "restricted_withheld":
-      return `이 기기 밖으로 보내지 않는 사실 ${arg}개는 모델에 보내지 않았습니다.`;
+      return `이 기기 밖으로 보내지 않는 사실 ${arg}개는 빼고 보냈습니다.`;
     case "search":
-      return "의미 검색 없이 낱말로만 찾았습니다.";
+      return null;
     case "no_candidates":
-      return "쓸 경험을 찾지 못했습니다. 원문 근거가 있는 확인한 사실이 있어야 후보가 됩니다.";
+      return "쓸 경험을 찾지 못했습니다. 확인한 사실이 있어야 고를 수 있습니다.";
     default:
       return null;
   }

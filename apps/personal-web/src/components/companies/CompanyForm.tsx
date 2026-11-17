@@ -1,5 +1,5 @@
 import type { Company, CompanyIn } from "@career-brain/client";
-import { Button, Input, Label } from "@career-brain/ui";
+import { Button, Disclosure, Input, Label } from "@career-brain/ui";
 import { useState, type FormEvent } from "react";
 import { ErrorText } from "../common";
 
@@ -87,10 +87,7 @@ export function CompanyForm({
           maxLength={500}
         />
       </div>
-      <details className="group">
-        <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-[13px] text-muted hover:text-fg [&::-webkit-details-marker]:hidden">
-          식별 번호 (선택)
-        </summary>
+      <Disclosure title="식별 번호 (선택)">
         <div className="mt-2 grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="company-corp">DART 고유번호</Label>
@@ -117,7 +114,7 @@ export function CompanyForm({
             />
           </div>
         </div>
-      </details>
+      </Disclosure>
       <ErrorText error={error} />
       <div className="flex gap-2">
         <Button type="submit" variant="primary" disabled={pending || !v.name.trim()}>

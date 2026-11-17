@@ -11,7 +11,7 @@ import type {
   ResumeVersion,
 } from "@career-brain/client";
 import { RESUME_TEMPLATES } from "@career-brain/client";
-import { Button, cn, ConfirmDialog, Label, Select, Sheet, Textarea, ViewTabs } from "@career-brain/ui";
+import { Button, Checkbox, cn, ConfirmDialog, IconButton, Label, MoreMenu, Select, SelectItem, Sheet, Textarea, ViewTabs } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -153,7 +153,7 @@ function Editor({ v }: { v: ResumeVersion }) {
             <Button size="sm" onClick={() => setExporting(true)}>
               <Download size={14} /> 내보내기
             </Button>
-            <MoreMenu v={v} />
+            <VersionMenu v={v} />
           </>
         }
       />
@@ -313,12 +313,12 @@ function SettingsRow({
           id="rs-template"
           value={v.summary.template}
           disabled={busy}
-          onChange={(e) => onChange({ template: e.target.value as ResumeTemplate })}
+          onValueChange={(v) => onChange({ template: v as ResumeTemplate })}
         >
           {RESUME_TEMPLATES.map((t) => (
-            <option key={t} value={t}>
+            <SelectItem key={t} value={t}>
               {TEMPLATE_LABEL[t]}
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>
@@ -330,21 +330,20 @@ function SettingsRow({
           id="rs-pages"
           value={String(v.summary.max_pages)}
           disabled={busy}
-          onChange={(e) => onChange({ max_pages: Number(e.target.value) })}
+          onValueChange={(v) => onChange({ max_pages: Number(v) })}
         >
           {[1, 2, 3, 4, 5].map((n) => (
-            <option key={n} value={n}>
+            <SelectItem key={n} value={n}>
               {n}쪽
-            </option>
+            </SelectItem>
           ))}
         </Select>
       </div>
       <label className="flex min-h-9 items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={v.summary.blind}
           disabled={busy}
-          onChange={(e) => onChange({ blind: e.target.checked })}
+          onCheckedChange={(checked) => onChange({ blind: checked })}
         />
         블라인드
         <span className="text-[13px] text-muted max-sm:hidden">사진·생년월일·주소·학교 이름을 빼고 냅니다</span>
@@ -353,8 +352,7 @@ function SettingsRow({
   );
 }
 
-function MoreMenu({ v }: { v: ResumeVersion }) {
-  const [open, setOpen] = useState(false);
+function VersionMenu({ v }: { v: ResumeVersion }) {
   const [confirm, setConfirm] = useState(false);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -367,32 +365,22 @@ function MoreMenu({ v }: { v: ResumeVersion }) {
   });
   return (
     <>
-      <Button size="sm" variant="ghost" aria-label="더 보기" onClick={() => setOpen(true)}>
-        <MoreHorizontal size={16} />
-      </Button>
-      <Sheet open={open} onOpenChange={setOpen} title="판본">
-        <ul className="divide-y divide-line border-y border-line text-sm">
-          <li className="py-3">
-            <Link to="/brain/resumes" className="underline underline-offset-2">
-              이 판본에서 직무별·공고별 판본 만들기
-            </Link>
-            <p className="text-[13px] text-muted">이력서 목록의 '판본 만들기'에서 이 판본을 고릅니다.</p>
-          </li>
-          <li className="py-3">
-            <button type="button" className="min-h-9 text-danger" onClick={() => setConfirm(true)}>
-              판본 삭제
-            </button>
-            <p className="text-[13px] text-muted">
-              {v.summary.children ? "이 판본에서 만든 판본이 있어 삭제할 수 없습니다." : "저장한 내용이 모두 사라집니다."}
-            </p>
-          </li>
-        </ul>
-      </Sheet>
+      <MoreMenu
+        label="판본 메뉴"
+        items={[
+          { label: "이 판본으로 새 판본 만들기", onSelect: () => void navigate({ to: "/brain/resumes" }) },
+          { label: "판본 삭제", danger: true, separated: true, onSelect: () => setConfirm(true) },
+        ]}
+      />
       <ConfirmDialog
         open={confirm}
         onOpenChange={setConfirm}
         title="판본을 삭제할까요?"
-        description={`'${v.summary.title}'의 저장한 내용이 모두 사라집니다. 되돌릴 수 없습니다.`}
+        description={
+          v.summary.children
+            ? "이 판본에서 만든 판본이 있어 삭제할 수 없습니다. 그 판본을 먼저 삭제하세요."
+            : `'${v.summary.title}'의 내용이 모두 사라집니다. 되돌릴 수 없습니다.`
+        }
         confirmLabel="삭제"
         tone="danger"
         busy={del.isPending}
@@ -406,24 +394,6 @@ function MoreMenu({ v }: { v: ResumeVersion }) {
 }
 
 // ---------------------------------------------------------------- 구역·항목·줄
-
-function IconButton({
-  label,
-  onClick,
-  disabled,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button size="icon" variant="ghost" aria-label={label} title={label} onClick={onClick} disabled={disabled}>
-      {children}
-    </Button>
-  );
-}
 
 function SectionBlock({
   sec,
@@ -633,11 +603,10 @@ function ProfileShow({ it, busy, onRun }: { it: ResumeItem; busy: boolean; onRun
       <legend className="sr-only">프로필에서 보일 칸</legend>
       {Object.entries(PROFILE_SHOW_LABEL).map(([k, label]) => (
         <label key={k} className="flex min-h-9 items-center gap-1.5 text-[13px] sm:min-h-7">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={!!show[k]}
             disabled={busy}
-            onChange={(e) => onRun([{ op: "update_item", item_id: it.id, show: { ...show, [k]: e.target.checked } }])}
+            onCheckedChange={(checked) => onRun([{ op: "update_item", item_id: it.id, show: { ...show, [k]: checked } }])}
           />
           {label}
         </label>

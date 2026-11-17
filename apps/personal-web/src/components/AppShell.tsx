@@ -1,4 +1,4 @@
-import { cn, Sheet } from "@career-brain/ui";
+import { cn, Sheet, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import {
@@ -181,14 +181,19 @@ export function AppShell() {
             <span className="text-[15px] font-semibold">Career Brain</span>
           </Link>
           {connected ? (
-            <button
-              type="button"
-              onClick={() => setPalette(true)}
-              aria-label="검색과 이동"
-              className="-mr-2 ml-auto inline-flex size-10 items-center justify-center rounded-md text-fg hover:bg-subtle"
-            >
-              <Search size={20} />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => setPalette(true)}
+                  aria-label="검색과 이동"
+                  className="-mr-2 ml-auto inline-flex size-10 items-center justify-center rounded-md text-fg hover:bg-subtle"
+                >
+                  <Search size={20} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>검색과 이동</TooltipContent>
+            </Tooltip>
           ) : null}
         </header>
 

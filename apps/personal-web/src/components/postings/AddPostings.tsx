@@ -1,5 +1,5 @@
 import type { SaveUrlResult } from "@career-brain/client";
-import { Button, cn, Spinner } from "@career-brain/ui";
+import { Button, cn, Spinner, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
@@ -70,7 +70,7 @@ export function AddPostings() {
               submit();
             }
           }}
-          placeholder="공고 URL 붙여넣기 (여러 개도 됩니다)"
+          placeholder="공고 주소를 붙여넣으세요"
           spellCheck={false}
           className={cn(
             "min-h-9 min-w-0 flex-1 resize-none rounded-md border border-line bg-surface px-3 py-[7px] text-sm leading-5",
@@ -125,14 +125,19 @@ function SaveResults({ results, onDismiss }: { results: SaveUrlResult[]; onDismi
             </>
           ) : null}
         </p>
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="결과 닫기"
-          className="-mr-2 inline-flex size-9 items-center justify-center rounded-md text-muted hover:text-fg"
-        >
-          <X size={14} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onDismiss}
+              aria-label="결과 닫기"
+              className="-mr-2 inline-flex size-9 items-center justify-center rounded-md text-muted hover:text-fg"
+            >
+              <X size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>결과 닫기</TooltipContent>
+        </Tooltip>
       </div>
       {bad.length ? (
         <ul className="divide-y divide-line border-y border-line">

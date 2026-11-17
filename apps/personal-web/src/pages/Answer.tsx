@@ -1,5 +1,5 @@
 import { ANSWER_ASSET_KINDS, type AnswerAsset, type AnswerAssetClaim, type AnswerAssetKind } from "@career-brain/client";
-import { Button, ConfirmDialog, Input, Label, Select, Textarea } from "@career-brain/ui";
+import { Button, ConfirmDialog, Input, Label, Select, SelectItem, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
@@ -118,11 +118,11 @@ function AnswerEditor({ initial }: { initial: AnswerAsset }) {
             <Label htmlFor="an-kind" className="mb-1">
               종류
             </Label>
-            <Select id="an-kind" value={v.kind} onChange={(e) => set({ kind: e.target.value as AnswerAssetKind })}>
+            <Select id="an-kind" value={v.kind} onValueChange={(v) => set({ kind: v as AnswerAssetKind })}>
               {ANSWER_ASSET_KINDS.map((k) => (
-                <option key={k} value={k}>
+                <SelectItem key={k} value={k}>
                   {ANSWER_KIND_LABEL[k]}
-                </option>
+                </SelectItem>
               ))}
             </Select>
           </div>
@@ -177,14 +177,19 @@ function AnswerEditor({ initial }: { initial: AnswerAsset }) {
                     {c.statement}
                   </span>
                   {!c.confirmed ? <span className="shrink-0 font-semibold">확인 해제됨</span> : null}
-                  <button
-                    type="button"
-                    aria-label={`근거 빼기: ${c.statement}`}
-                    onClick={() => set({ claims: v.claims.filter((x) => x.id !== c.id) })}
-                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg hover:text-fg"
-                  >
-                    <X size={14} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={`근거 빼기: ${c.statement}`}
+                        onClick={() => set({ claims: v.claims.filter((x) => x.id !== c.id) })}
+                        className="inline-flex size-7 shrink-0 items-center justify-center rounded-full text-muted hover:bg-bg hover:text-fg"
+                      >
+                        <X size={14} />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>근거 빼기</TooltipContent>
+                  </Tooltip>
                 </li>
               ))}
             </ul>
