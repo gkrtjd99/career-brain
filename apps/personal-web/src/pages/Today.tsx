@@ -117,13 +117,13 @@ export function TodayPage() {
       ) : null}
       <ErrorText error={postings.error ?? experiences.error ?? apps.error} className="mb-4" />
 
-      <div className="space-y-8">
+      <div className="space-y-5 sm:space-y-8">
         <div className="space-y-3 empty:hidden">
           <TokenExpiryNotice />
           <ApprovalRequestsCard />
         </div>
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-4 gap-2 sm:gap-3">
           <Stat
             to="/postings"
             label="이번 주 마감"
@@ -150,7 +150,7 @@ export function TodayPage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-6">
           <div className="lg:col-span-2">
             <MonthCalendar events={events} today={today} selected={selected} onSelect={setSelected} />
           </div>
@@ -172,7 +172,7 @@ export function TodayPage() {
           </Section>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-6">
           <Section
             title="진행 중인 지원"
             className="lg:col-span-2"
@@ -219,7 +219,7 @@ export function TodayPage() {
           </Section>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-6">
           <Section
             title="저장한 공고 · 아직 지원 전"
             className="lg:col-span-2"
@@ -227,8 +227,9 @@ export function TodayPage() {
           >
             {notApplied.length ? (
               <List>
-                {notApplied.slice(0, 6).map((p) => (
+                {notApplied.slice(0, 6).map((p, i) => (
                   <Row
+                    className={i >= 4 ? "hidden sm:block" : undefined}
                     key={p.id}
                     to="/postings/$postingId"
                     params={{ postingId: p.id }}
@@ -251,8 +252,8 @@ export function TodayPage() {
           <Section title="최근 저장">
             {recent.length ? (
               <ul className="space-y-1">
-                {recent.map((it) => (
-                  <RecentRow key={`${it.kind}-${it.action}-${it.id}`} it={it} />
+                {recent.map((it, i) => (
+                  <RecentRow key={`${it.kind}-${it.action}-${it.id}`} it={it} className={i >= 3 ? "hidden sm:block" : undefined} />
                 ))}
               </ul>
             ) : !activity.isPending ? (
@@ -325,10 +326,14 @@ function dedupe(items: ActivityItem[]) {
 
 function Stat({ to, label, value, hint }: { to: string; label: string; value: number; hint: string }) {
   return (
-    <Link to={to} className="rounded-lg border border-line bg-surface px-3 py-3 hover:border-fg/40">
-      <div className="text-xs text-muted">{label}</div>
-      <div className="mt-0.5 text-2xl font-semibold tabular-nums">{value}</div>
-      <div className="truncate text-xs text-muted">{hint}</div>
+    <Link
+      to={to}
+      title={hint}
+      className="rounded-lg border border-line bg-surface px-2 py-2 hover:border-fg/40 sm:px-3 sm:py-3"
+    >
+      <div className="truncate text-[11px] text-muted sm:text-xs">{label}</div>
+      <div className="text-lg leading-6 font-semibold tabular-nums sm:mt-0.5 sm:text-2xl sm:leading-8">{value}</div>
+      <div className="hidden truncate text-xs text-muted sm:block">{hint}</div>
     </Link>
   );
 }
@@ -349,7 +354,9 @@ function Row({
   meta,
   right,
   count,
+  className,
 }: {
+  className?: string;
   to: string;
   params?: Record<string, string>;
   search?: Record<string, string>;
@@ -359,8 +366,8 @@ function Row({
   count?: number;
 }) {
   return (
-    <li>
-      <Link to={to} params={params} search={search} className="flex min-h-12 items-center gap-3 px-3 py-2.5 hover:bg-subtle/60">
+    <li className={className}>
+      <Link to={to} params={params} search={search} className="flex min-h-11 items-center gap-3 px-3 py-2 hover:bg-subtle/60 sm:min-h-12 sm:py-2.5">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{title}</div>
           {meta ? <div className="truncate text-xs text-muted">{meta}</div> : null}
@@ -381,7 +388,7 @@ function ApplicationRow({ a, next }: { a: ApplicationSummary; next: ApplicationS
       <Link
         to="/applications/$applicationId"
         params={{ applicationId: a.id }}
-        className="flex min-h-14 items-center gap-3 px-3 py-2.5 hover:bg-subtle/60"
+        className="flex min-h-12 items-center gap-2 px-3 py-2 hover:bg-subtle/60 sm:min-h-14 sm:gap-3 sm:py-2.5"
       >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -400,7 +407,12 @@ function ApplicationRow({ a, next }: { a: ApplicationSummary; next: ApplicationS
             </div>
           </div>
         ) : null}
-        <div className="w-24 shrink-0 text-right">
+        {a.status === "draft" && a.questions ? (
+          <span className="shrink-0 text-xs text-muted tabular-nums sm:hidden">
+            {written}/{a.questions}
+          </span>
+        ) : null}
+        <div className="shrink-0 text-right sm:w-24">
           {a.status === "draft" ? (
             <DdayBadge deadline={a.deadline} />
           ) : next?.scheduled_at ? (
@@ -438,7 +450,7 @@ function AgendaList({ events, today, grouped }: { events: AgendaEvent[]; today: 
                     to={e.to}
                     params={e.params}
                     search={e.search}
-                    className="flex min-h-11 items-center gap-2.5 px-3 py-2 hover:bg-subtle/60"
+                    className="flex min-h-10 items-center gap-2.5 px-3 py-1.5 hover:bg-subtle/60 sm:min-h-11 sm:py-2"
                   >
                     <span className={cn("shrink-0 rounded px-1.5 py-px text-[11px] leading-4", KIND_CHIP[e.kind])}>
                       {AGENDA_KIND[e.kind]}
@@ -477,12 +489,12 @@ function activityLink(it: ActivityItem): { to: string; params?: Record<string, s
   return { to: "/study" };
 }
 
-function RecentRow({ it }: { it: ActivityItem }) {
+function RecentRow({ it, className }: { it: ActivityItem; className?: string }) {
   const link = activityLink(it);
   const label = ACTIVITY_LABEL[`${it.kind}:${it.action}`] ?? it.kind;
   return (
-    <li>
-      <Link to={link.to} params={link.params} className="block rounded px-2 py-1.5 hover:bg-subtle/60">
+    <li className={className}>
+      <Link to={link.to} params={link.params} className="block rounded px-2 py-1 hover:bg-subtle/60 sm:py-1.5">
         <div className="truncate text-sm">{it.title}</div>
         <div className="truncate text-xs text-muted">
           {label} · {formatDateTime(it.at)}
