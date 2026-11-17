@@ -111,7 +111,7 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 
 ## 채용 공고 (c0006)
 
-- `core.job_postings` — 공간마다 `canonical_url` UNIQUE (정규화: 소문자 호스트, 추적 파라미터·조각·기본 포트·끝 슬래시 제거, 쿼리 정렬). `status` draft/saved/archived. 확정한 값은 `fields`, 항목별 근거는 `evidence`(structured 경로·quote 위치·user). `confirmed_version_id`, `pending_changes`(확정 후 바뀐 항목), saved면 `saved_by`·`saved_at` 필수 (`ck_job_postings_saved`).
+- `core.job_postings` — 공간마다 `canonical_url` UNIQUE (정규화: 소문자 호스트, 추적 파라미터·조각·기본 포트·끝 슬래시 제거, 쿼리 정렬). `status` draft/saved/archived. 확정한 값은 `fields`, 항목별 근거는 `evidence`(structured 경로·quote 위치·user). `confirmed_version_id`, `pending_changes`(확정 후 바뀐 항목), saved면 `saved_by`·`saved_at` 필수 (`ck_job_postings_saved`). c0033: 회사 연결 `company_id` (아래 "회사 조사").
 - `core.job_posting_versions` — 가져온 원문 스냅샷. **SELECT/INSERT만** (수정·삭제 불가). `(posting_id, version_no)`, `(posting_id, content_hash)` UNIQUE → 같은 본문이면 새 버전·LLM 호출 없음. `method` http/browser/manual_text, `adapter`, `extracted`, `missing`, `changed_fields`, `model_call_id`, `screenshot_key`(blob sha256).
 - `core.job_fetch_runs` — 가져오기 시도 기록. `status` pending/done/listing/failed, `error_code`, `http_status`, `unchanged`, 목록 페이지면 `candidates`(따라가지 않음), `notes`.
 - 확정하지 않은 초안은 7일 뒤 `purge_unconfirmed`로 정리 (버전·실행 기록은 FK CASCADE).
@@ -457,3 +457,21 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - downgrade: 색인·CHECK·칸을 지운다.
 - 시험: `packages/core/tests/test_source_purpose.py` (제안 규칙, 증빙 추출·외부 호출 0, 참고 검색 제외·포함, PATCH 규칙과 409, 다른 공간 0건, MCP, 증빙 원본 해시 왕복, migration).
 
+
+## 회사 조사 (c0033, O13)
+
+`c0033` (`down_revision = c0032`). 회사의 공개 정보를 원문 인용과 함께 둔다 (plan §19.1). **참고 지식**이다: 사용자의 경험이 아니고, 문서 근거(`document_claims`는 `claims`만 가리킨다)로 쓸 수 없다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `companies` | 이름·`name_key`(NFKC·대소문자 무시, `(주)`·`주식회사`·`Inc.` 같은 법인 표시와 기호 뺌)·별칭(`text[]`, 20개 이하)·홈페이지·선택 식별자(`corp_code` 숫자 8자리, `business_no` 숫자 10자리). `UNIQUE (workspace_id, name_key)` | 전체 |
+| `company_pages` | 인용의 원문 한 건. `origin`: `url`(공고와 같은 fetch 경로, worker job `company_fetch`)·`paste`. 상태 `pending`/`done`/`failed`, 오류 코드, 글(200,000자 이하), 가져온 시각, 모델 호출, 후보 수, 메모. `done`이면 글·가져온 시각 필수. 회사를 지우면 함께 지워진다 | 전체 |
+| `company_facts` | 항목 하나: 종류(`talent`·`values`·`business`·`product`·`finance`·`culture`·`news`·`hiring`·`other`)·본문·인용(`quote`, 원문 안 위치 `quote_start`/`quote_end`)·원문 주소·가져온 시각(NOT NULL)·기준일(`as_of` + `as_of_precision` year/month/day, 함께 null)·상태(`candidate`/`confirmed`)·출처(`model`/`user`). `page_id` NOT NULL — 원문 없는 항목은 없다 | 전체 |
+| `job_postings.company_id` | uuid NULL. FK (`workspace_id, company_id`) → `companies`, `ON DELETE SET NULL (company_id)` (회사를 지워도 공고는 남는다). 부분 색인 | 기존 권한 그대로 |
+
+- 규칙 (usecase `career_core.usecases.companies`, DB CHECK가 한 번 더): 인용은 원문 글에 있어야 저장된다(공백 차이만 허용, `quote_not_found`). 재무 항목은 기준일이 있어야 한다(`ck_company_facts_finance_as_of`, HTTP `finance_needs_as_of`). 기준일은 추측하지 않는다 — 모델 후보의 기준일은 연도(와 달·날)가 인용이나 `as_of_quote`에 그대로 있을 때만 남기고, 재무 후보는 그렇지 않으면 버린다.
+- 오래됨: 기준일 기간의 끝(없으면 가져온 시각)이 오늘보다 365일 넘게 지났으면 보기에서 `stale: true`.
+- 후보: 모델(용도 `company_facts`, 없으면 `default`, 자료 등급 `public`)이 고른 항목은 `candidate`로 저장되고 사람(`actor.is_human`)만 확인한다. 사람이 직접 고른 인용은 바로 `confirmed`. 모델이 없으면 원문 글만 저장한다 (메모 `no_model`).
+- 공고 묶기: 연결되지 않은 공고 중 회사 이름의 `name_key`가 회사 이름·별칭과 같은 것을 제안만 한다. 연결은 사람이 `link-postings`로.
+- 내보내기: 세 표는 카탈로그로 자동 포함. `@schema_step("c0033")`가 옛 묶음에 빈 표와 `job_postings.company_id = null`을 넣는다. 대기 중인 `company_fetch`는 `pending_work`로 다시 큐에 들어간다. 삭제 기록(tombstone) 대상은 아니다.
+- 시험: `packages/core/tests/test_companies.py` (이름 키·기준일, 인용 필수·DB CHECK, HTTP 오류·권한, URL 가져오기·후보 검증, 붙여넣기+모델, 공고 묶기·다른 공간 0건, 문서 근거 거부, MCP 도구, 내보내기 왕복).

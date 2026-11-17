@@ -32,7 +32,7 @@ docker compose run --rm -v "$PWD/backup":/backup app export --out /backup/career
   ```
 
   구현은 `age` 명령이 PATH에 있으면 그것, 없으면 `pyrage`(선택 설치 `career-core[age]`, 루트 개발 환경 포함). `CAREER_AGE_BACKEND=binary|pyrage`로 고른다. 비밀번호(scrypt) 방식은 두지 않았다 (명령행·환경변수에 남기 쉬움). `export_runs`의 해시는 받은 파일(암호문) 기준이다.
-- **대기 작업**: 내보낼 때 큐에서 대기·실행 중이던 파싱(`parse`)·추출(`extract`)·공고 가져오기(`job_fetch`)를 manifest `pending_work`에 `{kind, target_table, target_id, status}`로 적는다 (큐 표 자체는 넣지 않는다).
+- **대기 작업**: 내보낼 때 큐에서 대기·실행 중이던 파싱(`parse`)·추출(`extract`)·공고 가져오기(`job_fetch`)·회사 페이지 가져오기(`company_fetch`, c0033)를 manifest `pending_work`에 `{kind, target_table, target_id, status}`로 적는다 (큐 표 자체는 넣지 않는다).
 - **삭제 기록**: `personal-api export-deletions --out deletions.jsonl` (API `GET /api/core/maintenance/deletions`)는 삭제 기록만 작은 JSONL로 쓴다 (첫 줄 머리말 `{"format": "career-brain-deletions", "format_version": 1, "workspace_id", …}`, 그다음 줄마다 `{target_table, target_id, deleted_at}`). 묶음보다 자주 받아 둔다.
 
 ### 묶음 형식 (tar.gz, `format_version` 2)
@@ -86,6 +86,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0030 | `schema_step` | 옛 묶음에는 빈 `model_connections`·`model_route_overrides`·`model_settings` (키 암호문 표는 내보내지 않음) |
 | c0031 | `schema_step` | `experiences`에 `kind = 'other'`·`parent_id = null`·`ongoing`·`tags = []`, `started_on`/`ended_on`은 migration과 같이 원문 기간이 분명할 때만 |
 | c0032 | `schema_step` | `sources`에 `purpose = 'experience'` (옛 묶음의 원본은 모두 경험 추출 대상이었다). 원본 파일·버전 해시는 그대로 — 증빙 원본도 바이트 그대로 복원된다 |
+| c0033 | `schema_step` | 새 표 `companies`·`company_pages`·`company_facts` (옛 묶음엔 빈 표), `job_postings.company_id = null` (옛 공고는 회사에 잇지 않은 상태) |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -226,6 +227,8 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `extraction_runs`·`job_fetch_runs` | same_except | 상태·결과 수·오류·메모·`updated_at` | 실행하며 채워지는 칸 |
   | `experiences` | same_except | 상태·`updated_at`·종류·상위·시작/끝 달·진행 중·태그(c0031) | 확인과 정리(종류·상하·날짜·태그)만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행) |
   | `claims` | same_except | 상태·확인한 사람·확인 시각·`updated_at` | 문장·종류·기여가 정체 |
+  | `company_pages` | same_except | 상태·오류·HTTP 상태·방식·최종 주소·제목·글·해시·가져온 시각·모델 호출·후보 수·메모·`updated_at` (c0033) | 가져오기 작업이 채우는 칸. 회사·입력 종류·주소·요청자·만든 시각이 정체 |
+  | `company_facts` | same_except | 상태·확인한 사람·확인 시각·기준일·기준일 단위·`updated_at` (c0033) | 종류·본문·인용·인용 위치가 정체 (본문이나 인용을 고치면 다른 행) |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |
   | `approvals` | same_except | 결정·사용·무효 칸·`updated_at` | 행위·대상·대상 버전·내용 해시·요청 시각이 정체 |
@@ -271,7 +274,7 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
 
 ### 대기 작업 다시 넣기
 
-manifest `pending_work`의 각 항목을 대상 행(`parse_runs`·`extraction_runs`·`job_fetch_runs`)이 복원된 공간에 있을 때만 `queued` job으로 넣는다 (같은 종류·대상이면 한 번, 새 ID면 바뀐 대상 ID로). 결과는 복원 보고 `requeued`와 CLI 출력 `re-queued N parse job(s)`. worker(`serve` 또는 `worker`)가 처리한다.
+manifest `pending_work`의 각 항목을 대상 행(`parse_runs`·`extraction_runs`·`job_fetch_runs`·`company_pages`)이 복원된 공간에 있을 때만 `queued` job으로 넣는다 (같은 종류·대상이면 한 번, 새 ID면 바뀐 대상 ID로). 결과는 복원 보고 `requeued`와 CLI 출력 `re-queued N parse job(s)`. worker(`serve` 또는 `worker`)가 처리한다.
 
 ### 삭제 기록 다시 적용 (`--deletions`)
 

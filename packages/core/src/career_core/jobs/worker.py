@@ -234,13 +234,23 @@ def index_handlers(deps) -> dict[str, JobHandler]:
 
 
 def posting_handlers(deps) -> dict[str, JobHandler]:
+    """공고 가져오기와, 같은 가져오기 경로를 쓰는 회사 페이지 가져오기 (O13). ``deps``는 ``PostingDeps``."""
+    from career_core.usecases.companies import (
+        COMPANY_FETCH_JOB,
+        give_up_company_fetch,
+        process_company_fetch,
+    )
     from career_core.usecases.postings import FETCH_JOB, give_up_fetch, process_fetch
 
     return {
         FETCH_JOB: JobHandler(
             run=lambda ws, target: process_fetch(deps, ws, target),
             give_up=lambda ws, target: give_up_fetch(deps, ws, target),
-        )
+        ),
+        COMPANY_FETCH_JOB: JobHandler(
+            run=lambda ws, target: process_company_fetch(deps, ws, target),
+            give_up=lambda ws, target: give_up_company_fetch(deps, ws, target),
+        ),
     }
 
 

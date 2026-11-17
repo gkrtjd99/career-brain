@@ -19,6 +19,7 @@ const PURPOSE_LABEL: Record<string, string> = {
   brain_extract: "경험 추출",
   interview_questions: "인터뷰 질문",
   job_extract: "공고 추출",
+  company_facts: "회사 항목 추출",
   embedding: "검색 색인",
   search: "검색",
   ping: "연결 확인",

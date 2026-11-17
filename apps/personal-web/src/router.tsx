@@ -5,6 +5,7 @@ import { getToken } from "./lib/api";
 import { BrainPage } from "./pages/Brain";
 import { ConnectPage } from "./pages/Connect";
 import { ApplicationsPage } from "./pages/Applications";
+import { CompaniesPage } from "./pages/Companies";
 import { ExperiencePage } from "./pages/Experience";
 import { NotFoundPage } from "./pages/NotFound";
 import { PostingPage } from "./pages/Posting";
@@ -108,6 +109,21 @@ export const experienceRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): { tab?: ExperienceTab } =>
     TABS.includes(s.tab as ExperienceTab) && s.tab !== "claims" ? { tab: s.tab as ExperienceTab } : {},
   component: ExperiencePage,
+});
+
+/** 참고 › 회사. 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+const companiesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/companies",
+  beforeLoad: requireToken,
+  component: CompaniesPage,
+});
+
+export const companyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/companies/$companyId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Company"), "CompanyPage"),
 });
 
 const KINDS: SearchKind[] = ["claim", "block", "answer"];
@@ -282,6 +298,8 @@ const routeTree = rootRoute.addChildren([
   sourcesRoute,
   sourceRoute,
   experienceRoute,
+  companiesRoute,
+  companyRoute,
   searchRoute,
   postingsRoute,
   postingRoute,

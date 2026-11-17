@@ -1700,6 +1700,8 @@ class PostingSummary:
     last_fetch_error: str | None
     created_at: datetime | None = None
     saved_at: datetime | None = None
+    # c0033 (O13): 이은 회사 (없으면 None)
+    company_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1744,6 +1746,7 @@ class PostingView:
     saved_at: datetime | None
     latest: VersionView | None
     runs: list[FetchRunView] = field(default_factory=list)
+    company_id: UUID | None = None  # c0033 (O13)
 
 
 def _version_view(v: JobPostingVersion, *, with_text: bool = False) -> VersionView:
@@ -1816,6 +1819,7 @@ async def list_postings(db: Database, actor: ActorContext) -> list[PostingSummar
                 run.error_code if run else None,
                 p.created_at,
                 p.saved_at,
+                p.company_id,
             )
         )
     return out
@@ -1880,6 +1884,7 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
             )
             for r in runs
         ],
+        p.company_id,
     )
 
 

@@ -56,6 +56,7 @@ KNOWN_PURPOSES: tuple[str, ...] = (
     "doc_suggest",
     "job_extract",
     "job_extract_image",
+    "company_facts",
     "embed",
     "judge_claim",
     "judge_visibility",
