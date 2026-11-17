@@ -269,6 +269,13 @@ def cases(e):
             None,
         ),
         (
+            "application_prep_get",
+            {"application_id": str(aid)},
+            "GET",
+            f"/core/applications/{aid}/prep",
+            None,
+        ),
+        (
             "get_interview",
             {"experience_id": str(e["experience"])},
             "GET",

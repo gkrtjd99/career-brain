@@ -1487,6 +1487,15 @@ def _c0036_profiles(arc) -> None:
     arc.ensure_tables("core.profile_photos", "core.profiles")
 
 
+@schema_step(
+    "c0037",
+    "지원 준비 문서 표 application_preps (옛 묶음에는 빈 표). 다시 만들 수 있는 산출물이고 "
+    "사람이 고른 경험(choices)이 함께 들어간다",
+)
+def _c0037_application_prep(arc) -> None:
+    arc.ensure_tables("core.application_preps")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
