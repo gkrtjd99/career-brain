@@ -1,26 +1,36 @@
-import { Link } from "@tanstack/react-router";
+import { cn } from "@career-brain/ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
-import { cn } from "@career-brain/ui";
-import { AGENDA_KIND, type AgendaEvent, type AgendaKind } from "../../lib/agenda";
+import type { AgendaEvent, AgendaKind } from "../../lib/agenda";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
-/** 종류는 색이 아니라 모양으로 구분한다 (흑백 테마): 마감 = 채움, 전형 = 테두리, 시험 = 점선 */
-export const KIND_CHIP: Record<AgendaKind, string> = {
-  deadline: "bg-fg text-bg",
-  stage: "border border-fg text-fg",
-  test: "border border-dashed border-muted text-muted",
-};
-
-export const KIND_DOT: Record<AgendaKind, string> = {
-  deadline: "bg-fg",
-  stage: "border border-fg",
-  test: "border border-dashed border-muted",
-};
+/** 종류는 색 대신 작은 표시의 모양으로: 마감 = 채운 점, 전형 = 빈 점, 시험 = 점선 점 */
+export function KindMark({ kind, className }: { kind: AgendaKind; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block size-1.5 shrink-0 rounded-full",
+        kind === "deadline" && "bg-fg",
+        kind === "stage" && "border border-fg",
+        kind === "test" && "border border-dashed border-muted",
+        className,
+      )}
+    />
+  );
+}
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
+}
+
+function keyOf(d: Date) {
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
+function fromKey(k: string) {
+  return new Date(Date.UTC(Number(k.slice(0, 4)), Number(k.slice(5, 7)) - 1, Number(k.slice(8, 10))));
 }
 
 function monthGrid(year: number, month: number) {
@@ -32,149 +42,195 @@ function monthGrid(year: number, month: number) {
   return cells;
 }
 
-export function MonthCalendar({
-  events,
-  today,
-  selected,
-  onSelect,
-}: {
+function weekOf(day: string) {
+  const start = fromKey(day);
+  start.setUTCDate(start.getUTCDate() - start.getUTCDay());
+  return Array.from({ length: 7 }, (_, i) => {
+    const x = new Date(start);
+    x.setUTCDate(start.getUTCDate() + i);
+    return keyOf(x);
+  });
+}
+
+function useKindsByDay(events: AgendaEvent[]) {
+  return useMemo(() => {
+    const map = new Map<string, AgendaKind[]>();
+    for (const e of events) {
+      const kinds = map.get(e.date) ?? [];
+      if (!kinds.includes(e.kind)) kinds.push(e.kind);
+      map.set(e.date, kinds);
+    }
+    return map;
+  }, [events]);
+}
+
+interface Props {
   events: AgendaEvent[];
   today: string;
   selected: string | null;
   onSelect: (day: string | null) => void;
+}
+
+function Header({
+  label,
+  onPrev,
+  onNext,
+  onToday,
+}: {
+  label: string;
+  onPrev: () => void;
+  onNext: () => void;
+  onToday?: () => void;
 }) {
+  return (
+    <div className="mb-2 flex items-center">
+      <div className="text-sm font-semibold tabular-nums">{label}</div>
+      <div className="ml-auto flex items-center">
+        {onToday ? (
+          <button type="button" onClick={onToday} className="rounded px-2 py-1 text-xs text-muted hover:text-fg">
+            오늘로
+          </button>
+        ) : null}
+        <button type="button" aria-label="이전" onClick={onPrev} className="rounded p-1 text-muted hover:text-fg">
+          <ChevronLeft size={16} />
+        </button>
+        <button type="button" aria-label="다음" onClick={onNext} className="rounded p-1 text-muted hover:text-fg">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DayButton({
+  day,
+  today,
+  selected,
+  kinds,
+  onSelect,
+  size,
+}: {
+  day: string;
+  today: string;
+  selected: string | null;
+  kinds: AgendaKind[];
+  onSelect: (day: string | null) => void;
+  size: "sm" | "md";
+}) {
+  const isToday = day === today;
+  const isSelected = day === selected;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(isSelected ? null : day)}
+      aria-pressed={isSelected}
+      aria-label={`${Number(day.slice(5, 7))}월 ${Number(day.slice(8))}일${kinds.length ? ", 일정 있음" : ""}`}
+      className={cn(
+        "flex flex-col items-center gap-1 rounded-md py-1 transition-colors duration-150",
+        isSelected ? "bg-subtle" : "hover:bg-subtle/60",
+      )}
+    >
+      <span
+        className={cn(
+          "inline-flex items-center justify-center rounded-full tabular-nums",
+          size === "sm" ? "size-7 text-[13px]" : "size-8 text-sm",
+          isToday && "bg-fg font-semibold text-bg",
+          !isToday && day < today && "text-muted",
+        )}
+      >
+        {Number(day.slice(8))}
+      </span>
+      <span className="flex h-1.5 items-center gap-0.5">
+        {kinds.map((k) => (
+          <KindMark key={k} kind={k} />
+        ))}
+      </span>
+    </button>
+  );
+}
+
+/** 넓은 화면 옆자리용 작은 월 달력: 날짜와 일정 점만. 이름은 옆 목록이 보여 준다. */
+export function MiniMonth({ events, today, selected, onSelect }: Props) {
   const ty = Number(today.slice(0, 4));
-  const tm = Number(today.slice(5, 7));
-  const [view, setView] = useState({ y: ty, m: tm - 1 });
+  const tm = Number(today.slice(5, 7)) - 1;
+  const [view, setView] = useState({ y: ty, m: tm });
   const cells = useMemo(() => monthGrid(view.y, view.m), [view]);
-  const byDay = useMemo(() => {
-    const map = new Map<string, AgendaEvent[]>();
-    for (const e of events) map.set(e.date, [...(map.get(e.date) ?? []), e]);
-    return map;
-  }, [events]);
+  const kindsByDay = useKindsByDay(events);
   const move = (delta: number) =>
     setView(({ y, m }) => {
       const t = m + delta;
       return { y: y + Math.floor(t / 12), m: ((t % 12) + 12) % 12 };
     });
-  const isThisMonth = view.y === ty && view.m === tm - 1;
 
   return (
-    <div className="rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-1 border-b border-line px-3 py-1.5 sm:py-2">
-        <div className="text-sm font-semibold">
-          {view.y}년 {view.m + 1}월
-        </div>
-        <div className="ml-auto flex items-center gap-1">
-          {!isThisMonth ? (
-            <button
-              type="button"
-              onClick={() => setView({ y: ty, m: tm - 1 })}
-              className="rounded px-2 py-1 text-xs text-muted hover:bg-subtle hover:text-fg"
-            >
-              이번 달
-            </button>
-          ) : null}
-          <button
-            type="button"
-            aria-label="이전 달"
-            onClick={() => move(-1)}
-            className="rounded p-1 text-muted hover:bg-subtle hover:text-fg"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <button
-            type="button"
-            aria-label="다음 달"
-            onClick={() => move(1)}
-            className="rounded p-1 text-muted hover:bg-subtle hover:text-fg"
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-7 border-b border-line text-center text-[11px] text-muted">
-        {WEEKDAYS.map((w, i) => (
-          <div key={w} className={cn("py-1 sm:py-1.5", i === 0 && "text-danger/80")}>
+    <div>
+      <Header
+        label={`${view.y}년 ${view.m + 1}월`}
+        onPrev={() => move(-1)}
+        onNext={() => move(1)}
+        onToday={view.y !== ty || view.m !== tm ? () => setView({ y: ty, m: tm }) : undefined}
+      />
+      <div className="grid grid-cols-7 text-center text-[11px] text-muted">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="pb-1">
             {w}
           </div>
         ))}
       </div>
       <div className="grid grid-cols-7">
-        {cells.map((day, i) => {
-          const list = day ? (byDay.get(day) ?? []) : [];
-          const past = day ? day < today : false;
-          const isToday = day === today;
-          const isSelected = day !== null && day === selected;
-          return (
-            <div
-              key={day ?? `blank-${i}`}
-              className={cn(
-                "min-h-10 border-line p-0.5 sm:min-h-20 sm:p-1",
-                i % 7 !== 6 && "border-r",
-                i < cells.length - 7 && "border-b",
-                !day && "bg-subtle/40",
-              )}
-            >
-              {day ? (
-                <button
-                  type="button"
-                  onClick={() => onSelect(isSelected ? null : day)}
-                  aria-pressed={isSelected}
-                  aria-label={`${Number(day.slice(5, 7))}월 ${Number(day.slice(8))}일 일정 ${list.length}개`}
-                  className={cn(
-                    "flex h-full w-full flex-col items-stretch gap-0.5 rounded text-left",
-                    isSelected ? "bg-subtle" : "hover:bg-subtle/60",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "mx-auto inline-flex size-5 items-center justify-center rounded-full text-[11px] sm:mx-0 sm:size-6 sm:text-xs",
-                      isToday ? "bg-fg font-semibold text-bg" : past ? "text-muted/70" : "text-fg",
-                    )}
-                  >
-                    {Number(day.slice(8))}
-                  </span>
-                  {/* 좁은 화면: 점, 넓은 화면: 이름 칩 2개 + 나머지 수 */}
-                  <span className="flex flex-wrap justify-center gap-0.5 sm:hidden">
-                    {list.slice(0, 3).map((e) => (
-                      <span key={e.key} className={cn("size-1.5 rounded-full", KIND_DOT[e.kind])} />
-                    ))}
-                  </span>
-                  <span className="hidden flex-col gap-0.5 sm:flex">
-                    {list.slice(0, 2).map((e) => (
-                      <span
-                        key={e.key}
-                        title={`${AGENDA_KIND[e.kind]} · ${e.title}${e.sub ? ` · ${e.sub}` : ""}`}
-                        className={cn(
-                          "truncate rounded px-1 py-px text-[11px] leading-4",
-                          KIND_CHIP[e.kind],
-                          past && "opacity-50",
-                        )}
-                      >
-                        {e.title}
-                      </span>
-                    ))}
-                    {list.length > 2 ? (
-                      <span className="px-1 text-[11px] text-muted">+{list.length - 2}</span>
-                    ) : null}
-                  </span>
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
+        {cells.map((day, i) =>
+          day ? (
+            <DayButton
+              key={day}
+              day={day}
+              today={today}
+              selected={selected}
+              kinds={kindsByDay.get(day) ?? []}
+              onSelect={onSelect}
+              size="sm"
+            />
+          ) : (
+            <span key={`blank-${i}`} />
+          ),
+        )}
       </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-line px-3 py-1.5 text-[11px] text-muted sm:py-2">
-        {(Object.keys(AGENDA_KIND) as AgendaKind[]).map((k) => (
-          <span key={k} className="inline-flex items-center gap-1.5">
-            <span className={cn("inline-block h-2.5 w-4 rounded-sm", KIND_DOT[k])} />
-            {AGENDA_KIND[k]}
-          </span>
+    </div>
+  );
+}
+
+/** 좁은 화면용 한 주 띠 */
+export function WeekStrip({ events, today, selected, onSelect }: Props) {
+  const [anchor, setAnchor] = useState(today);
+  const days = useMemo(() => weekOf(anchor), [anchor]);
+  const kindsByDay = useKindsByDay(events);
+  const shift = (n: number) => {
+    const d = fromKey(anchor);
+    d.setUTCDate(d.getUTCDate() + n);
+    setAnchor(keyOf(d));
+  };
+  const first = days[0]!;
+  return (
+    <div>
+      <Header
+        label={`${Number(first.slice(0, 4))}년 ${Number(first.slice(5, 7))}월`}
+        onPrev={() => shift(-7)}
+        onNext={() => shift(7)}
+        onToday={!days.includes(today) ? () => setAnchor(today) : undefined}
+      />
+      <div className="grid grid-cols-7 text-center">
+        {days.map((day, i) => (
+          <div key={day}>
+            <div className="pb-0.5 text-[11px] text-muted">{WEEKDAYS[i]}</div>
+            <DayButton
+              day={day}
+              today={today}
+              selected={selected}
+              kinds={kindsByDay.get(day) ?? []}
+              onSelect={onSelect}
+              size="md"
+            />
+          </div>
         ))}
-        <Link to="/postings" className="ml-auto hidden hover:text-fg sm:inline">
-          공고 마감은 저장한 공고에서
-        </Link>
       </div>
     </div>
   );
