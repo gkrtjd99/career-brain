@@ -1,8 +1,8 @@
 import type { OAuthLink, OAuthToken } from "@career-brain/client";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Spinner } from "@career-brain/ui";
+import { Button, ConfirmDialog, Input, Label, Section, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { ErrorText, List, Loaded } from "../common";
+import { useState, type ReactNode } from "react";
+import { ErrorText, Loaded } from "../common";
 import { api } from "../../lib/api";
 import { formatDateTime } from "../../lib/dates";
 import { int } from "../../lib/format";
@@ -24,6 +24,19 @@ function oauthError(error: unknown) {
 }
 
 type Pending = { kind: "link"; item: OAuthLink } | { kind: "token"; item: OAuthToken } | null;
+
+function Row({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5 py-2.5 text-[13px] sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 break-all sm:text-right">{children}</dd>
+    </div>
+  );
+}
+
+function Quiet({ children }: { children: ReactNode }) {
+  return <p className="border-t border-line pt-3 text-sm text-muted">{children}</p>;
+}
 
 export function OAuthTab() {
   const qc = useQueryClient();
@@ -55,39 +68,61 @@ export function OAuthTab() {
       {(o) => {
         const subjects = new Map(o.links.map((l) => [l.id, l.label || l.subject]));
         return (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="max-w-3xl space-y-10">
             <Section title="설정">
-              <Card className="space-y-1 px-3 py-2 text-[13px]">
-                {o.config.enabled ? (
-                  <>
-                    <p>
-                      <span className="text-muted">인가 서버: </span>
-                      <span className="break-all">{o.config.issuer}</span>
-                    </p>
-                    <p>
-                      <span className="text-muted">자원(MCP 주소): </span>
-                      <span className="break-all">{o.config.resource}</span>
-                    </p>
-                    <p className="text-muted">
-                      확인 방법: {[o.config.jwks ? "JWT 서명(JWKS)" : null, o.config.introspection ? "introspection" : null].filter(Boolean).join(" · ")}
-                      {o.config.require_jti ? " · jti 필수" : ""}
-                      {o.config.introspect_jwt ? " · JWT도 introspection" : ""}
-                      {o.config.introspection_cache_seconds !== null
-                        ? ` · 인가 서버 폐기 반영 최대 ${o.config.introspection_cache_seconds}초`
-                        : ""}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-muted">
-                    외부 OAuth가 꺼져 있습니다 (CAREER_OAUTH_ISSUER 없음). 원격 MCP는 API 토큰으로만 접속합니다. 연결은 미리 만들어 둘 수
-                    있습니다.
-                  </p>
-                )}
-              </Card>
+              {o.config.enabled ? (
+                <dl className="divide-y divide-line border-y border-line">
+                  <Row label="인가 서버">{o.config.issuer}</Row>
+                  <Row label="자원(MCP 주소)">{o.config.resource}</Row>
+                  <Row label="확인 방법">
+                    {[o.config.jwks ? "JWT 서명(JWKS)" : null, o.config.introspection ? "introspection" : null]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {o.config.require_jti ? " · jti 필수" : ""}
+                    {o.config.introspect_jwt ? " · JWT도 introspection" : ""}
+                    {o.config.introspection_cache_seconds !== null
+                      ? ` · 인가 서버 폐기 반영 최대 ${o.config.introspection_cache_seconds}초`
+                      : ""}
+                  </Row>
+                </dl>
+              ) : (
+                <Quiet>
+                  외부 OAuth가 꺼져 있습니다 (CAREER_OAUTH_ISSUER 없음). 원격 MCP는 API 토큰으로만 접속합니다. 연결은
+                  미리 만들어 둘 수 있습니다.
+                </Quiet>
+              )}
+            </Section>
+
+            <Section title="연결">
+              {o.links.length ? (
+                <ul className="divide-y divide-line border-t border-line">
+                  {o.links.map((l) => (
+                    <li key={l.id} className="flex items-center gap-4 py-3 text-[13px]">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{l.label}</div>
+                        <div className="truncate font-mono text-xs text-muted">{l.subject}</div>
+                        <div className="truncate text-muted tabular-nums">
+                          {formatDateTime(l.created_at)}
+                          {l.revoked_at ? ` · 끊음 ${formatDateTime(l.revoked_at)}` : ""}
+                        </div>
+                      </div>
+                      {l.revoked_at ? (
+                        <span className="shrink-0 text-muted">끊음</span>
+                      ) : (
+                        <Button size="sm" variant="danger" onClick={() => setPending({ kind: "link", item: l })}>
+                          끊기
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <Quiet>연결이 없습니다. 아래에서 인가 서버의 사용자 ID로 연결을 추가합니다.</Quiet>
+              )}
             </Section>
 
             <Section title="연결 추가">
-              <div className="space-y-2">
+              <div className="space-y-2 sm:max-w-md">
                 <Label htmlFor="oauth-subject">인가 서버의 사용자 ID (sub)</Label>
                 <Input
                   id="oauth-subject"
@@ -99,7 +134,13 @@ export function OAuthTab() {
                   className="font-mono text-xs"
                 />
                 <Label htmlFor="oauth-label">이름 (선택)</Label>
-                <Input id="oauth-label" value={label} onChange={(e) => setLabel(e.target.value)} maxLength={100} placeholder="예: 노트북 Claude" />
+                <Input
+                  id="oauth-label"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  maxLength={100}
+                  placeholder="예: 노트북 Claude"
+                />
                 {!o.config.enabled ? (
                   <>
                     <Label htmlFor="oauth-issuer">인가 서버 (issuer)</Label>
@@ -119,57 +160,30 @@ export function OAuthTab() {
                   연결
                 </Button>
                 <ErrorText error={link.error ? oauthError(link.error) : null} />
-                <p className="text-xs text-muted">
-                  연결한 사용자의 토큰은 이 공간에서 내 역할 범위와 토큰 범위의 교집합으로만 쓰이고, 승인·관리 권한은 받지 않습니다.
+                <p className="text-[13px] text-muted">
+                  연결한 사용자의 토큰은 이 공간에서 내 역할 범위와 토큰 범위의 교집합으로만 쓰이고, 승인·관리 권한은
+                  받지 않습니다.
                 </p>
               </div>
             </Section>
 
-            <Section title="연결">
-              {o.links.length ? (
-                <List>
-                  {o.links.map((l) => (
-                    <li key={l.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{l.label}</div>
-                        <div className="truncate font-mono text-xs text-muted">{l.subject}</div>
-                        <div className="truncate text-xs text-muted">
-                          {formatDateTime(l.created_at)}
-                          {l.revoked_at ? ` · 끊음 ${formatDateTime(l.revoked_at)}` : ""}
-                        </div>
-                      </div>
-                      {l.revoked_at ? (
-                        <Badge tone="none">끊음</Badge>
-                      ) : (
-                        <Button size="sm" variant="danger" onClick={() => setPending({ kind: "link", item: l })}>
-                          끊기
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </List>
-              ) : (
-                <EmptyState>연결이 없습니다.</EmptyState>
-              )}
-            </Section>
-
             <Section title="최근 토큰">
               {o.tokens.length ? (
-                <List>
+                <ul className="divide-y divide-line border-t border-line">
                   {o.tokens.map((t) => (
-                    <li key={t.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+                    <li key={t.id} className="flex items-center gap-4 py-3 text-[13px]">
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-mono text-xs">
                           {t.ref_kind === "jti" ? t.token_ref : `sha256 ${t.token_ref.slice(0, 12)}…`}
                         </div>
-                        <div className="truncate text-xs text-muted tabular-nums">
-                          {subjects.get(t.identity_id) ?? t.subject} · {t.via === "jwt" ? "JWT" : "introspection"} · {int(t.uses)}회 ·
-                          마지막 {formatDateTime(t.last_seen_at)}
+                        <div className="truncate text-muted tabular-nums">
+                          {subjects.get(t.identity_id) ?? t.subject} · {t.via === "jwt" ? "JWT" : "introspection"} ·{" "}
+                          {int(t.uses)}회 · 마지막 {formatDateTime(t.last_seen_at)}
                           {t.expires_at ? ` · 만료 ${formatDateTime(t.expires_at)}` : ""}
                         </div>
                       </div>
                       {t.revoked_at ? (
-                        <Badge tone="danger">폐기함</Badge>
+                        <span className="shrink-0 text-muted">폐기함</span>
                       ) : (
                         <Button size="sm" variant="danger" onClick={() => setPending({ kind: "token", item: t })}>
                           폐기
@@ -177,9 +191,9 @@ export function OAuthTab() {
                       )}
                     </li>
                   ))}
-                </List>
+                </ul>
               ) : (
-                <EmptyState>아직 받은 토큰이 없습니다. 원격 MCP 클라이언트가 OAuth 토큰으로 접속하면 여기에 보입니다.</EmptyState>
+                <Quiet>아직 받은 토큰이 없습니다. 원격 MCP 클라이언트가 OAuth 토큰으로 접속하면 여기에 보입니다.</Quiet>
               )}
             </Section>
 

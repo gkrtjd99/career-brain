@@ -1,10 +1,11 @@
 import type { Approval, ApprovalChange, ApprovalStatus, RunStatus } from "@career-brain/client";
-import { Badge, Button, Card, ConfirmDialog, EmptyState, Input, Label, Section, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import { Badge, Button, ConfirmDialog, Label, Section, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import type { BadgeTone } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ChevronRight } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { ErrorText, errorText, List, Loaded, PageHeader, Tabs } from "../components/common";
+import { ErrorText, errorText, Loaded, PageHeader, Tabs } from "../components/common";
 import { MaintenanceTab } from "../components/system/MaintenanceTab";
 import { LiveProvider, useLiveConnected } from "../components/system/live";
 import { OAuthTab } from "../components/system/OAuthTab";
@@ -27,7 +28,6 @@ import {
 const route = getRouteApi("/system");
 export type SystemTab = "runs" | "approvals" | "maintenance" | "audit" | "oauth";
 
-
 const ACTIVE: RunStatus[] = ["queued", "running", "waiting_approval", "interrupted"];
 
 function message(error: unknown) {
@@ -43,26 +43,58 @@ function Problem({ error }: { error: unknown }) {
   );
 }
 
-function RowButton({ onClick, title, meta, right }: { onClick: () => void; title: ReactNode; meta?: ReactNode; right?: ReactNode }) {
+/** 사용자가 손댈 상태(실패·대기·멈춤)만 배지로, 나머지는 옅은 글자로. */
+function StatusMark({ status }: { status: { label: string; tone: BadgeTone } }) {
+  if (status.tone === "danger" || status.tone === "warn") return <Badge tone={status.tone}>{status.label}</Badge>;
+  return <span className="text-[13px] text-muted">{status.label}</span>;
+}
+
+function Rows({ children }: { children: ReactNode }) {
+  return <ul className="divide-y divide-line border-t border-line">{children}</ul>;
+}
+
+function Quiet({ children }: { children: ReactNode }) {
+  return <p className="border-t border-line pt-3 text-sm text-muted">{children}</p>;
+}
+
+function RowButton({
+  onClick,
+  title,
+  meta,
+  right,
+}: {
+  onClick: () => void;
+  title: ReactNode;
+  meta?: ReactNode;
+  right?: ReactNode;
+}) {
   return (
     <li>
-      <button onClick={onClick} className="flex min-h-12 w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-subtle/60">
+      <button
+        type="button"
+        onClick={onClick}
+        className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-4 rounded-md px-2 py-3 text-left transition-colors duration-150 hover:bg-subtle/60"
+      >
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{title}</div>
-          {meta ? <div className="truncate text-xs text-muted">{meta}</div> : null}
+          {meta ? <div className="truncate text-[13px] text-muted tabular-nums">{meta}</div> : null}
         </div>
-        {right}
-        <ChevronRight size={16} className="shrink-0 text-muted" />
+        {right ? <div className="shrink-0">{right}</div> : null}
       </button>
     </li>
   );
 }
 
+/** 라벨·값 줄을 얇은 선으로 나눈 목록 */
+function Fields({ children }: { children: ReactNode }) {
+  return <dl className="divide-y divide-line border-y border-line">{children}</dl>;
+}
+
 function Field({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1 text-[13px]">
-      <span className="shrink-0 text-muted">{label}</span>
-      <span className="min-w-0 text-right break-words">{children}</span>
+    <div className="flex items-baseline justify-between gap-4 py-2 text-[13px]">
+      <dt className="shrink-0 text-muted">{label}</dt>
+      <dd className="min-w-0 text-right break-words tabular-nums">{children}</dd>
     </div>
   );
 }
@@ -138,8 +170,13 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
     refetchInterval: (query) => (!live && query.state.data?.some((r) => ACTIVE.includes(r.status)) ? 5000 : false),
   });
   return (
-    <div className="space-y-3">
-      <Select value={status} onChange={(e) => setStatus(e.target.value as RunStatus | "")} className="w-auto" aria-label="상태">
+    <div className="space-y-4">
+      <Select
+        value={status}
+        onChange={(e) => setStatus(e.target.value as RunStatus | "")}
+        className="w-auto"
+        aria-label="상태"
+      >
         <option value="">모든 상태</option>
         {(Object.keys(RUN_STATUS) as RunStatus[]).map((s) => (
           <option key={s} value={s}>
@@ -150,7 +187,7 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
       <Loaded query={q}>
         {(rows) =>
           rows.length ? (
-            <List>
+            <Rows>
               {rows.map((r) => (
                 <RowButton
                   key={r.id}
@@ -164,12 +201,12 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  right={<Badge tone={RUN_STATUS[r.status].tone}>{RUN_STATUS[r.status].label}</Badge>}
+                  right={<StatusMark status={RUN_STATUS[r.status]} />}
                 />
               ))}
-            </List>
+            </Rows>
           ) : (
-            <EmptyState>실행 기록이 없습니다. 에이전트(MCP)나 API가 여러 단계 작업을 시작하면 여기에 보입니다.</EmptyState>
+            <Quiet>실행 기록이 없습니다. 에이전트(MCP)나 API가 여러 단계 작업을 시작하면 여기에 보입니다.</Quiet>
           )
         }
       </Loaded>
@@ -177,7 +214,15 @@ function RunsTab({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClose: () => void; onApproval: (id: string) => void }) {
+function RunSheet({
+  runId,
+  onClose,
+  onApproval,
+}: {
+  runId: string | null;
+  onClose: () => void;
+  onApproval: (id: string) => void;
+}) {
   const qc = useQueryClient();
   const live = useLiveConnected();
   const run = useQuery({
@@ -193,7 +238,11 @@ function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClos
   });
   const act = useMutation({
     mutationFn: (what: "cancel" | "interrupt" | "resume") =>
-      what === "cancel" ? api.cancelRun(runId!) : what === "interrupt" ? api.interruptRun(runId!) : api.resumeRun(runId!),
+      what === "cancel"
+        ? api.cancelRun(runId!)
+        : what === "interrupt"
+          ? api.interruptRun(runId!)
+          : api.resumeRun(runId!),
     onSuccess: (r) => {
       qc.setQueryData(["run", runId], r);
       void qc.invalidateQueries({ queryKey: ["runs"] });
@@ -206,13 +255,15 @@ function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClos
       {run.isPending ? <Spinner /> : null}
       <ErrorText error={run.error} />
       {r ? (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-semibold">{WORKFLOW_LABEL[r.workflow] ?? r.workflow}</span>
-            <Badge tone={RUN_STATUS[r.status].tone}>{RUN_STATUS[r.status].label}</Badge>
-            {r.stop_requested ? <Badge tone="warn">{r.stop_requested === "cancel" ? "취소 요청됨" : "멈춤 요청됨"}</Badge> : null}
+            <StatusMark status={RUN_STATUS[r.status]} />
+            {r.stop_requested ? (
+              <Badge tone="warn">{r.stop_requested === "cancel" ? "취소 요청됨" : "멈춤 요청됨"}</Badge>
+            ) : null}
           </div>
-          <Card className="px-3 py-2">
+          <Fields>
             <Field label="진행">
               {r.step}
               {r.steps_total ? ` / ${r.steps_total}` : ""}단계
@@ -232,7 +283,7 @@ function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClos
             ) : null}
             {r.error_code ? <Field label="실패 사유">{RUN_CODE[r.error_code] ?? r.error_code}</Field> : null}
             {r.resumes ? <Field label="다시 시작">{r.resumes}회</Field> : null}
-          </Card>
+          </Fields>
           {r.approval_id ? (
             <Button size="sm" onClick={() => onApproval(r.approval_id!)}>
               연결된 승인 요청 보기
@@ -258,20 +309,22 @@ function RunSheet({ runId, onClose, onApproval }: { runId: string | null; onClos
           <Problem error={act.error} />
           <Section title="이벤트">
             {events.data?.length ? (
-              <ol className="space-y-1.5 border-l border-line pl-3">
+              <ol className="divide-y divide-line border-t border-line">
                 {events.data.map((e) => (
-                  <li key={e.seq} className="text-[13px]">
+                  <li key={e.seq} className="py-2 text-[13px]">
                     <span className="text-muted tabular-nums">{formatDateTime(e.created_at)}</span>{" "}
                     {e.code ? (RUN_CODE[e.code] ?? e.code) : (RUN_EVENT_KIND[e.kind] ?? e.kind)}
                     {e.step !== null ? <span className="text-muted"> · {e.step}단계</span> : null}
-                    {e.status ? <span className="text-muted"> · {RUN_STATUS[e.status as RunStatus]?.label ?? e.status}</span> : null}
+                    {e.status ? (
+                      <span className="text-muted"> · {RUN_STATUS[e.status as RunStatus]?.label ?? e.status}</span>
+                    ) : null}
                   </li>
                 ))}
               </ol>
             ) : events.isPending ? (
               <Spinner />
             ) : (
-              <p className="text-[13px] text-muted">이벤트가 없습니다.</p>
+              <Quiet>이벤트가 없습니다.</Quiet>
             )}
           </Section>
         </div>
@@ -306,8 +359,13 @@ function ApprovalsTab({ onOpen }: { onOpen: (id: string) => void }) {
     placeholderData: keepPreviousData,
   });
   return (
-    <div className="space-y-3">
-      <Select value={status} onChange={(e) => setStatus(e.target.value as ApprovalStatus)} className="w-auto" aria-label="상태">
+    <div className="space-y-4">
+      <Select
+        value={status}
+        onChange={(e) => setStatus(e.target.value as ApprovalStatus)}
+        className="w-auto"
+        aria-label="상태"
+      >
         {(Object.keys(APPROVAL_STATUS) as ApprovalStatus[]).map((s) => (
           <option key={s} value={s}>
             {APPROVAL_STATUS[s].label}
@@ -317,7 +375,7 @@ function ApprovalsTab({ onOpen }: { onOpen: (id: string) => void }) {
       <Loaded query={q}>
         {(rows) =>
           rows.length ? (
-            <List>
+            <Rows>
               {rows.map((a) => (
                 <RowButton
                   key={a.id}
@@ -330,12 +388,12 @@ function ApprovalsTab({ onOpen }: { onOpen: (id: string) => void }) {
                   ]
                     .filter(Boolean)
                     .join(" · ")}
-                  right={<Badge tone={APPROVAL_STATUS[a.status].tone}>{APPROVAL_STATUS[a.status].label}</Badge>}
+                  right={<StatusMark status={APPROVAL_STATUS[a.status]} />}
                 />
               ))}
-            </List>
+            </Rows>
           ) : (
-            <EmptyState>{status === "pending" ? "기다리는 승인 요청이 없습니다." : "해당하는 승인이 없습니다."}</EmptyState>
+            <Quiet>{status === "pending" ? "기다리는 승인 요청이 없습니다." : "해당하는 승인이 없습니다."}</Quiet>
           )
         }
       </Loaded>
@@ -352,11 +410,12 @@ function ChangeRow({ c }: { c: ApprovalChange }) {
   else
     text = (
       <>
-        <span className="text-muted line-through">{changeValue(c.before)}</span> → <span className="font-medium">{changeValue(c.after)}</span>
+        <span className="text-muted line-through">{changeValue(c.before)}</span> →{" "}
+        <span className="font-medium">{changeValue(c.after)}</span>
       </>
     );
   return (
-    <li className="py-1.5 text-[13px]">
+    <li className="py-2 text-[13px]">
       <div className="text-xs text-muted">
         {doc}
         {c.path.endsWith("]") ? "문서" : field}
@@ -370,9 +429,9 @@ function SummaryDocs({ summary }: { summary: Record<string, unknown> }) {
   const docs = Array.isArray(summary.documents) ? (summary.documents as Record<string, unknown>[]) : [];
   if (!docs.length) return null;
   return (
-    <ul className="divide-y divide-line">
+    <ul className="divide-y divide-line border-y border-line">
       {docs.map((d, i) => (
-        <li key={String(d.document_id ?? i)} className="flex items-baseline justify-between gap-3 py-1.5 text-[13px]">
+        <li key={String(d.document_id ?? i)} className="flex items-baseline justify-between gap-3 py-2 text-[13px]">
           <span className="min-w-0 truncate">{String(d.title ?? "문서")}</span>
           <span className="shrink-0 text-muted tabular-nums">
             {d.revision ? `${d.revision}번째 버전` : "아직 없음"}
@@ -384,7 +443,15 @@ function SummaryDocs({ summary }: { summary: Record<string, unknown> }) {
   );
 }
 
-function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | null; onClose: () => void; onRun: (id: string) => void }) {
+function ApprovalSheet({
+  approvalId,
+  onClose,
+  onRun,
+}: {
+  approvalId: string | null;
+  onClose: () => void;
+  onRun: (id: string) => void;
+}) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const diff = useQuery({
@@ -410,12 +477,12 @@ function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | nu
       {diff.isPending ? <Spinner /> : null}
       <ErrorText error={diff.error} />
       {d && a ? (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-base font-semibold">{approvalTitle(a)}</span>
-            <Badge tone={APPROVAL_STATUS[a.status].tone}>{APPROVAL_STATUS[a.status].label}</Badge>
+            <StatusMark status={APPROVAL_STATUS[a.status]} />
           </div>
-          <Card className="px-3 py-2">
+          <Fields>
             <Field label="요청">
               {a.requested_via === "agent" ? "에이전트" : "사람"} · {formatDateTime(a.created_at)}
             </Field>
@@ -424,11 +491,13 @@ function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | nu
             {a.decided_at ? <Field label="결정">{formatDateTime(a.decided_at)}</Field> : null}
             {a.decision_note ? <Field label="메모">{a.decision_note}</Field> : null}
             {a.used_at ? <Field label="사용">{formatDateTime(a.used_at)}</Field> : null}
-            {a.invalid_reason ? <Field label="무효 사유">{INVALID_REASON[a.invalid_reason] ?? a.invalid_reason}</Field> : null}
+            {a.invalid_reason ? (
+              <Field label="무효 사유">{INVALID_REASON[a.invalid_reason] ?? a.invalid_reason}</Field>
+            ) : null}
             <Field label="내용 해시">
               <code className="text-xs">{a.payload_hash.slice(0, 12)}…</code>
             </Field>
-          </Card>
+          </Fields>
 
           <Section title="요청한 내용">
             <SummaryDocs summary={d.requested} />
@@ -446,18 +515,16 @@ function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | nu
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" /> 대상이 지워졌습니다.
               </p>
             ) : d.changes.length ? (
-              <div className="rounded-md border border-warn/40 bg-warn-soft/40 px-3 py-1">
-                <ul className="divide-y divide-line">
-                  {d.changes.map((c) => (
-                    <ChangeRow key={`${c.path}-${c.kind}`} c={c} />
-                  ))}
-                </ul>
-              </div>
+              <ul className="divide-y divide-line border-y border-line">
+                {d.changes.map((c) => (
+                  <ChangeRow key={`${c.path}-${c.kind}`} c={c} />
+                ))}
+              </ul>
             ) : (
               <p className="text-[13px] text-muted">바뀐 것이 없습니다. 요청한 그대로입니다.</p>
             )}
             {d.target_changed && a.status === "pending" ? (
-              <p className="text-xs text-warn">대상이 바뀌어 이 요청은 승인할 수 없습니다. 다시 요청하세요.</p>
+              <p className="text-[13px] font-medium">대상이 바뀌어 이 요청은 승인할 수 없습니다. 다시 요청하세요.</p>
             ) : null}
           </Section>
 
@@ -473,11 +540,17 @@ function ApprovalSheet({ approvalId, onClose, onRun }: { approvalId: string | nu
                 >
                   승인
                 </Button>
-                <Button variant="danger" disabled={decide.isPending} onClick={() => decide.mutate({ approve: false, hash: a.payload_hash })}>
+                <Button
+                  variant="danger"
+                  disabled={decide.isPending}
+                  onClick={() => decide.mutate({ approve: false, hash: a.payload_hash })}
+                >
                   거절
                 </Button>
               </div>
-              <p className="text-xs text-muted">승인은 이 내용(해시)과 지금 대상 버전에만 쓰입니다. 대상이 바뀌면 바로 무효가 됩니다.</p>
+              <p className="text-xs text-muted">
+                승인은 이 내용(해시)과 지금 대상 버전에만 쓰입니다. 대상이 바뀌면 바로 무효가 됩니다.
+              </p>
             </div>
           ) : null}
           <Problem error={decide.error} />
@@ -503,12 +576,14 @@ function AuditTab() {
     placeholderData: keepPreviousData,
   });
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted">MCP 도구 호출마다 도구·결과·걸린 시간·인자 해시만 남깁니다. 인자 원문은 저장하지 않습니다.</p>
+    <div className="space-y-4">
+      <p className="text-[13px] text-muted">
+        MCP 도구 호출마다 도구·결과·걸린 시간·인자 해시만 남깁니다. 인자 원문은 저장하지 않습니다.
+      </p>
       <Loaded query={q}>
         {(page) => (
-          <div className={q.isFetching ? "space-y-4 opacity-70" : "space-y-4"}>
-            <p className="text-xs text-muted">
+          <div className={q.isFetching ? "space-y-6 opacity-70" : "space-y-6"}>
+            <p className="text-[13px] text-muted">
               {page.retention_days
                 ? `보존 기간 ${page.retention_days}일: 더 오래된 기록은 주기 유지보수가 지웁니다 (CAREER_AUDIT_RETENTION_DAYS).`
                 : "보존 기간 없음: 기록을 지우지 않습니다 (CAREER_AUDIT_RETENTION_DAYS=0)."}
@@ -520,10 +595,12 @@ function AuditTab() {
                     <button
                       key={t.tool}
                       onClick={() => setTool(tool === t.tool ? "" : t.tool)}
+                      type="button"
+                      aria-pressed={tool === t.tool}
                       className={
                         tool === t.tool
-                          ? "rounded-md border border-accent bg-accent-soft px-2 py-1 text-xs"
-                          : "rounded-md border border-line bg-surface px-2 py-1 text-xs hover:bg-subtle"
+                          ? "h-8 rounded-md border border-accent bg-accent-soft px-2.5 text-xs tabular-nums"
+                          : "h-8 rounded-md border border-line px-2.5 text-xs tabular-nums transition-colors duration-150 hover:bg-subtle"
                       }
                     >
                       <span className="font-mono">{t.tool}</span> {int(t.calls)}
@@ -534,7 +611,12 @@ function AuditTab() {
               </Section>
             ) : null}
             <div className="flex flex-wrap gap-2">
-              <Select value={status} onChange={(e) => setStatus(e.target.value as "" | "ok" | "error")} className="w-auto" aria-label="결과">
+              <Select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as "" | "ok" | "error")}
+                className="w-auto"
+                aria-label="결과"
+              >
                 <option value="">모든 결과</option>
                 <option value="ok">성공</option>
                 <option value="error">오류</option>
@@ -546,22 +628,27 @@ function AuditTab() {
               ) : null}
             </div>
             {page.events.length ? (
-              <List>
+              <Rows>
                 {page.events.map((e) => (
-                  <li key={e.id} className="px-3 py-2 text-[13px]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="min-w-0 truncate font-mono text-xs">{e.tool ?? e.event}</span>
-                      <Badge tone={e.status === "ok" ? "ok" : "danger"}>{e.status === "ok" ? "성공" : (e.error_code ?? "오류")}</Badge>
+                  <li key={e.id} className="flex items-center gap-4 py-3 text-[13px]">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-mono text-xs">{e.tool ?? e.event}</div>
+                      <div className="truncate text-muted tabular-nums">
+                        {formatDateTime(e.created_at)} ·{" "}
+                        {e.channel === "mcp-stdio" ? "stdio" : e.channel === "mcp-http" ? "원격" : e.channel} ·{" "}
+                        {int(e.duration_ms)}ms{e.args_sha256 ? ` · 인자 ${e.args_sha256.slice(0, 8)}` : ""}
+                      </div>
                     </div>
-                    <div className="truncate text-xs text-muted tabular-nums">
-                      {formatDateTime(e.created_at)} · {e.channel === "mcp-stdio" ? "stdio" : e.channel === "mcp-http" ? "원격" : e.channel} ·{" "}
-                      {int(e.duration_ms)}ms{e.args_sha256 ? ` · 인자 ${e.args_sha256.slice(0, 8)}` : ""}
-                    </div>
+                    {e.status === "ok" ? (
+                      <span className="shrink-0 text-muted">성공</span>
+                    ) : (
+                      <Badge tone="danger">{e.error_code ?? "오류"}</Badge>
+                    )}
                   </li>
                 ))}
-              </List>
+              </Rows>
             ) : (
-              <EmptyState>기록이 없습니다. MCP 클라이언트가 도구를 부르면 여기에 보입니다.</EmptyState>
+              <Quiet>기록이 없습니다. MCP 클라이언트가 도구를 부르면 여기에 보입니다.</Quiet>
             )}
           </div>
         )}
@@ -569,4 +656,3 @@ function AuditTab() {
     </div>
   );
 }
-
