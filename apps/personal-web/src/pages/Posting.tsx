@@ -9,17 +9,7 @@ import {
   type PostingValue,
   type PostingVersion,
 } from "@career-brain/client";
-import {
-  Badge,
-  Button,
-  Card,
-  Highlight,
-  Input,
-  Section,
-  Sheet,
-  Spinner,
-  Textarea,
-} from "@career-brain/ui";
+import { Badge, Button, cn, Highlight, Input, Section, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link } from "@tanstack/react-router";
 import { Archive, ExternalLink, FileText, RefreshCw, Trash2, Plus } from "lucide-react";
@@ -29,7 +19,7 @@ import { DdayBadge } from "../components/DdayBadge";
 import { ChoiceQuestions, CostConfirmation } from "../components/postings/PostingExtras";
 import { useCreateApplication } from "./Applications";
 import { api } from "../lib/api";
-import { formatDateTime, formatDeadline } from "../lib/dates";
+import { ddayLabel, formatDateTime, formatDeadline } from "../lib/dates";
 import { hostOf } from "../lib/format";
 import {
   ADAPTER_LABEL,
@@ -63,7 +53,10 @@ function fromDraft(field: PostingField, v: string | EssayQuestion[]): PostingVal
     return qs.length ? qs : null;
   }
   if (isList(field)) {
-    const items = (v as string).split("\n").map((s) => s.trim()).filter(Boolean);
+    const items = (v as string)
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
     return items.length ? items : null;
   }
   const s = (v as string).trim();
@@ -110,25 +103,33 @@ function PostingView({ p }: { p: Posting }) {
 
   const run = p.runs[0];
   const title =
-    (p.fields.title as string | undefined) ?? (p.latest?.extracted.title?.value as string | undefined) ?? hostOf(p.canonical_url);
+    (p.fields.title as string | undefined) ??
+    (p.latest?.extracted.title?.value as string | undefined) ??
+    hostOf(p.canonical_url);
   const deadline = (p.fields.deadline ?? p.latest?.extracted.deadline?.value) as string | undefined;
   const st = POSTING_STATUS[p.status];
   const pendingRun = run?.status === "pending";
 
   return (
-    <div>
+    <div className="mx-auto max-w-5xl">
       <PageHeader
         back={{ to: "/postings", label: "공고" }}
         title={title}
         subtitle={
-          <span className="flex flex-wrap items-center gap-1.5">
-            <Badge tone={st.tone}>{st.label}</Badge>
-            <DdayBadge deadline={deadline} />
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            <span className={p.status === "draft" ? "font-medium text-fg" : undefined}>{st.label}</span>
+            {ddayLabel(deadline) ? (
+              <>
+                <span aria-hidden>·</span>
+                <DdayBadge deadline={deadline} />
+              </>
+            ) : null}
+            <span aria-hidden>·</span>
             <a
               href={p.canonical_url}
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-0.5 hover:text-fg"
+              className="inline-flex min-w-0 items-center gap-0.5 underline-offset-2 hover:text-fg hover:underline"
             >
               {hostOf(p.canonical_url)} <ExternalLink size={12} />
             </a>
@@ -136,37 +137,46 @@ function PostingView({ p }: { p: Posting }) {
         }
         actions={
           <>
-            <Button size="sm" onClick={() => refetch.mutate()} disabled={refetch.isPending || pendingRun}>
+            <Button onClick={() => refetch.mutate()} disabled={refetch.isPending || pendingRun}>
               <RefreshCw size={14} className={pendingRun ? "animate-spin" : undefined} /> 다시 가져오기
             </Button>
             {p.status !== "archived" ? (
-              <Button size="sm" variant="ghost" onClick={() => archive.mutate()} disabled={archive.isPending}>
+              <Button variant="ghost" onClick={() => archive.mutate()} disabled={archive.isPending}>
                 <Archive size={14} /> 보관
               </Button>
             ) : null}
           </>
         }
       />
-      <ErrorText error={refetch.error ?? archive.error} className="mb-3" />
+      <ErrorText error={refetch.error ?? archive.error} className="mb-4" />
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0 space-y-6">
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-14">
+        <div className="min-w-0 space-y-10">
           {run ? <RunNotice run={run} posting={p} /> : null}
           {p.pending_changes.length && p.status === "saved" ? (
-            <div className="rounded-lg border border-line bg-warn-soft px-3 py-2.5 text-[13px] text-warn">
+            <div role="status" className="rounded-md bg-subtle px-3 py-2.5 text-[13px]">
               다시 가져온 공고에서 바뀐 항목:{" "}
-              <strong>{p.pending_changes.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}</strong>.
-              아래에서 새 값을 확인하고 다시 저장하세요.
+              <strong>{p.pending_changes.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}</strong>. 아래에서
+              새 값을 확인하고 다시 저장하세요.
             </div>
           ) : null}
           <ChoiceQuestions p={p} />
           {p.latest || p.status !== "draft" ? (
-            <ReviewForm key={`${p.latest?.id}-${p.confirmed_version_id}-${p.saved_at}`} p={p} onEvidence={setEvidenceOf} onSaved={invalidate} />
+            <ReviewForm
+              key={`${p.latest?.id}-${p.confirmed_version_id}-${p.saved_at}`}
+              p={p}
+              onEvidence={setEvidenceOf}
+              onSaved={invalidate}
+            />
           ) : null}
-          <ManualText postingId={p.id} open={run?.status === "failed" || (!p.latest && !pendingRun && run?.status !== "listing")} onDone={invalidate} />
+          <ManualText
+            postingId={p.id}
+            open={run?.status === "failed" || (!p.latest && !pendingRun && run?.status !== "listing")}
+            onDone={invalidate}
+          />
         </div>
 
-        <aside className="space-y-6">
+        <aside className="mt-10 min-w-0 space-y-10 lg:mt-0">
           <Section title="가져오기 기록">
             <Runs runs={p.runs} onVersion={setVersionId} />
           </Section>
@@ -184,12 +194,7 @@ function PostingView({ p }: { p: Posting }) {
       </div>
 
       {p.latest ? (
-        <EvidenceSheet
-          posting={p}
-          version={p.latest}
-          target={evidenceOf}
-          onClose={() => setEvidenceOf(null)}
-        />
+        <EvidenceSheet posting={p} version={p.latest} target={evidenceOf} onClose={() => setEvidenceOf(null)} />
       ) : null}
       <VersionSheet postingId={p.id} versionId={versionId} onClose={() => setVersionId(null)} />
     </div>
@@ -210,17 +215,17 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
   });
   if (run.status === "pending")
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2.5 text-[13px]">
+      <p role="status" className="flex items-center gap-2 text-[13px] text-muted">
         <Spinner /> 페이지를 가져오는 중입니다. worker가 켜져 있어야 합니다.
-      </div>
+      </p>
     );
   if (run.status === "needs_confirmation") return <CostConfirmation run={run} postingId={posting.id} />;
   if (run.status === "failed")
     return (
-      <div className="rounded-lg border border-line bg-danger-soft px-3 py-2.5 text-[13px] text-danger">
+      <div role="alert" className="rounded-md bg-danger-soft px-3 py-2.5 text-[13px] text-danger">
         가져오기 실패: <strong>{FETCH_ERROR[run.error_code ?? ""] ?? run.error_code}</strong>
-        {run.http_status ? ` (HTTP ${run.http_status})` : ""}. 마감으로 처리하지 않습니다. 본문을 직접
-        붙여넣을 수 있습니다.
+        {run.http_status ? ` (HTTP ${run.http_status})` : ""}. 마감으로 처리하지 않습니다. 본문을 직접 붙여넣을 수
+        있습니다.
         {run.error_code === "bot_blocked" ? (
           <p className="mt-1 text-fg">
             사이트의 자동 요청 확인 화면(봇 차단)이 막았습니다. 우회하지 않으며, 다시 가져와도 같을 수 있습니다.
@@ -229,97 +234,101 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
         ) : null}
         {run.error_code === "maybe_bot_blocked" ? (
           <p className="mt-1 text-fg">
-            알려진 서비스는 아니지만 자동 요청 확인 화면(캡차·확인 스크립트)으로 보입니다. 막혔을 수 있으며
-            우회하지 않습니다. 브라우저에서 공고 본문을 복사해 아래에 붙여넣어 주세요.
+            알려진 서비스는 아니지만 자동 요청 확인 화면(캡차·확인 스크립트)으로 보입니다. 막혔을 수 있으며 우회하지
+            않습니다. 브라우저에서 공고 본문을 복사해 아래에 붙여넣어 주세요.
           </p>
         ) : null}
       </div>
     );
   if (run.status === "listing")
     return (
-      <Card className="p-3">
-        <p className="mb-2 text-[13px]">
+      <section>
+        <h2 className="mb-1 text-[15px] font-semibold">저장할 공고 고르기</h2>
+        <p className="mb-3 text-[13px] text-muted">
           공고 목록 페이지입니다. 목록을 따라가지 않으니, 저장할 공고를 골라 주세요.
           {run.candidates.length ? ` (후보 ${run.candidates.length}개)` : ""}
         </p>
         {run.candidates.length ? (
-          <ul className="max-h-80 divide-y divide-line overflow-y-auto rounded-md border border-line">
-            {run.candidates.map((c) => (
-              <li key={c.url}>
-                <label className="flex cursor-pointer items-start gap-2 px-2.5 py-2 text-[13px] hover:bg-subtle">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={picked.has(c.url)}
-                    onChange={(e) => {
-                      const next = new Set(picked);
-                      if (e.target.checked) next.add(c.url);
-                      else next.delete(c.url);
-                      setPicked(next);
-                    }}
-                  />
-                  <span className="min-w-0">
-                    <span className="block">{c.title}</span>
-                    <span className="block truncate font-mono text-xs text-muted">{c.url}</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
+          <div className="border-y border-line">
+            <ul className="-mx-2 max-h-80 divide-y divide-line overflow-y-auto">
+              {run.candidates.map((c) => (
+                <li key={c.url}>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2.5 text-[13px] transition-colors duration-150 hover:bg-subtle/60">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-fg"
+                      checked={picked.has(c.url)}
+                      onChange={(e) => {
+                        const next = new Set(picked);
+                        if (e.target.checked) next.add(c.url);
+                        else next.delete(c.url);
+                        setPicked(next);
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium">{c.title}</span>
+                      <span className="block truncate font-mono text-xs text-muted">{c.url}</span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Button
-            size="sm"
             variant="primary"
             disabled={!picked.size || picked.size > 20 || save.isPending}
             onClick={() => save.mutate()}
           >
             선택한 {picked.size}건 가져오기
           </Button>
-          {save.isSuccess ? <span className="text-xs text-ok">요청했습니다. 공고 목록에서 확인하세요.</span> : null}
-          {picked.size > 20 ? <span className="text-xs text-warn">한 번에 20건까지</span> : null}
+          {save.isSuccess ? <span className="text-[13px]">요청했습니다. 공고 목록에서 확인하세요.</span> : null}
+          {picked.size > 20 ? <span className="text-[13px] font-medium">한 번에 20건까지</span> : null}
           {posting.status !== "archived" ? (
-            <span className="text-xs text-muted">이 목록 항목은 보관해도 됩니다.</span>
+            <span className="text-[13px] text-muted">이 목록 항목은 보관해도 됩니다.</span>
           ) : null}
         </div>
         <ErrorText error={save.error} className="mt-1" />
-      </Card>
+      </section>
     );
   if (run.unchanged)
-    return (
-      <p className="text-xs text-muted">마지막으로 가져온 내용이 이전과 같아 새 버전을 만들지 않았습니다.</p>
-    );
+    return <p className="text-[13px] text-muted">마지막으로 가져온 내용이 이전과 같아 새 버전을 만들지 않았습니다.</p>;
   return null;
 }
 
 function Runs({ runs, onVersion }: { runs: FetchRun[]; onVersion: (id: string) => void }) {
-  if (!runs.length) return <p className="text-xs text-muted">기록 없음</p>;
+  if (!runs.length) return <p className="border-t border-line pt-3 text-[13px] text-muted">기록 없음</p>;
   return (
-    <ul className="space-y-2">
+    <ul className="divide-y divide-line border-t border-line text-[13px]">
       {runs.map((r) => {
         const s = FETCH_STATUS[r.status] ?? { label: r.status, tone: "neutral" as const };
         return (
-          <li key={r.id} className="rounded-md border border-line bg-surface px-2.5 py-2 text-xs">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <Badge tone={s.tone}>{s.label}</Badge>
-              {r.unchanged ? <Badge tone="none">변경 없음</Badge> : null}
-              <span className="text-muted">{formatDateTime(r.created_at)}</span>
+          <li key={r.id} className="py-2.5">
+            <div className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className={cn("font-medium", r.status === "failed" && "text-danger")}>{s.label}</span>
+              {r.unchanged ? <span className="text-muted">· 변경 없음</span> : null}
+              <span className="text-muted tabular-nums">· {formatDateTime(r.created_at)}</span>
             </div>
             {r.error_code ? (
-              <div className="mt-1 text-danger">
+              <div className="mt-0.5 text-danger">
                 {FETCH_ERROR[r.error_code] ?? r.error_code}
                 {r.http_status ? ` · HTTP ${r.http_status}` : ""}
               </div>
             ) : null}
             {r.notes.length ? (
-              <ul className="mt-1 space-y-0.5 text-muted">
+              <ul className="mt-0.5 space-y-0.5 text-xs text-muted">
                 {r.notes.map((n) => (
                   <li key={n}>{noteLabel(n)}</li>
                 ))}
               </ul>
             ) : null}
             {r.version_id && !r.unchanged ? (
-              <button className="mt-1 text-accent hover:underline" onClick={() => onVersion(r.version_id!)}>
+              <button
+                type="button"
+                className="-my-1 mt-0.5 py-1 underline-offset-2 hover:underline"
+                onClick={() => onVersion(r.version_id!)}
+              >
                 이 버전 보기
               </button>
             ) : null}
@@ -337,34 +346,38 @@ function Versions({ p, onOpen }: { p: Posting; onOpen: (id: string) => void }) {
   });
   const rows = q.data ?? (p.latest ? [p.latest] : []);
   return (
-    <div className="space-y-2 text-xs">
-      <ErrorText error={q.error} />
-      {rows.map((v) => (
-        <button
-          key={v.id}
-          onClick={() => onOpen(v.id)}
-          className="block w-full rounded-md border border-line bg-surface px-2.5 py-2 text-left hover:bg-subtle"
-        >
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-medium">v{v.version_no}</span>
-            {v.id === p.confirmed_version_id ? (
-              <Badge tone="ok">확정 기준</Badge>
-            ) : v.id === p.latest?.id ? (
-              <Badge tone="warn">최신 · 미확정</Badge>
-            ) : null}
-            <span className="text-muted">{formatDateTime(v.created_at)}</span>
-          </div>
-          <div className="mt-1 text-muted">
-            {METHOD_LABEL[v.method] ?? v.method} · {ADAPTER_LABEL[v.adapter] ?? v.adapter}
-            {v.has_screenshot ? (v.adapter === "image" ? " · 원본 이미지 보관" : " · 스크린샷 있음") : ""}
-          </div>
-          {v.changed_fields.length ? (
-            <div className="mt-1 text-warn">
-              이전 버전과 달라진 항목: {v.changed_fields.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}
-            </div>
-          ) : null}
-        </button>
-      ))}
+    <div className="text-[13px]">
+      <ErrorText error={q.error} className="mb-2" />
+      <ul className="divide-y divide-line border-t border-line">
+        {rows.map((v) => (
+          <li key={v.id}>
+            <button
+              type="button"
+              onClick={() => onOpen(v.id)}
+              className="-mx-2 block w-[calc(100%+1rem)] rounded-md px-2 py-2.5 text-left transition-colors duration-150 hover:bg-subtle/60"
+            >
+              <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                <span className="font-medium tabular-nums">v{v.version_no}</span>
+                <span className="text-muted tabular-nums">{formatDateTime(v.created_at)}</span>
+                {v.id === p.confirmed_version_id ? (
+                  <span className="text-muted">· 확정 기준</span>
+                ) : v.id === p.latest?.id ? (
+                  <Badge tone="warn">최신 · 미확정</Badge>
+                ) : null}
+              </div>
+              <div className="mt-0.5 text-xs text-muted">
+                {METHOD_LABEL[v.method] ?? v.method} · {ADAPTER_LABEL[v.adapter] ?? v.adapter}
+                {v.has_screenshot ? (v.adapter === "image" ? " · 원본 이미지 보관" : " · 스크린샷 있음") : ""}
+              </div>
+              {v.changed_fields.length ? (
+                <div className="mt-0.5 text-xs">
+                  이전 버전과 달라진 항목: {v.changed_fields.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}
+                </div>
+              ) : null}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -374,30 +387,36 @@ function NextSteps({ p }: { p: Posting }) {
   const apps = useQuery({ queryKey: ["applications"], queryFn: api.applications });
   const create = useCreateApplication();
   const app = apps.data?.find((a) => a.posting_id === p.id);
+  const row =
+    "-mx-2 flex min-h-11 flex-col justify-center rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-subtle/60";
   return (
-    <div className="space-y-2 text-[13px]">
-      {app ? (
-        <Link
-          to="/applications/$applicationId"
-          params={{ applicationId: app.id }}
-          className="block rounded-md border border-line bg-surface px-2.5 py-2 hover:bg-subtle"
-        >
-          <span className="font-medium">지원서 열기</span>
-          <span className="text-xs text-muted">
-            {" "}
-            · 문항 {app.questions}
-            {app.unwritten ? ` · 안 쓴 문항 ${app.unwritten}` : ""}
-          </span>
-        </Link>
-      ) : (
-        <Button size="sm" variant="primary" onClick={() => create.mutate(p.id)} disabled={create.isPending || apps.isLoading}>
-          <Plus size={14} /> 지원 만들기
-        </Button>
+    <div className="text-[13px]">
+      {app ? null : (
+        <div className="mb-3">
+          <Button variant="primary" onClick={() => create.mutate(p.id)} disabled={create.isPending || apps.isLoading}>
+            <Plus size={14} /> 지원 만들기
+          </Button>
+          <ErrorText error={create.error} className="mt-1" />
+        </div>
       )}
-      <ErrorText error={create.error} />
-      <Link to="/study" search={{ tab: "coverage", posting: p.id }} className="block text-accent hover:underline">
-        요건별 준비 상태 보기
-      </Link>
+      <ul className="divide-y divide-line border-t border-line">
+        {app ? (
+          <li>
+            <Link to="/applications/$applicationId" params={{ applicationId: app.id }} className={row}>
+              <span className="text-sm font-medium">지원서 열기</span>
+              <span className="text-muted tabular-nums">
+                문항 {app.questions}
+                {app.unwritten ? ` · 안 쓴 문항 ${app.unwritten}` : ""}
+              </span>
+            </Link>
+          </li>
+        ) : null}
+        <li>
+          <Link to="/study" search={{ tab: "coverage", posting: p.id }} className={row}>
+            <span className="text-sm font-medium">요건별 준비 상태 보기</span>
+          </Link>
+        </li>
+      </ul>
     </div>
   );
 }
@@ -458,17 +477,16 @@ function ReviewForm({
     <Section
       title={p.status === "draft" ? "추출 결과 확인" : "공고 내용"}
       action={
-        <span className="text-xs text-muted">
+        <span className="text-[13px] text-muted tabular-nums">
           {version ? `v${version.version_no} 기준` : "직접 입력"}
         </span>
       }
     >
-      <p className="-mt-1 text-xs text-muted">
-        항목마다 원문 근거를 확인하세요. 원문에서 찾지 못한 값은 비워 두었습니다. 고친 값은 근거가 “직접
-        입력”이 됩니다.
+      <p className="text-[13px] text-muted">
+        항목마다 원문 근거를 확인하세요. 원문에서 못 찾은 값은 비워 두었고, 고친 값은 근거가 “직접 입력”이 됩니다.
       </p>
       <form
-        className="divide-y divide-line rounded-lg border border-line bg-surface"
+        className="mt-3 divide-y divide-line border-t border-line"
         onSubmit={(e) => {
           e.preventDefault();
           if (!titleEmpty) confirm.mutate();
@@ -485,17 +503,25 @@ function ReviewForm({
             onEvidence={(index) => onEvidence({ field: f, index })}
           />
         ))}
-        <div className="flex flex-wrap items-center gap-2 px-3 py-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-4">
           <Button type="submit" variant="primary" disabled={titleEmpty || confirm.isPending || !dirtyVsConfirmed}>
-            {p.status === "draft" ? "확인하고 저장" : p.pending_changes.length ? "새 버전으로 다시 저장" : "고친 내용 저장"}
+            {p.status === "draft"
+              ? "확인하고 저장"
+              : p.pending_changes.length
+                ? "새 버전으로 다시 저장"
+                : "고친 내용 저장"}
           </Button>
           {hidden > 0 ? (
-            <Button variant="ghost" size="sm" onClick={() => setShowEmpty(true)}>
+            <Button variant="ghost" onClick={() => setShowEmpty(true)}>
               빈 항목 {hidden}개 보기
             </Button>
           ) : null}
-          {titleEmpty ? <span className="text-xs text-warn">공고명은 꼭 있어야 합니다.</span> : null}
-          {confirm.isSuccess ? <span className="text-xs text-ok">저장했습니다.</span> : null}
+          {titleEmpty ? <span className="text-[13px] font-medium">공고명은 꼭 있어야 합니다.</span> : null}
+          {confirm.isSuccess ? (
+            <span role="status" className="text-[13px] text-muted">
+              저장했습니다.
+            </span>
+          ) : null}
           <ErrorText error={confirm.error} />
         </div>
       </form>
@@ -530,6 +556,7 @@ function describe(ev: FieldEvidence): EvidenceInfo {
   return { kind: "none" };
 }
 
+/** 항목별 근거. 배지는 손대야 하는 "확인 필요"에만, 나머지는 흐린 글자. */
 function EvidenceLine({
   info,
   missing,
@@ -544,36 +571,40 @@ function EvidenceLine({
   switch (info.kind) {
     case "structured":
       return (
-        <span className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="ok">구조화 데이터</Badge>
-          <code className="text-[11px] text-muted">{info.ref}</code>
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-muted">
+          구조화 데이터
+          <code className="text-[11px] break-all">{info.ref}</code>
         </span>
       );
     case "quote":
       return (
-        <button onClick={() => onOpen()} type="button" className="flex items-start gap-1.5 text-left">
-          <Badge tone="ok">원문 인용</Badge>
-          <span className="line-clamp-2 text-muted hover:text-fg">“{info.quote}”</span>
+        <button
+          onClick={() => onOpen()}
+          type="button"
+          className="flex items-baseline gap-1.5 text-left text-muted transition-colors duration-150 hover:text-fg"
+        >
+          <span className="shrink-0">원문 인용</span>
+          <span className="line-clamp-2">“{info.quote}”</span>
         </button>
       );
     case "quotes":
       return (
-        <span className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="ok">원문 인용 {info.quotes.length}개</Badge>
-          <button type="button" className="text-accent hover:underline" onClick={() => onOpen(0)}>
+        <span className="flex flex-wrap items-baseline gap-x-1.5 text-muted">
+          원문 인용 {info.quotes.length}개
+          <button type="button" className="text-fg underline-offset-2 hover:underline" onClick={() => onOpen(0)}>
             원문에서 보기
           </button>
         </span>
       );
     case "user":
-      return <Badge tone="accent">직접 입력</Badge>;
+      return <span className="text-muted">직접 입력</span>;
     case "edited":
-      return <Badge tone="accent">수정함 · 근거: 직접 입력</Badge>;
+      return <span className="font-medium">수정함 · 근거: 직접 입력</span>;
     case "none":
       return missing && review ? (
         <Badge tone="warn">확인 필요 · 원문에서 못 찾음</Badge>
       ) : (
-        <Badge tone="none">근거 없음 · 비어 있음</Badge>
+        <span className="text-muted">근거 없음 · 비어 있음</span>
       );
   }
 }
@@ -596,7 +627,7 @@ function FieldRow({
   const id = `pf-${field}`;
   const review = REVIEW_FIELDS.includes(field);
   return (
-    <div className="grid gap-1.5 px-3 py-3 xl:grid-cols-[110px_minmax(0,1fr)] xl:gap-3">
+    <div className="grid gap-1.5 py-3 xl:grid-cols-[110px_minmax(0,1fr)] xl:gap-3">
       <label htmlFor={id} className="text-[13px] font-medium text-muted xl:pt-2">
         {FIELD_LABEL[field]}
       </label>
@@ -626,8 +657,14 @@ function FieldRow({
           />
         )}
         {field === "deadline" && typeof value === "string" && value.trim() ? (
-          <div className="flex items-center gap-1.5 text-xs text-muted">
-            {formatDeadline(value.trim())} <DdayBadge deadline={value.trim()} />
+          <div className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted tabular-nums">
+            {formatDeadline(value.trim())}
+            {ddayLabel(value.trim()) && value.trim() !== "always" ? (
+              <>
+                <span aria-hidden>·</span>
+                <DdayBadge deadline={value.trim()} />
+              </>
+            ) : null}
           </div>
         ) : null}
         <div className="text-xs">
@@ -638,13 +675,7 @@ function FieldRow({
   );
 }
 
-function QuestionsEditor({
-  value,
-  onChange,
-}: {
-  value: EssayQuestion[];
-  onChange: (v: EssayQuestion[]) => void;
-}) {
+function QuestionsEditor({ value, onChange }: { value: EssayQuestion[]; onChange: (v: EssayQuestion[]) => void }) {
   const update = (i: number, patch: Partial<EssayQuestion>) =>
     onChange(value.map((q, j) => (j === i ? { ...q, ...patch } : q)));
   return (
@@ -668,7 +699,6 @@ function QuestionsEditor({
               aria-label={`문항 ${i + 1} 글자 수`}
             />
             <Button
-              size="sm"
               variant="ghost"
               className="w-full"
               aria-label={`문항 ${i + 1} 빼기`}
@@ -679,7 +709,7 @@ function QuestionsEditor({
           </div>
         </div>
       ))}
-      <Button size="sm" onClick={() => onChange([...value, { prompt: "", char_limit: null }])}>
+      <Button onClick={() => onChange([...value, { prompt: "", char_limit: null }])}>
         <Plus size={14} /> 문항 추가
       </Button>
     </div>
@@ -790,11 +820,7 @@ function VersionSheet({
                   <div key={f} className="contents">
                     <dt className="text-muted">{FIELD_LABEL[f]}</dt>
                     <dd className="min-w-0">
-                      {Array.isArray(val)
-                        ? `${val.length}개 항목`
-                        : f === "deadline"
-                          ? formatDeadline(val)
-                          : val}
+                      {Array.isArray(val) ? `${val.length}개 항목` : f === "deadline" ? formatDeadline(val) : val}
                       {v.changed_fields.includes(f) ? (
                         <Badge tone="warn" className="ml-1.5">
                           바뀜
@@ -828,7 +854,15 @@ function VersionSheet({
 
 // ---------------------------------------------------------------- 본문 직접 붙여넣기
 
-function ManualText({ postingId, open: initiallyOpen, onDone }: { postingId: string; open: boolean; onDone: () => void }) {
+function ManualText({
+  postingId,
+  open: initiallyOpen,
+  onDone,
+}: {
+  postingId: string;
+  open: boolean;
+  onDone: () => void;
+}) {
   const [open, setOpen] = useState(initiallyOpen);
   const [text, setText] = useState("");
   useEffect(() => {
@@ -844,13 +878,13 @@ function ManualText({ postingId, open: initiallyOpen, onDone }: { postingId: str
   });
   if (!open)
     return (
-      <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+      <Button variant="ghost" className="-ml-3.5" onClick={() => setOpen(true)}>
         본문 직접 붙여넣기
       </Button>
     );
   return (
     <Section title="본문 직접 붙여넣기">
-      <p className="-mt-1 text-xs text-muted">
+      <p className="text-[13px] text-muted">
         페이지를 못 가져왔거나 로그인이 필요한 공고라면, 공고 본문을 복사해 넣으세요. 새 버전으로 추출합니다.
       </p>
       <form
@@ -860,7 +894,13 @@ function ManualText({ postingId, open: initiallyOpen, onDone }: { postingId: str
           if (text.trim()) send.mutate();
         }}
       >
-        <Textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-40" maxLength={60000} aria-label="공고 본문" />
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          className="min-h-40"
+          maxLength={60000}
+          aria-label="공고 본문"
+        />
         <ErrorText error={send.error} />
         <div className="flex gap-2">
           <Button type="submit" variant="primary" disabled={!text.trim() || send.isPending}>

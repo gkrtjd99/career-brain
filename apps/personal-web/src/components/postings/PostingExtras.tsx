@@ -1,6 +1,6 @@
 // 공고 화면의 c0025 추가분: 스캔 PDF 비전 비용 확인, 지원서 선택형 문항(구조화 데이터에서만).
 import type { ChoiceQuestion, FetchRun, Posting } from "@career-brain/client";
-import { Badge, Button, Card, Section } from "@career-brain/ui";
+import { Button, Section } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ErrorText } from "../common";
 import { api } from "../../lib/api";
@@ -38,13 +38,15 @@ export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId:
   const pending = c.status === "pending";
   const parts = c.parts ?? [];
   return (
-    <Card className="space-y-2 border-warn/40 p-3 text-[13px]">
-      <p className="font-medium">스캔 PDF를 AI로 읽기 전에 비용을 확인해 주세요</p>
-      <p className="text-muted">
-        글자가 없는 PDF라 쪽 이미지를 이미지 읽기 모델({c.model})로 보내고, 읽은 글에서 항목을 추출합니다. 예상
-        비용이 확인 기준({usd(c.threshold_usd, 2)})을 넘었습니다. 토큰 수와 금액은 추정값입니다.
-      </p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+    <section className="space-y-3 text-[13px]">
+      <div>
+        <h2 className="mb-1 text-[15px] font-semibold">스캔 PDF를 AI로 읽기 전에 비용을 확인해 주세요</h2>
+        <p className="text-muted">
+          글자가 없는 PDF라 쪽 이미지를 이미지 읽기 모델({c.model})로 보내고, 읽은 글에서 항목을 추출합니다. 예상 비용이
+          확인 기준({usd(c.threshold_usd, 2)})을 넘었습니다. 토큰 수와 금액은 추정값입니다.
+        </p>
+      </div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 border-t border-line pt-3 tabular-nums">
         <dt className="text-muted">읽을 쪽</dt>
         <dd>
           {c.pages.join(", ")}쪽 (전체 {c.pages_total}쪽 중 {c.images}장)
@@ -56,105 +58,95 @@ export function CostConfirmation({ run, postingId }: { run: FetchRun; postingId:
           {parts.length > 1 ? " (두 호출 합계)" : ""}
         </dd>
         <dt className="text-muted">예상 비용</dt>
-        <dd>
+        <dd className="font-medium">
           {c.estimated_usd ? usd(c.estimated_usd) : "단가 모름"}
           {c.max_usd ? ` (최대 ${usd(c.max_usd)})` : ""}
-          {parts.length > 1 ? " · 종량제 호출만 합침" : ""}
+          <span className="font-normal text-muted">{parts.length > 1 ? " · 종량제 호출만 합침" : ""}</span>
         </dd>
       </dl>
       {parts.length ? (
-        <table className="w-full text-left text-xs">
-          <thead className="text-muted">
-            <tr>
-              <th className="py-0.5 font-normal">호출</th>
-              <th className="py-0.5 font-normal">입력 토큰</th>
-              <th className="py-0.5 font-normal">출력 토큰</th>
-              <th className="py-0.5 font-normal">예상 (최대)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {parts.map((p) => (
-              <tr key={p.purpose} className="align-top">
-                <td className="py-0.5 pr-2">
-                  {PART_LABEL[p.purpose] ?? p.purpose}
-                  <div className="text-muted">
-                    {p.model} · {BILLING_LABEL[p.billing] ?? p.billing}
-                  </div>
-                </td>
-                <td className="py-0.5 pr-2">
-                  {p.input_tokens.toLocaleString()} (최대 {p.max_input_tokens.toLocaleString()})
-                </td>
-                <td className="py-0.5 pr-2">
-                  약 {p.output_tokens.toLocaleString()} (최대 {p.max_output_tokens.toLocaleString()})
-                  <div className="text-muted">{basisLabel(p.basis)}</div>
-                </td>
-                <td className="py-0.5">
-                  {p.estimated_usd ? usd(p.estimated_usd) : "단가 모름"}
-                  {p.max_usd ? ` (${usd(p.max_usd)})` : ""}
-                  {p.billing !== "metered" ? <div className="text-muted">정가 환산, 합계에서 뺌</div> : null}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[28rem] text-left text-xs tabular-nums">
+            <thead className="text-muted">
+              <tr className="border-b border-line">
+                <th className="py-1.5 pr-3 font-normal">호출</th>
+                <th className="py-1.5 pr-3 font-normal">입력 토큰</th>
+                <th className="py-1.5 pr-3 font-normal">출력 토큰</th>
+                <th className="py-1.5 font-normal">예상 (최대)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {parts.map((p) => (
+                <tr key={p.purpose} className="align-top">
+                  <td className="py-1.5 pr-3">
+                    {PART_LABEL[p.purpose] ?? p.purpose}
+                    <div className="text-muted">
+                      {p.model} · {BILLING_LABEL[p.billing] ?? p.billing}
+                    </div>
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    {p.input_tokens.toLocaleString()} (최대 {p.max_input_tokens.toLocaleString()})
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    약 {p.output_tokens.toLocaleString()} (최대 {p.max_output_tokens.toLocaleString()})
+                    <div className="text-muted">{basisLabel(p.basis)}</div>
+                  </td>
+                  <td className="py-1.5">
+                    {p.estimated_usd ? usd(p.estimated_usd) : "단가 모름"}
+                    {p.max_usd ? ` (${usd(p.max_usd)})` : ""}
+                    {p.billing !== "metered" ? <div className="text-muted">정가 환산, 합계에서 뺌</div> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
       {pending ? (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={confirm.isPending || decline.isPending}
-            onClick={() => confirm.mutate()}
-          >
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Button variant="primary" disabled={confirm.isPending || decline.isPending} onClick={() => confirm.mutate()}>
             확인하고 읽기
           </Button>
-          <Button size="sm" variant="ghost" disabled={confirm.isPending || decline.isPending} onClick={() => decline.mutate()}>
+          <Button variant="ghost" disabled={confirm.isPending || decline.isPending} onClick={() => decline.mutate()}>
             읽지 않기 (직접 붙여넣기)
           </Button>
         </div>
       ) : (
         <p className="text-muted">
-          {c.status === "confirmed" || c.status === "used" ? "확인했습니다. 다시 가져오는 중입니다." : "결정한 요청입니다."}
+          {c.status === "confirmed" || c.status === "used"
+            ? "확인했습니다. 다시 가져오는 중입니다."
+            : "결정한 요청입니다."}
         </p>
       )}
       <ErrorText error={confirm.error ?? decline.error} />
-    </Card>
+    </section>
   );
 }
 
 /** 지원서 선택형 문항 (채용 시스템이 준 보기 고르기). 자기소개서 문항과 따로, 읽기 전용으로 보여 준다. */
 export function ChoiceQuestions({ p }: { p: Posting }) {
   const value = (p.fields.application_questions ?? p.latest?.extracted.application_questions?.value) as
-    | ChoiceQuestion[]
-    | undefined;
+    ChoiceQuestion[] | undefined;
   const evidence = p.evidence.application_questions ?? p.latest?.extracted.application_questions?.evidence;
   if (!Array.isArray(value) || !value.length) return null;
   const ref = evidence && typeof evidence.ref === "string" && evidence.kind === "structured" ? evidence.ref : null;
   return (
     <Section title="지원서 선택형 문항">
-      <Card className="space-y-3 p-3 text-[13px]">
-        <ul className="space-y-2">
-          {value.map((q, i) => (
-            <li key={`${i}-${q.prompt}`}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="font-medium">{q.prompt}</span>
-                {q.required ? <Badge tone="warn">필수</Badge> : null}
-              </div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {q.options.map((o) => (
-                  <Badge key={o} tone="none">
-                    {o}
-                  </Badge>
-                ))}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <p className="text-xs text-muted">
-          보기를 고르는 문항이라 자기소개서 문항에는 넣지 않았습니다.
-          {ref ? ` 근거: 채용 시스템 데이터 ${ref}` : evidence?.kind === "user" ? " 직접 고친 값입니다." : ""}
-        </p>
-      </Card>
+      <ul className="divide-y divide-line border-t border-line text-[13px]">
+        {value.map((q, i) => (
+          <li key={`${i}-${q.prompt}`} className="py-3">
+            <div className="font-medium">
+              {q.prompt}
+              {q.required ? <span className="ml-1.5 text-xs font-normal text-muted">필수</span> : null}
+            </div>
+            <div className="mt-0.5 text-muted">{q.options.join(" · ")}</div>
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-line pt-3 text-xs text-muted">
+        보기를 고르는 문항이라 자기소개서 문항에는 넣지 않았습니다.
+        {ref ? ` 근거: 채용 시스템 데이터 ${ref}` : evidence?.kind === "user" ? " 직접 고친 값입니다." : ""}
+      </p>
     </Section>
   );
 }
