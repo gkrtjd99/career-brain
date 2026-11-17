@@ -68,7 +68,7 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-/** 공용 문서 (지원에 묶이지 않은 포트폴리오·기본 이력서). 편집 규칙은 지원 문서와 같다. */
+/** 기본 문서 (지원에 묶이지 않은 포트폴리오·기본 이력서). 편집 규칙은 지원 문서와 같다. */
 export function SharedDocumentPage() {
   const { documentId } = sharedRoute.useParams();
   const q = useQuery({
@@ -333,7 +333,7 @@ export function DocumentEditor({
         <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
           <Copy size={14} />
           <span>
-            공용 문서{" "}
+            기본 문서{" "}
             <Link
               to="/documents/$documentId"
               params={{ documentId: doc.source.document_id }}
@@ -482,9 +482,9 @@ export function DocumentEditor({
   const history = (
     <div className="space-y-4">
       <p className="text-xs text-muted tabular-nums">
-        {base ? `지금 r${base}` : "아직 저장 전"} · {int(counts.chars)}자 · {int(counts.bytes)} byte
+        {base ? "저장됨" : "아직 저장 전"} · {int(counts.chars)}자
         {validate.data ? ` · AI 수정 문단 ${Math.round(validate.data.ai_ratio * 100)}%` : ""}
-        {doc.source?.revision_no ? ` · 공용 문서 r${doc.source.revision_no}에서 복사` : ""}
+        {doc.source?.revision_no ? " · 기본 문서에서 복사" : ""}
       </p>
       <HistoryPanel appId={appId} docId={doc.id} current={doc.current_revision} onOpen={setHistoryRev} />
     </div>
@@ -585,7 +585,7 @@ export function DocumentEditor({
         back={
           appId
             ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" }
-            : { to: "/documents", label: "공용 문서" }
+            : { to: "/documents", label: "기본 문서" }
         }
         title={
           <>
@@ -850,7 +850,7 @@ function CompareSheet({
           </div>
         </section>
         <section>
-          <h3 className="mb-2 text-[13px] font-semibold">내 편집 (r{base} 기준, 저장 안 함)</h3>
+          <h3 className="mb-2 text-[13px] font-semibold">내 편집 (저장 안 함)</h3>
           <div className="border-t border-line pt-3 text-sm leading-7 whitespace-pre-wrap">
             {mine || <span className="text-muted">(비어 있음)</span>}
           </div>

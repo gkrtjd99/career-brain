@@ -9,7 +9,7 @@ import { ProofPanel } from "../components/credentials/ProofPanel";
 import { PurposeChoice } from "../components/sources/PurposeChoice";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
-import { reasonText } from "../lib/ingest";
+import { parseFailNote, reasonText } from "../lib/ingest";
 import {
   ATTENTION_LABEL,
   DATA_CLASS_LABEL,
@@ -322,7 +322,7 @@ export function SourcePage() {
                         {parse.read_by === "device" ? " · 이 기기에서" : ""}
                         {parse.read_by === "model" ? " · 연결된 모델로" : ""}
                         {parse.missing_pages.length ? ` · 못 읽은 쪽 ${parse.missing_pages.join(", ")}` : ""}
-                        {parse.error_code ? ` · ${parse.error_code}` : ""}
+                        {parse.error_code ? ` · ${parseFailNote(parse.error_code, v?.mime_type)}` : ""}
                       </span>
                     ) : (
                       <span className="text-muted">차례를 기다리는 중. 오래 걸리면 연결·관리 › 작업에서 상태를 보세요.</span>

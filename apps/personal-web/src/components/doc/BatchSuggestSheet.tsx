@@ -138,7 +138,7 @@ function BatchSuggestSheet({
           </p>
           {dirty ? (
             <p role="alert" className="text-[13px] font-medium">
-              저장하지 않은 편집이 있습니다. 저장한 r{doc.revision_no} 기준으로만 시작할 수 있습니다 — 먼저 저장하세요.
+              저장하지 않은 편집이 있습니다. 저장한 글로만 시작할 수 있으니 먼저 저장하세요.
             </p>
           ) : null}
           <fieldset className="space-y-1.5">

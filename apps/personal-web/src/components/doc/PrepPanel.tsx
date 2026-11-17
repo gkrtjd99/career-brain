@@ -130,7 +130,7 @@ export function PrepPanel({
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted tabular-nums">
           <span className="font-medium text-fg">
-            {prep.mode === "model" ? "모델이 고른 후보" : "검색 순위 후보 (모델 없음)"}
+            {prep.mode === "model" ? "모델이 고른 후보" : "검색으로 찾은 후보"}
           </span>
           {prep.generated_at ? <span>· {formatDateTime(prep.generated_at)}</span> : null}
           {editable ? (

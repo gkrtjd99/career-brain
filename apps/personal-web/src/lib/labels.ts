@@ -275,8 +275,8 @@ export const ERROR_TEXT: Record<string, string> = {
   nothing_to_submit: "제출할 글이 없습니다.",
   unknown_document: "지원에 없는 문서입니다.",
   // c0012 공용 문서·내보내기·전형 단계·민감 정보
-  question_not_shared: "공고 문항은 공용 문서로 만들 수 없습니다.",
-  nothing_to_copy: "복사할 글이 없습니다. 공용 문서를 먼저 저장하세요.",
+  question_not_shared: "공고 문항은 기본 문서로 만들 수 없습니다.",
+  nothing_to_copy: "복사할 글이 없습니다. 기본 문서를 먼저 저장하세요.",
   nothing_to_export: "내보낼 글이 없습니다. 먼저 저장하세요.",
   invalid_format: "지원하지 않는 내보내기 형식입니다.",
   invalid_spans: "문장 근거 위치가 문단 글과 맞지 않습니다.",

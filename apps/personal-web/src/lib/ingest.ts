@@ -549,7 +549,7 @@ function failNote(err: unknown): string {
   return "이 기기에서 읽지 못했습니다";
 }
 
-function parseFailNote(code: string | null | undefined, mime?: string): string {
+export function parseFailNote(code: string | null | undefined, mime?: string): string {
   if (mime === "application/pdf" && (code === "ocr_unavailable" || code === "no_text" || code === "egress_denied"))
     return "글자가 없는 PDF입니다. 쪽을 사진으로 넣으면 이 기기에서 읽습니다";
   const known: Record<string, string> = {

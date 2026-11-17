@@ -207,7 +207,7 @@ export function AddDocumentSheet({ appId, open, onClose }: { appId: string; open
         {(
           [
             ["new", "새로 쓰기"],
-            ["copy", "공용 문서에서 복사"],
+            ["copy", "기본 문서에서 복사"],
           ] as const
         ).map(([v, label]) => (
           <button
@@ -228,7 +228,7 @@ export function AddDocumentSheet({ appId, open, onClose }: { appId: string; open
       {mode === "copy" ? (
         <div className="space-y-3">
           <p className="text-xs text-muted">
-            공용 문서의 최신 revision 을 이 지원의 새 문서로 복사합니다. 근거 연결도 같이 옮기고, 출처(문서·revision)를
+            기본 문서의 마지막 저장본을 이 지원의 새 문서로 복사합니다. 근거 연결도 함께 옮기고, 어디서 복사했는지
             남깁니다. 복사한 뒤 원본을 수정해도 이 문서는 바뀌지 않습니다.
           </p>
           <Loaded query={shared}>
