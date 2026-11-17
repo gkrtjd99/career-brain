@@ -41,6 +41,7 @@ from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.models import add_model_routes
 from career_core.interfaces.http.postings import add_posting_routes
+from career_core.interfaces.http.profiles import add_profile_routes
 from career_core.interfaces.http.search import add_search_routes
 from career_core.interfaces.http.settings import add_settings_routes
 from career_core.interfaces.http.study import add_study_routes
@@ -269,6 +270,9 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_search_routes(router, deps, authorize)
     add_posting_routes(router, deps, authorize)
     add_company_routes(router, deps, authorize)  # O13 회사 조사 (참고 지식)
+    add_profile_routes(
+        router, deps, authorize
+    )  # O21 프로필·증명사진 (사진 올리기는 blobs가 있을 때)
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
     add_settings_routes(router, deps, authorize)  # c0021 공간 공용 설정

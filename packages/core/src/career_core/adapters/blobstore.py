@@ -41,6 +41,13 @@ class LocalBlobStore:
     async def get(self, workspace_id: UUID, key: str) -> bytes:
         return await asyncio.to_thread(self._path(workspace_id, key).read_bytes)
 
+    async def delete(self, workspace_id: UUID, key: str) -> None:
+        """파일 하나 지우기 (없으면 그대로). 다른 행이 같은 key를 쓰지 않는지는 호출하는 usecase가 본다.
+
+        선택 기능이다: ``ports.BlobStore``에는 없고, 쓰는 쪽은 ``getattr(blobs, "delete", None)``로 찾는다
+        (지금은 프로필 사진을 지울 때만, O21)."""
+        await asyncio.to_thread(self._path(workspace_id, key).unlink, missing_ok=True)
+
     async def disk_usage(self, workspace_id: UUID) -> tuple[int, int]:
         """공간 디렉터리의 (파일 수, 바이트). 쓰다 만 임시 파일은 세지 않는다."""
         base = self.root / str(UUID(str(workspace_id)))

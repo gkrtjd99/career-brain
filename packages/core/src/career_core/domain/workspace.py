@@ -76,6 +76,9 @@ ACTION_SCOPES: dict[str, str] = {
     # c0033 (O13) 회사 조사: 참고 지식. 항목 후보 확인은 사람만 (usecase가 agent를 막는다)
     "companies.read": "read",
     "companies.write": "draft-write",
+    # c0036 (O21) 프로필·증명사진. 개인 식별 정보(restricted): MCP에는 profile_summary(이름·소개·링크)만
+    "profile.read": "read",
+    "profile.write": "draft-write",
 }
 
 

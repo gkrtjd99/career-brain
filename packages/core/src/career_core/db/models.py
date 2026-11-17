@@ -1273,3 +1273,47 @@ class CompanyFact(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0036: 프로필·증명사진 (O21)
+
+
+class ProfilePhoto(Base):
+    """사진 변환 도구가 만든 변환본 한 장 (원본은 두지 않는다). 메타데이터를 지운 바이트가 BlobStore에."""
+
+    __tablename__ = "profile_photos"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    spec: Mapped[str] = mapped_column(Text)  # domain.profiles.PhotoSpec
+    width_px: Mapped[int] = mapped_column(Integer)
+    height_px: Mapped[int] = mapped_column(Integer)
+    bytes: Mapped[int] = mapped_column(Integer)
+    mime: Mapped[str] = mapped_column(Text)  # image/jpeg | image/png
+    blob_key: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Profile(Base):
+    """공간마다 하나. 인적 사항·연락처·링크·한 줄 소개·기본 사진. 자료 등급 restricted로 다룬다."""
+
+    __tablename__ = "profiles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    name: Mapped[str | None] = mapped_column(Text, default=None)
+    name_en: Mapped[str | None] = mapped_column(Text, default=None)
+    birth_date: Mapped[date | None] = mapped_column(Date, default=None)
+    email: Mapped[str | None] = mapped_column(Text, default=None)
+    phone: Mapped[str | None] = mapped_column(Text, default=None)
+    address: Mapped[str | None] = mapped_column(Text, default=None)
+    links: Mapped[list] = mapped_column(JSONB, default=list)  # [{label, url}]
+    headline: Mapped[str | None] = mapped_column(Text, default=None)
+    default_photo_id: Mapped[UUID | None] = mapped_column(default=None)
+    updated_by: Mapped[UUID | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
