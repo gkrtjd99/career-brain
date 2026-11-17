@@ -14,7 +14,8 @@ import { countLine } from "./Application";
 const KINDS: SharedDocumentKind[] = ["resume", "portfolio", "cover_letter", "other"];
 
 /**
- * 공용 문서: 지원에 묶이지 않은 기본 이력서·포트폴리오. 지원 화면에서 "공용 문서에서 복사"로 가져간다.
+ * 기본 문서 (경로는 /documents, API는 공용 문서): 지원에 묶이지 않은 기본 이력서·포트폴리오.
+ * 브레인 › 나 › 내 글에서 연다. 지원 화면에서 "공용 문서에서 복사"로 가져간다.
  * 복사본은 출처(문서·revision)를 기억하고, 이후 원본을 고쳐도 복사본은 바뀌지 않는다.
  */
 export function SharedDocumentsPage() {
@@ -23,11 +24,12 @@ export function SharedDocumentsPage() {
   return (
     <div className="max-w-3xl">
       <PageHeader
-        title="공용 문서"
-        subtitle="지원마다 복사해 쓰는 기본 이력서·포트폴리오. 편집·근거·검사 규칙은 지원 문서와 같습니다."
+        back={{ to: "/brain", label: "브레인" }}
+        title="기본 문서"
+        subtitle="지원마다 복사해 쓰는 기본 이력서·포트폴리오입니다. 편집·근거·검사 규칙은 지원 문서와 같습니다."
         actions={
           <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
-            <Plus size={14} /> 공용 문서
+            <Plus size={14} /> 기본 문서
           </Button>
         }
       />
@@ -41,9 +43,9 @@ export function SharedDocumentsPage() {
             </List>
           ) : (
             <EmptyState>
-              공용 문서가 없습니다. 기본 이력서나 포트폴리오를 한 번 써 두면 지원마다 복사할 수 있습니다.{" "}
+              기본 문서가 없습니다. 기본 이력서나 포트폴리오를 한 번 써 두면 지원마다 복사할 수 있습니다.{" "}
               <button type="button" onClick={() => setAdding(true)} className="text-fg underline underline-offset-2">
-                공용 문서 추가
+                기본 문서 추가
               </button>
             </EmptyState>
           )
@@ -99,8 +101,8 @@ function AddSharedSheet({ open, onClose }: { open: boolean; onClose: () => void 
     <Sheet
       open={open}
       onOpenChange={(o) => !o && onClose()}
-      title="공용 문서 추가"
-      description="공고 문항은 지원마다 다르므로 공용 문서로 만들지 않습니다."
+      title="기본 문서 추가"
+      description="공고 문항은 지원마다 다르므로 기본 문서로 만들지 않습니다."
     >
       <form
         className="space-y-3"

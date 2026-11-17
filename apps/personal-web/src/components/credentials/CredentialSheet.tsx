@@ -140,6 +140,13 @@ function CredentialForm({
     onSuccess: done,
   });
   const remove = useMutation({ mutationFn: () => api.deleteCredential(c!.id), onSuccess: done });
+  const toEducation = useMutation({
+    mutationFn: () => api.moveCredentialToEducation(c!.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["education"] });
+      done();
+    },
+  });
 
   const span = (f: CredentialField) => c?.field_spans[f];
   const hint = (f: CredentialField) =>
@@ -164,7 +171,8 @@ function CredentialForm({
       <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3">
         <Field label="종류" htmlFor="cr-kind">
           <Select id="cr-kind" value={d.kind} onChange={(e) => set({ kind: e.target.value as CredentialKind })}>
-            {CREDENTIAL_KIND_OPTIONS.map((o) => (
+            {/* 학력은 학력 화면에서 적는다 (옛 학력 기록만 이 종류로 보인다) */}
+            {CREDENTIAL_KIND_OPTIONS.filter((o) => o.value !== "degree" || c?.kind === "degree").map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -282,6 +290,15 @@ function CredentialForm({
         <Textarea id="cr-detail" value={d.detail} onChange={(e) => set({ detail: e.target.value })} maxLength={2000} />
       </Field>
 
+      {c?.kind === "degree" ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-[13px] text-muted">
+          <span>학력은 이제 학력 화면에 둡니다.</span>
+          <Button size="sm" className="max-sm:h-9" onClick={() => toEducation.mutate()} disabled={toEducation.isPending}>
+            학력으로 옮기기
+          </Button>
+          <ErrorText error={toEducation.error} className="basis-full" />
+        </div>
+      ) : null}
       <ErrorText error={save.error} />
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-4">
         <Button type="submit" variant="primary" disabled={!valid || save.isPending}>

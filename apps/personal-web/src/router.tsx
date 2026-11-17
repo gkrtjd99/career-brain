@@ -188,6 +188,49 @@ const profileRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Profile"), "ProfilePage"),
 });
 
+/** 나 › 학력·기술·공통 답변·지난 제출본 (plan §20). 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+const educationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/education",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Education"), "EducationPage"),
+});
+
+const skillsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/skills",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Skills"), "SkillsPage"),
+});
+
+const answersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/answers",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Answers"), "AnswersPage"),
+});
+
+export const answerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/answers/$answerId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Answer"), "AnswerPage"),
+});
+
+const submissionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/submissions",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Submissions"), "SubmissionsPage"),
+});
+
+export const submissionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/submissions/$submissionId/$documentId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Submissions"), "SubmissionPage"),
+});
+
 const KINDS: SearchKind[] = ["claim", "block", "answer"];
 export const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -368,6 +411,12 @@ const routeTree = rootRoute.addChildren([
   referenceRoute,
   profileRoute,
   searchRoute,
+  educationRoute,
+  skillsRoute,
+  answersRoute,
+  answerRoute,
+  submissionsRoute,
+  submissionRoute,
   postingsRoute,
   postingRoute,
   manageRoute,

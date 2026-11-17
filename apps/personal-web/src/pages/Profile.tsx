@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, Plus, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { errorText, Loaded, PageHeader } from "../components/common";
+import { ProfileDetailsSection } from "../components/profile/ProfileDetailsSection";
 import { api } from "../lib/api";
 import { formatKB } from "../lib/photo";
 import { PHOTO_SPEC_LABEL, profileErrorText } from "../lib/profile";
@@ -29,6 +30,7 @@ export function ProfilePage() {
       />
       <div className="space-y-12">
         <Loaded query={profile}>{(p) => <ProfileForm initial={p} />}</Loaded>
+        <ProfileDetailsSection />
         <PhotosSection />
       </div>
     </div>

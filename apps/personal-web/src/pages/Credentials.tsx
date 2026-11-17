@@ -41,7 +41,7 @@ export function CredentialsPage() {
       <PageHeader
         back={{ to: "/brain", label: "브레인" }}
         title="자격·이수"
-        subtitle="자격증·어학 성적·수료·수상·학력입니다. 만료일을 적으면 오늘 화면 일정에 나옵니다."
+        subtitle="자격증·어학 성적·수료·수상입니다. 만료일을 적으면 오늘 화면 일정에 나옵니다."
         actions={
           <Button variant="primary" onClick={() => setSheet({ credential: null })}>
             <Plus size={15} /> 기록 추가
