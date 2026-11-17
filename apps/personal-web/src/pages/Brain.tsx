@@ -316,12 +316,12 @@ function Filters({
             onClick={() => setSearch({ q: undefined, kind: undefined, tag: undefined, year: undefined, review: undefined })}
             className="inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg"
           >
-            거름 지우기
+            필터 초기화
           </button>
         ) : null}
         <div className="ml-auto flex items-center gap-1" role="radiogroup" aria-label="보기">
           {[
-            { v: undefined, label: "연표" },
+            { v: undefined, label: "타임라인" },
             { v: "table" as const, label: "표" },
           ].map((f) => (
             <button
@@ -373,7 +373,7 @@ function ExperienceResults({
             <Quiet>
               {search.review ? "확인할 주장이 있는 경험이 없습니다." : "조건에 맞는 경험이 없습니다."}{" "}
               <Link to="/brain" search={{}} className={TEXT_LINK}>
-                거름 지우기
+                필터 초기화
               </Link>
             </Quiet>
           );
@@ -395,7 +395,7 @@ function ExperienceResults({
             )}
             {total > items.length ? (
               <p className="mt-3 text-[13px] text-muted tabular-nums">
-                앞 {items.length}개만 보입니다 (모두 {total}개). 거름을 좁혀 보세요.
+                앞 {items.length}개만 보입니다 (모두 {total}개). 필터를 좁혀 보세요.
               </p>
             ) : null}
           </div>
@@ -545,7 +545,7 @@ function ExperienceTable({
           className="w-auto"
         >
           <option value="">시작 달</option>
-          <option value="updated">최근 고침</option>
+          <option value="updated">최근 수정순</option>
           <option value="title">제목</option>
         </Select>
       </div>

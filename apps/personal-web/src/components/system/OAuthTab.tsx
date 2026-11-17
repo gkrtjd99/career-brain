@@ -103,14 +103,14 @@ export function OAuthTab() {
                         <div className="truncate font-mono text-xs text-muted">{l.subject}</div>
                         <div className="truncate text-muted tabular-nums">
                           {formatDateTime(l.created_at)}
-                          {l.revoked_at ? ` · 끊음 ${formatDateTime(l.revoked_at)}` : ""}
+                          {l.revoked_at ? ` · 해제 ${formatDateTime(l.revoked_at)}` : ""}
                         </div>
                       </div>
                       {l.revoked_at ? (
-                        <span className="shrink-0 text-muted">끊음</span>
+                        <span className="shrink-0 text-muted">해제됨</span>
                       ) : (
                         <Button size="sm" variant="danger" onClick={() => setPending({ kind: "link", item: l })}>
-                          끊기
+                          연결 해제
                         </Button>
                       )}
                     </li>
@@ -206,7 +206,7 @@ export function OAuthTab() {
                   ? "이 사용자의 모든 토큰이 다음 요청부터 거부됩니다. 다시 쓰려면 새로 연결해야 하고, 그 전에 받은 토큰은 계속 거부됩니다."
                   : "이 토큰은 만료 전이라도 다음 요청부터 거부됩니다. 같은 사용자의 다른 토큰은 그대로 쓸 수 있습니다."
               }
-              confirmLabel={pending?.kind === "link" ? "끊기" : "폐기"}
+              confirmLabel={pending?.kind === "link" ? "연결 해제" : "폐기"}
               cancelLabel="닫기"
               tone="danger"
               busy={revoke.isPending}

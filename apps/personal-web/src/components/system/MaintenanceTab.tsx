@@ -271,7 +271,7 @@ export function MaintenanceTab() {
             onOpenChange={setConfirmPurge}
             title="공고 초안을 지울까요?"
             description={`${m.draft_retention_days}일 넘게 확정하지 않은 초안 ${m.drafts_purgeable}개를 지웁니다. 되돌릴 수 없습니다 (삭제 기록에는 남습니다).`}
-            confirmLabel="지우기"
+            confirmLabel="삭제"
             cancelLabel="닫기"
             tone="danger"
             busy={purge.isPending}
@@ -572,7 +572,7 @@ function NearDuplicates({
       </summary>
       <p className="mt-1 text-muted">
         만든 시각·만든 사람이 같고 제목·문장 같은 칸만 다른 행입니다. 기본은 둘 다 둡니다 (들어오는 행을 새 행으로).
-        같은 자료를 고친 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
+        같은 자료를 수정한 것이면 "건너뛰기"를 고르세요 — 기존 행 그대로 두고, 그 행에 딸린 자료는 기존 행에 붙습니다.
         {total > pairs.length ? ` 앞 ${pairs.length}쌍만 보여 주고, 나머지는 둘 다 둡니다.` : ""}
       </p>
       <ul className={HAIRLINE_LIST}>

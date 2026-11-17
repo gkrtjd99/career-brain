@@ -31,11 +31,11 @@ import { modelsErrorText, Quiet, Rows, useConnectionTest } from "./parts";
 const NAME_RE = /^[a-z][a-z0-9_-]{0,39}$/;
 
 function testErrorText(code: string | null | undefined) {
-  if (!code) return "시험 실패";
+  if (!code) return "연결 실패";
   return ERROR_TEXT[code] ?? code;
 }
 
-/** 모델 연결 탭: 연결 목록과 추가·고치기·끊기·시험 */
+/** 모델 연결 탭: 연결 표(이름·과금·보낼 자료·상태)와 추가·수정·삭제·연결 확인 */
 export function ModelsTab({ status, canEdit }: { status: ModelsStatus; canEdit: boolean }) {
   const [sheet, setSheet] = useState<{ mode: "add" } | { mode: "edit"; conn: ModelConnection } | null>(null);
   const [removing, setRemoving] = useState<ModelConnection | null>(null);
@@ -50,12 +50,9 @@ export function ModelsTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
   });
   const rows = status.connections;
   return (
-    <div className="max-w-3xl space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="min-w-0 flex-1 text-[13px] text-muted">
-          모델을 부를 곳입니다. models.toml에 적은 연결은 읽기 전용으로 보이고, 화면에서 만든 연결은 이 공간에 둡니다
-          (키는 암호화해 두고 다시 보여 주지 않습니다). 저장하면 재시작 없이 바로 씁니다.
-        </p>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0 flex-1 text-[13px] text-muted">모델을 부를 곳입니다. 저장하면 재시작 없이 바로 씁니다.</p>
         {canEdit ? (
           <Button variant="primary" onClick={() => setSheet({ mode: "add" })}>
             연결 추가
@@ -64,27 +61,32 @@ export function ModelsTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
       </div>
 
       {rows.length ? (
-        <Rows>
-          {rows.map((c) => (
-            <ConnectionRow
-              key={c.name}
-              conn={c}
-              canEdit={canEdit}
-              onEdit={() => setSheet({ mode: "edit", conn: c })}
-              onRemove={() => setRemoving(c)}
-            />
-          ))}
-        </Rows>
+        <div>
+          <div className="hidden grid-cols-[minmax(0,1.5fr)_6rem_7rem_minmax(0,1fr)_auto] gap-4 border-b border-line pb-2 text-xs text-muted sm:grid">
+            <span>이름</span>
+            <span>과금</span>
+            <span>보낼 수 있는 자료</span>
+            <span>상태</span>
+            <span className="w-[13.5rem]" aria-hidden />
+          </div>
+          <ul className="divide-y divide-line border-b border-line">
+            {rows.map((c) => (
+              <ConnectionRow
+                key={c.name}
+                conn={c}
+                canEdit={canEdit}
+                onEdit={() => setSheet({ mode: "edit", conn: c })}
+                onRemove={() => setRemoving(c)}
+              />
+            ))}
+          </ul>
+        </div>
       ) : (
-        <Quiet>
-          연결이 없습니다. "연결 추가"로 공식 API 키, 구독 계정 프록시, 로컬 모델 중 하나를 이으세요. models.toml에 적은
-          연결도 여기 보입니다.
-        </Quiet>
+        <Quiet>연결이 없습니다. "연결 추가"에서 API 키, 구독 계정 프록시, 로컬 모델 중 하나를 연결하세요.</Quiet>
       )}
 
       <p className="text-[13px] text-muted">
-        시험은 과금되지 않는 모델 목록 조회(<code>GET /models</code>)만 부릅니다. 실제 생성 호출로 확인하려면{" "}
-        <code>personal-api ping</code>을 쓰세요 (짧은 요청이지만 과금됩니다).
+        연결 확인은 모델 목록만 불러오므로 요금이 들지 않습니다. models.toml에 적은 연결은 파일에서 수정합니다.
       </p>
 
       <ConnectionSheet
@@ -101,9 +103,9 @@ export function ModelsTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
             remove.reset();
           }
         }}
-        title={`연결 "${removing?.name ?? ""}" 끊기`}
-        description="이 연결과 저장한 키를 지웁니다. 되돌릴 수 없습니다. 이 연결을 쓰는 용도별 모델이 있으면 먼저 바꾸어야 합니다."
-        confirmLabel="끊기"
+        title={`연결 "${removing?.name ?? ""}" 삭제`}
+        description="이 연결과 저장한 키를 삭제합니다. 되돌릴 수 없습니다. 이 연결을 쓰는 용도가 있으면 먼저 다른 모델로 바꾸세요."
+        confirmLabel="삭제"
         tone="danger"
         busy={remove.isPending}
         onConfirm={() => removing && remove.mutate(removing.name)}
@@ -112,6 +114,16 @@ export function ModelsTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
       </ConfirmDialog>
     </div>
   );
+}
+
+/** 상태 한 낱말: 행동이 필요한 것만 진하게 */
+function stateOf(c: ModelConnection): { text: string; strong: boolean } {
+  if (c.key === "missing") return { text: "키 없음", strong: true };
+  if (c.key === "needs_reentry") return { text: "키 다시 입력 필요", strong: true };
+  if (!c.data_classes.length) return { text: "보낼 자료 없음 (호출 안 됨)", strong: true };
+  if (c.last_test_ok === false) return { text: "연결 실패", strong: true };
+  if (c.last_test_ok) return { text: "정상", strong: false };
+  return { text: "확인 전", strong: false };
 }
 
 function ConnectionRow({
@@ -131,61 +143,63 @@ function ConnectionRow({
     await test.refetch();
     void qc.invalidateQueries({ queryKey: ["models-status"] });
   };
-  // 행동이 필요한 상태(키 없음·다시 넣기·보낼 자료 없음)만 진하게
-  const keyNeedsWork = c.key === "missing" || c.key === "needs_reentry";
+  const st = stateOf(c);
   const fresh = test.data;
+  const billing =
+    BILLING_LABEL[c.billing] + (c.billing === "subscription" && c.price_as ? ` · ${c.price_as} 기준 환산` : "");
+  const data = (c.data_classes.length ? dataClassText(c.data_classes) : "보낼 자료 없음") + (!c.leaves_host ? " · 이 기기 안" : "");
   return (
-    <li className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start sm:gap-4">
-      <div className="min-w-0 flex-1 space-y-0.5 text-[13px]">
-        <div className="text-sm">
-          <span className="font-medium break-all">{c.name}</span>
-          <span className="text-muted"> · {connectionKindLabel(c)}</span>
-        </div>
-        <div className="text-muted">
-          {BILLING_LABEL[c.billing]}
-          {c.billing === "subscription" ? (c.price_as ? ` (환산 기준 ${c.price_as})` : " (환산 안 함)") : null}
-          {!c.leaves_host ? " · 이 기계 밖으로 나가지 않음" : null}
-          {c.source === "file" ? " · 파일에서 옴 · 읽기 전용" : null}
-        </div>
-        <div className={c.data_classes.length ? "text-muted" : "font-medium text-fg"}>
-          보낼 수 있는 자료: {dataClassText(c.data_classes)}
-        </div>
-        <div className="text-muted">
-          키: <span className={keyNeedsWork ? "font-medium text-fg" : undefined}>{keyStateText(c)}</span>
-          {" · "}
-          <span className="tabular-nums">
-            {c.last_test_at
-              ? `마지막 시험 ${c.last_test_ok ? "통과" : "실패"} ${formatDateTime(c.last_test_at)}`
-              : "아직 시험 안 함"}
-          </span>
-        </div>
-        {test.isFetching ? (
-          <div className="flex items-center gap-2 text-muted">
-            <Spinner /> 모델 목록을 묻는 중
+    <li className="py-3 text-[13px]">
+      <div className="grid gap-1 sm:grid-cols-[minmax(0,1.5fr)_6rem_7rem_minmax(0,1fr)_auto] sm:items-center sm:gap-4">
+        <div className="min-w-0">
+          <div className="text-sm font-medium break-all">{c.name}</div>
+          <div className="text-xs text-muted">
+            {connectionKindLabel(c)}
+            {c.source === "file" ? " · models.toml" : null}
           </div>
-        ) : test.isError ? (
-          <p role="alert" className="text-danger">
-            {modelsErrorText(test.error)}
-          </p>
-        ) : fresh ? (
+        </div>
+        {/* 좁은 화면: 과금·자료·상태를 한 줄로 */}
+        <div className="text-muted sm:hidden">
+          {billing} · {data} · <span className={st.strong ? "font-medium text-fg" : undefined}>{st.text}</span>
+        </div>
+        <div className="hidden text-muted sm:block">{billing}</div>
+        <div className="hidden text-muted sm:block">{data}</div>
+        <div className="hidden tabular-nums sm:block">
+          <span className={st.strong ? "font-medium" : "text-muted"}>{st.text}</span>
+          {c.key === "set" && c.key_last4 ? <span className="text-muted"> · 키 ····{c.key_last4}</span> : null}
+          {c.last_test_at ? (
+            <div className="text-xs text-muted">마지막 확인 {formatDateTime(c.last_test_at)}</div>
+          ) : null}
+        </div>
+        <div className="mt-1 flex gap-1 sm:mt-0 sm:w-[13.5rem] sm:justify-end">
+          <Button size="sm" onClick={() => void run()} disabled={test.isFetching}>
+            {test.isFetching ? "확인 중" : "연결 확인"}
+          </Button>
+          {canEdit && c.source === "ui" ? (
+            <>
+              <Button size="sm" variant="ghost" onClick={onEdit}>
+                수정
+              </Button>
+              <Button size="sm" variant="ghost" className="text-danger" onClick={onRemove}>
+                삭제
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </div>
+      {test.isFetching ? (
+        <div className="mt-2 flex items-center gap-2 text-muted">
+          <Spinner /> 모델 목록을 불러오는 중
+        </div>
+      ) : test.isError ? (
+        <p role="alert" className="mt-2 text-danger">
+          {modelsErrorText(test.error)}
+        </p>
+      ) : fresh ? (
+        <div className="mt-2">
           <TestResult result={fresh} />
-        ) : null}
-      </div>
-      <div className="flex shrink-0 flex-wrap gap-1.5">
-        <Button size="sm" onClick={() => void run()} disabled={test.isFetching}>
-          시험
-        </Button>
-        {canEdit && c.source === "ui" ? (
-          <>
-            <Button size="sm" variant="ghost" onClick={onEdit}>
-              고치기
-            </Button>
-            <Button size="sm" variant="danger" onClick={onRemove}>
-              끊기
-            </Button>
-          </>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -200,14 +214,14 @@ function TestResult({ result }: { result: ModelConnectionTest }) {
   const shown = result.models.slice(0, 12);
   return (
     <p className="break-words">
-      <span className="font-medium">통과 · 모델 {result.models.length}개</span>
+      <span className="font-medium">연결됨 · 모델 {result.models.length}개</span>
       {shown.length ? <span className="text-muted"> — {shown.join(", ")}</span> : null}
       {result.models.length > shown.length ? <span className="text-muted"> 외 {result.models.length - shown.length}개</span> : null}
     </p>
   );
 }
 
-// ---------------------------------------------------------------- 추가·고치기 시트
+// ---------------------------------------------------------------- 추가·수정 시트
 
 interface Draft {
   kind: ConnectionKind;
@@ -301,7 +315,7 @@ function ConnectionSheet({
     },
   });
 
-  const title = saved ? `연결 "${saved.name}" 저장함` : editing ? `연결 "${editing.name}" 고치기` : "연결 추가";
+  const title = saved ? `연결 "${saved.name}" 저장됨` : editing ? `연결 "${editing.name}" 수정` : "연결 추가";
   return (
     <Sheet
       open={state !== null}
@@ -340,7 +354,7 @@ function ConnectionSheet({
           <ErrorText error={save.error} />
           <div className="flex flex-wrap gap-2">
             <Button type="submit" variant="primary" disabled={validate(draft, editing, taken) !== null || save.isPending}>
-              {save.isPending ? "저장하고 시험하는 중" : "저장하고 시험"}
+              {save.isPending ? "저장하고 확인하는 중" : "저장하고 연결 확인"}
             </Button>
             <Button variant="ghost" onClick={onClose}>
               취소
@@ -605,7 +619,7 @@ function KeyField({
             checked={d.clearKey}
             onChange={(e) => set({ clearKey: e.target.checked, apiKey: "" })}
           />
-          저장한 키 지우기
+          저장된 키 삭제
         </label>
       ) : null}
     </Field>
@@ -664,7 +678,7 @@ function SavedStep({
     <div className="space-y-4 text-[13px]">
       <p>저장했습니다. 바로 씁니다.</p>
       <div className="border-y border-line py-3">
-        <p className="mb-1 text-muted">시험 (과금 없는 모델 목록 조회)</p>
+        <p className="mb-1 text-muted">연결 확인 (모델 목록만 불러옴, 요금 없음)</p>
         {saved.test ? (
           <TestResult result={saved.test} />
         ) : (
@@ -676,7 +690,7 @@ function SavedStep({
       {saved.test?.ok ? (
         <p className="text-muted">용도별 모델 탭에서 이 연결의 모델을 고르면 그 작업이 이 연결로 갑니다.</p>
       ) : (
-        <p className="text-muted">주소·키를 확인한 뒤 목록의 "고치기"로 다시 저장하거나 "시험"을 누르세요.</p>
+        <p className="text-muted">주소와 키를 확인한 뒤 목록에서 "수정"으로 다시 저장하거나 "연결 확인"을 누르세요.</p>
       )}
       <Button variant="primary" onClick={onClose}>
         닫기

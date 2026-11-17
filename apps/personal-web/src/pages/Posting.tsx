@@ -483,7 +483,7 @@ function ReviewForm({
       }
     >
       <p className="text-[13px] text-muted">
-        항목마다 원문 근거를 확인하세요. 원문에서 못 찾은 값은 비워 두었고, 고친 값은 근거가 “직접 입력”이 됩니다.
+        항목마다 원문 근거를 확인하세요. 원문에서 못 찾은 값은 비워 두었고, 수정한 값은 근거가 “직접 입력”이 됩니다.
       </p>
       <form
         className="mt-3 divide-y divide-line border-t border-line"
@@ -509,7 +509,7 @@ function ReviewForm({
               ? "확인하고 저장"
               : p.pending_changes.length
                 ? "새 버전으로 다시 저장"
-                : "고친 내용 저장"}
+                : "수정 내용 저장"}
           </Button>
           {hidden > 0 ? (
             <Button variant="ghost" onClick={() => setShowEmpty(true)}>

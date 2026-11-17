@@ -31,9 +31,14 @@ export function RoutesTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
   return (
     <div className="max-w-3xl space-y-6">
       <p className="text-[13px] text-muted">
-        작업(용도)마다 어느 연결의 어떤 모델을 쓸지 정합니다. 정하지 않은 용도는 기본을 씁니다 (임베딩·이미지 읽기·판정은
-        기본으로 넘어가지 않고 그 일을 하지 않습니다). 화면에서 고친 값은 models.toml 값을 덮습니다.
+        작업마다 쓸 모델을 고릅니다. 정하지 않은 작업은 기본 모델을 씁니다. 검색 색인·이미지 읽기·판정은 기본으로 넘어가지
+        않으니 따로 정해야 합니다.
       </p>
+      <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] gap-4 border-b border-line pb-2 text-xs text-muted sm:grid">
+        <span>작업</span>
+        <span>모델</span>
+        <span className="w-[9rem]" aria-hidden />
+      </div>
       <Rows>
         {purposeOrder(status).map((p) => (
           <RouteRow
@@ -84,45 +89,45 @@ function RouteRow({
   const label = ROUTE_PURPOSE_LABEL[purpose];
   return (
     <li className="py-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-4">
-        <div className="min-w-0 flex-1 text-[13px]">
-          <div className="text-sm">
-            <span className="font-medium">{label ?? purpose}</span>
-            {label ? <span className="font-mono text-xs text-muted"> {purpose}</span> : null}
-          </div>
+      <div className="grid gap-1 text-[13px] sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] sm:items-center sm:gap-4">
+        <div className="text-sm font-medium">{label ?? purpose}</div>
+        <div className="min-w-0">
           {route ? (
-            <div className="text-muted">
-              <span className="font-mono break-all text-fg">
-                {route.endpoint}/{route.model}
+            <>
+              <span className="break-all">
+                {route.model}
+                <span className="text-muted"> · {route.endpoint}</span>
               </span>
-              {route.source === "ui" ? " · 화면에서 덮음" : " · 파일에서 옴"}
-            </div>
+              {route.source === "file" ? <span className="text-muted"> · models.toml</span> : null}
+            </>
           ) : (
-            <div className="text-muted">
+            <span className="text-muted">
               {fallback
-                ? `없음 — 기본(${fallback.endpoint}/${fallback.model})을 씀`
+                ? `기본 모델 사용 (${fallback.model})`
                 : purpose === "default"
-                  ? "없음 — 따로 정하지 않은 용도는 호출하지 않습니다"
-                  : "없음 — 이 일은 하지 않습니다"}
-            </div>
+                  ? "정하지 않음 — 따로 정한 작업만 실행됩니다"
+                  : "정하지 않음 — 이 작업은 실행되지 않습니다"}
+            </span>
           )}
-          {route && !conn ? <div className="font-medium">이 연결이 없습니다. 다른 연결을 고르세요.</div> : null}
+          {route && !conn ? <div className="font-medium">이 연결이 없습니다. 다른 모델을 고르세요.</div> : null}
           {conn && !conn.data_classes.length ? (
-            <div className="font-medium">이 연결은 보낼 수 있는 자료가 없어 호출이 거부됩니다.</div>
+            <div className="font-medium">이 연결은 보낼 수 있는 자료가 없어 실행되지 않습니다.</div>
           ) : null}
         </div>
-        {canEdit && !editing ? (
-          <div className="flex shrink-0 flex-wrap gap-1.5">
-            <Button size="sm" variant="ghost" onClick={() => onEdit(true)} disabled={!status.connections.length}>
-              고치기
-            </Button>
-            {route?.source === "ui" ? (
-              <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => save.mutate(null)}>
-                파일 값으로
+        <div className="flex gap-1 sm:w-[9rem] sm:justify-end">
+          {canEdit && !editing ? (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => onEdit(true)} disabled={!status.connections.length}>
+                변경
               </Button>
-            ) : null}
-          </div>
-        ) : null}
+              {route?.source === "ui" ? (
+                <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => save.mutate(null)}>
+                  초기화
+                </Button>
+              ) : null}
+            </>
+          ) : null}
+        </div>
       </div>
       {editing ? (
         <RouteEditor
@@ -224,7 +229,7 @@ function RouteEditor({
             >
               이 연결의 모델 목록 불러오기
             </button>{" "}
-            (과금 없음).
+            (요금 없음).
           </>
         )}
       </div>
@@ -234,7 +239,7 @@ function RouteEditor({
         </Button>
         {onReset ? (
           <Button size="sm" disabled={busy} onClick={onReset}>
-            파일 값으로
+            초기화
           </Button>
         ) : null}
         <Button size="sm" variant="ghost" onClick={onCancel}>

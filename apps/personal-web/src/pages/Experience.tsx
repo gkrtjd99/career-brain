@@ -123,7 +123,7 @@ function ExperienceInfo({ exp }: { exp: Experience }) {
       </dl>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" className="max-sm:h-9" onClick={() => setEditing(true)}>
-          <Pencil size={14} /> 고치기
+          <Pencil size={14} /> 수정
         </Button>
         {canHaveChildren ? (
           <Button size="sm" className="max-sm:h-9" onClick={() => setAdding(true)}>
@@ -156,7 +156,7 @@ function ExperienceInfo({ exp }: { exp: Experience }) {
         </div>
       ) : null}
 
-      <Sheet open={editing} onOpenChange={(o) => !o && setEditing(false)} title="경험 고치기">
+      <Sheet open={editing} onOpenChange={(o) => !o && setEditing(false)} title="경험 수정">
         {editing ? <EditExperienceForm exp={exp} onDone={() => setEditing(false)} /> : null}
       </Sheet>
       <Sheet open={adding} onOpenChange={(o) => !o && setAdding(false)} title="안에 프로젝트 추가">
