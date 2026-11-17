@@ -127,6 +127,8 @@ export interface ResumeCheck {
   version_id: Uuid;
   revision: number;
   estimated_pages: number;
+  /** Always true: the server count is an estimate; the preview measures real pages. */
+  pages_estimated: true;
   max_pages: number;
   blind: boolean;
   blind_suggested: boolean;

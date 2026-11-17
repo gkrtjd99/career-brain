@@ -31,6 +31,7 @@ from career_core.db.models import DocumentBlock, ParseRun, Source, SourceVersion
 from career_core.db.session import Database
 from career_core.domain.ingest import mask_resident_numbers
 from career_core.domain.sources import TERMINAL_PARSE_STATUSES, ParseStatus, SourcePurpose
+from career_core.domain.text_clean import clean_control
 from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ImageInput, ModelCallError, ModelDenied, ModelRequest
 from career_core.ports import (
@@ -127,6 +128,12 @@ async def _load(db: Database, ws: UUID, run_id: UUID) -> _RunView | None:
 async def _replace_blocks(
     db: Database, ws: UUID, run_id: UUID, origin: str, blocks: Iterable[ParsedBlock], *, start: int
 ) -> None:
+    # 제어 문자는 어느 파서·OCR에서 왔든 여기서 지운다 (인용·검색·내보내기에 나가지 않게)
+    blocks = [
+        ParsedBlock(page=b.page, text=text)
+        for b in blocks
+        if (text := clean_control(b.text)).strip()
+    ]
     async with db.workspace_session(ws) as s:
         await guard_lease(s, run_id)
         await s.execute(

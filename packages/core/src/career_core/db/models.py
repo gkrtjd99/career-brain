@@ -229,6 +229,10 @@ class Experience(Base):
     status: Mapped[str] = mapped_column(Text, default="active")
     origin: Mapped[str] = mapped_column(Text)
     extraction_run_id: Mapped[UUID | None] = mapped_column(default=None)
+    # c0050: 합친 경험(retired)은 대상 경험을 가리킨다. 추출이 확실하지 않을 때 "같은 경험일 수 있음" 대상.
+    merged_into_id: Mapped[UUID | None] = mapped_column(default=None)
+    merged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    possible_duplicate_of: Mapped[UUID | None] = mapped_column(default=None)
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -251,6 +255,10 @@ class ExtractionRun(Base):
     experiences_created: Mapped[int] = mapped_column(Integer, default=0)
     claims_created: Mapped[int] = mapped_column(Integer, default=0)
     claims_dropped: Mapped[int] = mapped_column(Integer, default=0)
+    # c0050: 기존 경험에 붙인 수 · 같은 사실에 근거로 붙인 수 · 경험이 아닌 줄(학력·기술) 제안
+    experiences_matched: Mapped[int] = mapped_column(Integer, default=0)
+    claims_attached: Mapped[int] = mapped_column(Integer, default=0)
+    suggestions: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow

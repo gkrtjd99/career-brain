@@ -402,6 +402,9 @@ async def test_every_workspace_table_is_exported_or_excluded(db):
         "fk_resume_versions_source_revision",
         # c0049: 포트폴리오 묶음 → 위 묶음(같은 표)
         "fk_portfolio_bundles_parent",
+        # c0050: 합친 경험 → 대상 경험, "같은 경험일 수 있음" → 그 경험 (같은 표)
+        "fk_experiences_merged_into",
+        "fk_experiences_possible_duplicate",
     }
     assert plan.groups == ()
 

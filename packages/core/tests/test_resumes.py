@@ -721,7 +721,7 @@ async def test_html_is_self_contained_and_clean(db, env):
         # 밖에서 가져오는 것 없음, 숨김 서식 없음
         assert not re.search(r"(src|href)=\"https?://", html)
         assert "hidden_text_markup" not in res.summary and "prompt_injection" not in res.summary
-        assert res.filename.endswith(".pdf.html")
+        assert res.filename.endswith(".html") and not res.filename.endswith(".pdf.html")
         docx = await uc.export_version(db, env["blobs"], owner, mid, fmt="docx")
         assert docx.data[:2] == b"PK" and "hidden_text_markup" not in docx.summary
         md = await uc.export_version(db, env["blobs"], owner, mid, fmt="md")

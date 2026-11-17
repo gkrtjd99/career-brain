@@ -41,6 +41,7 @@ from career_core.domain.brain import (
     EvidenceKind,
     confirmed_status,
 )
+from career_core.domain.experience_match import QUOTE_WEAK, quote_support
 from career_core.domain.experiences import (
     EXPERIENCE_KINDS,
     ExperienceKind,
@@ -374,6 +375,7 @@ class ExperienceFilter:
     review: str | None = None  # needs_review | confirmed | no_claims
     q: str | None = None  # 제목·조직·역할·태그에 든 글자
     sort: str = "start"  # start(시작 달 최근 먼저) | updated | title
+    duplicates: bool = False  # c0050: "같은 경험일 수 있음" 표시가 있는 것만
     limit: int = MAX_LIST_LIMIT
     offset: int = 0
 
@@ -396,6 +398,9 @@ class ExperienceSummary:
     tags: list[str] = field(default_factory=list)
     children_count: int = 0
     updated_at: datetime | None = None
+    # c0050: 추출이 "같은 경험일 수 있음"으로 본 기존 경험 (활성일 때만)
+    possible_duplicate_of: UUID | None = None
+    possible_duplicate_title: str | None = None
 
     @property
     def needs_review(self) -> int:
@@ -450,6 +455,8 @@ def _filtered(f: ExperienceFilter) -> list:
         conds.append(~_claim_exists(ClaimStatus.EXTRACTED, *CONFIRMED_STATUSES))
     elif f.review is not None:
         raise ClaimRuleError("invalid_review_filter")
+    if f.duplicates:
+        conds.append(Experience.possible_duplicate_of.is_not(None))
     if f.q and f.q.strip():
         pattern = _like(f.q.strip())
         conds.append(
@@ -484,6 +491,7 @@ async def page_experiences(
     conds = _filtered(f)
     order = _order(f.sort)
     parent = aliased(Experience)
+    dup = aliased(Experience)
     child = aliased(Experience)
     children = (
         select(func.count(child.id))
@@ -495,15 +503,18 @@ async def page_experiences(
         total = await s.scalar(select(func.count()).select_from(Experience).where(*conds))
         rows = (
             await s.execute(
-                select(Experience, parent.title, children)
+                select(Experience, parent.title, children, dup.id, dup.title)
                 .outerjoin(parent, parent.id == Experience.parent_id)
+                .outerjoin(
+                    dup, (dup.id == Experience.possible_duplicate_of) & (dup.status == ACTIVE)
+                )
                 .where(*conds)
                 .order_by(*order)
                 .limit(limit)
                 .offset(offset)
             )
         ).all()
-        ids = [e.id for e, _, _ in rows]
+        ids = [e.id for e, *_ in rows]
         counts = (
             (
                 await s.execute(
@@ -536,8 +547,10 @@ async def page_experiences(
             tags=list(e.tags or []),
             children_count=n_children or 0,
             updated_at=e.updated_at,
+            possible_duplicate_of=dup_id,
+            possible_duplicate_title=dup_title,
         )
-        for e, parent_title, n_children in rows
+        for e, parent_title, n_children, dup_id, dup_title in rows
     ]
     return out, total or 0
 
@@ -662,6 +675,9 @@ class EvidenceView:
     answer_id: UUID | None = None
     question: str | None = None
     answer: str | None = None
+    # 원문 위치 근거: 인용이 주장을 받치는가 (숫자·핵심 낱말 비교, ``domain.experience_match.quote_support``).
+    # True면 화면에 "인용이 약함". 모델을 부르지 않고 읽을 때 계산한다 (문장을 고치면 다시 본다).
+    weak_quote: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -696,6 +712,11 @@ class ExperienceView:
     tags: list[str] = field(default_factory=list)
     children: list[ChildExperience] = field(default_factory=list)
     updated_at: datetime | None = None
+    # c0050: 합친 경험이면 대상 경험(보관 상태), 추출이 "같은 경험일 수 있음"으로 본 경험
+    merged_into_id: UUID | None = None
+    merged_at: datetime | None = None
+    possible_duplicate_of: UUID | None = None
+    possible_duplicate_title: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -717,6 +738,15 @@ async def get_experience(db: Database, actor: ActorContext, experience_id: UUID)
         parent_title = (
             await s.scalar(select(Experience.title).where(Experience.id == exp.parent_id))
             if exp.parent_id
+            else None
+        )
+        dup_title = (
+            await s.scalar(
+                select(Experience.title).where(
+                    Experience.id == exp.possible_duplicate_of, Experience.status == ACTIVE
+                )
+            )
+            if exp.possible_duplicate_of
             else None
         )
         children = (
@@ -761,11 +791,18 @@ async def get_experience(db: Database, actor: ActorContext, experience_id: UUID)
                 .where(ClaimEvidence.claim_id.in_(claim_ids))
             )
         ).all()
+    statements = {c.id: c.statement for c in claims}
     evidence: dict[UUID, list[EvidenceView]] = {}
     for ev, span, page, title in span_rows:
         evidence.setdefault(ev.claim_id, []).append(
             EvidenceView(
-                ev.id, ev.kind, span_id=span.id, quote=span.quote, page=page, source_title=title
+                ev.id,
+                ev.kind,
+                span_id=span.id,
+                quote=span.quote,
+                page=page,
+                source_title=title,
+                weak_quote=quote_support(statements.get(ev.claim_id, ""), span.quote) == QUOTE_WEAK,
             )
         )
     for ev, ans, prompt in answer_rows:
@@ -788,6 +825,10 @@ async def get_experience(db: Database, actor: ActorContext, experience_id: UUID)
         ongoing=exp.ongoing,
         tags=list(exp.tags or []),
         updated_at=exp.updated_at,
+        merged_into_id=exp.merged_into_id,
+        merged_at=exp.merged_at,
+        possible_duplicate_of=exp.possible_duplicate_of if dup_title else None,
+        possible_duplicate_title=dup_title,
         children=[
             ChildExperience(
                 c.id,
@@ -1065,3 +1106,99 @@ async def list_pending_claims(
         for c, title, n in rows[:limit]
     ]
     return out, len(rows) > limit
+
+
+# ---------------------------------------------------------------- 여러 사실 한 번에 확인
+
+MAX_BATCH_CONFIRM = 200
+BATCH_CONTRIBUTIONS = ("personal", "team", "as_is")
+
+
+@dataclass(frozen=True, slots=True)
+class BatchConfirmResult:
+    confirmed: list[tuple[UUID, str]]  # (사실, 새 상태)
+    skipped: list[tuple[UUID, str]]  # (사실, 까닭: contribution_required)
+    truncated: bool  # 고른 범위의 후보가 한도보다 많아 나머지는 그대로
+
+
+async def confirm_claims(
+    db: Database,
+    actor: ActorContext,
+    *,
+    contribution: str,
+    experience_id: UUID | None = None,
+    source_id: UUID | None = None,
+    claim_ids: list[UUID] | None = None,
+) -> BatchConfirmResult:
+    """확인 대기(``extracted``) 사실을 한 번에 확인한다 — 한 경험, 한 원본에서 나온 것, 또는 고른 ID.
+
+    한 건 확인(``confirm_claim``)과 같은 규칙: 확인 권한(approve)이 있어야 하고, 팀/본인 구분이 있어야 확인된다.
+    ``contribution``은 모두에 같은 선택을 준다: ``personal``(본인) · ``team``(팀) · ``as_is``(각 사실에 적힌 대로).
+    ``as_is``에서 구분이 "모름"인 사실은 확인하지 않고 ``skipped``(``contribution_required``)로 돌려준다.
+    활성 경험의 사실만. 한 번에 200개까지 (넘으면 ``truncated``, 나머지는 그대로).
+    """
+    if not can_confirm(actor):
+        raise ClaimRuleError("confirm_requires_approve")
+    if contribution not in BATCH_CONTRIBUTIONS:
+        raise ClaimRuleError("invalid_contribution")
+    if sum(x is not None for x in (experience_id, source_id, claim_ids)) != 1:
+        raise ClaimRuleError("choose_one_scope")
+    q = (
+        select(Claim)
+        .join(Experience, Experience.id == Claim.experience_id)
+        .where(Claim.status == ClaimStatus.EXTRACTED, Experience.status == ACTIVE)
+    )
+    if experience_id is not None:
+        q = q.where(Claim.experience_id == experience_id)
+    elif source_id is not None:
+        from_source = (
+            select(ClaimEvidence.claim_id)
+            .join(SourceSpan, SourceSpan.id == ClaimEvidence.source_span_id)
+            .join(DocumentBlock, DocumentBlock.id == SourceSpan.document_block_id)
+            .join(ParseRun, ParseRun.id == DocumentBlock.parse_run_id)
+            .join(SourceVersion, SourceVersion.id == ParseRun.source_version_id)
+            .where(SourceVersion.source_id == source_id)
+        )
+        q = q.where(Claim.id.in_(from_source))
+    else:
+        ids = list(dict.fromkeys(claim_ids or []))
+        if not ids:
+            raise ClaimRuleError("choose_one_scope")
+        if len(ids) > MAX_BATCH_CONFIRM:
+            raise ClaimRuleError("too_many_ids")
+        q = q.where(Claim.id.in_(ids))
+    confirmed: list[tuple[UUID, str]] = []
+    skipped: list[tuple[UUID, str]] = []
+    async with db.workspace_session(actor.workspace_id) as s:
+        if experience_id is not None and await s.get(Experience, experience_id) is None:
+            raise NotFound("experience")
+        if source_id is not None and await s.get(Source, source_id) is None:
+            raise NotFound("source")
+        rows = (
+            await s.scalars(
+                q.order_by(Claim.created_at, Claim.id)
+                .limit(MAX_BATCH_CONFIRM + 1)
+                .with_for_update(of=Claim)
+            )
+        ).all()
+        truncated = len(rows) > MAX_BATCH_CONFIRM
+        rows = rows[:MAX_BATCH_CONFIRM]
+        spans = set(
+            (
+                await s.scalars(
+                    select(ClaimEvidence.claim_id).where(
+                        ClaimEvidence.claim_id.in_([c.id for c in rows]),
+                        ClaimEvidence.kind == EvidenceKind.SOURCE_SPAN,
+                    )
+                )
+            ).all()
+        )
+        for claim in rows:
+            if contribution != "as_is":
+                claim.contribution = contribution
+            if claim.contribution == Contribution.UNKNOWN:
+                skipped.append((claim.id, "contribution_required"))
+                continue
+            _mark_confirmed(claim, actor, has_span=claim.id in spans)
+            confirmed.append((claim.id, claim.status))
+    return BatchConfirmResult(confirmed, skipped, truncated)

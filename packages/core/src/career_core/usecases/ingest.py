@@ -34,6 +34,7 @@ from career_core.domain.sources import (
     DataClass,
     ParseStatus,
 )
+from career_core.domain.text_clean import clean_control
 from career_core.ports import ActorContext
 from career_core.usecases import parsing
 
@@ -204,7 +205,7 @@ async def _store(s, ws: UUID, run: ParseRun, layer: TextLayer, *, settle: bool) 
                 page=b.page,
                 ordinal=start + i,
                 origin=parsing.DEVICE_ORIGIN,
-                text=b.text,
+                text=clean_control(b.text),  # 길이는 그대로 (좌표가 어긋나지 않게)
                 bbox=list(b.bbox) if b.bbox else None,
             )
         )

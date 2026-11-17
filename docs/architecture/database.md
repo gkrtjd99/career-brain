@@ -694,3 +694,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 모든 표 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
 - 내보내기: 카탈로그로 자동 포함(이미지 파일은 `blobs/`), `@schema_step("c0049")`(옛 묶음엔 빈 표). `github_tokens`는 `EXCLUDED_TABLES`(비밀). 합치기 키: 항목·묶음 same_except, revision·줄 근거·이미지·묶음 항목은 DB UNIQUE.
 - 시험: `packages/core/tests/test_portfolio.py`.
+
+## 같은 경험 합치기·추출 제안 (c0050)
+
+`c0050` (`down_revision = c0049`). 여러 원본에서 같은 경험이 따로 생기던 문제 (2026-11-18 사용 점검).
+
+| 테이블 | 바뀐 칸 |
+|---|---|
+| `experiences` | `merged_into_id`(합친 대상, FK `(workspace_id, merged_into_id)` → `experiences` `ON DELETE SET NULL (merged_into_id)`, `DEFERRABLE INITIALLY IMMEDIATE`)·`merged_at`·`possible_duplicate_of`(추출이 "같은 경험일 수 있음"으로 본 기존 경험, 같은 꼴의 FK). CHECK `ck_experiences_merged`: 합친 경험은 `status = 'retired'`이고 자기 자신이 아니며 `merged_at`이 있다. CHECK `ck_experiences_possible_duplicate`: 자기 자신이 아니다. 부분 색인 `ix_experiences_merged_into` |
+| `extraction_runs` | `experiences_matched`·`claims_attached`(정수, 기본 0)·`suggestions`(JSONB 객체, 200000바이트 이하 CHECK: 학력 제안·옮기지 못한 기술명·같은 경험일 수 있는 짝·만든 자격 후보 수·걸러 낸 줄 수) |
+
+- 추출(`usecases/extraction.py::_Saver`): 한 트랜잭션 안에서 활성 경험과 견준다 (`domain/experience_match.py`). 확실하면(같은 조직 + 제목 비슷함 ≥ 0.8 + 기간이 어긋나지 않음, 또는 조직을 모를 때 제목이 거의 같고 기간이 겹침) 기존 경험의 빈 칸만 채우고 태그를 더한다 — 사람이 고친 값은 그대로. 같은 사실(정규화한 문장이 같거나 비슷하고 숫자가 같음)이면 새 주장 대신 근거만 붙인다. 확실하지 않으면 새로 만들고 `possible_duplicate_of`.
+- 경험이 아닌 줄: 학력은 `suggestions.education`(학력 표에는 후보 상태가 없어서 만들지 않는다; `GET /core/extraction-suggestions`가 아직 학력에 없는 학교만 돌려준다), 자격증·어학은 `credentials`의 `extracted` 후보(경험 원본은 증빙이 아니므로 `source_id = NULL`, `parse_run_id`·`field_spans`로 원문 위치), 기술 목록 줄은 이 실행의 경험 중 그 기술을 말한 경험의 태그로, 나머지는 `suggestions.skills`.
+- 합치기(`usecases/experience_merge.py::merge_experiences`, approve 필요, 20개까지): 대상 칸이 이긴다(빈 칸만 채움, 태그는 합침). 주장·하위 경험·자격·학력·포트폴리오 항목·면접 세션을 대상으로 옮기고, 대상에 같은 문장이 있는 추출 후보는 근거를 옮긴 뒤 은퇴(`claims_folded`). 지원 준비의 고른 경험·문항·요건과 면접 준비 질문의 경험 ID를 바꿔 쓴다. 이력서 revision은 바꾸지 않는다(덧붙이기만 하는 기록) — 읽을 때 `merged_into_id`를 따라 대상 값으로 읽고, 한 번에 채우기는 대상을 다시 넣지 않는다. 합친 경험은 `retired` + `merged_into_id`로 남는다(기록).
+- 지우기(`delete_experience`): **거부가 기본**. 하위 경험·포트폴리오·면접 세션·쓰인 사실(문서·이력서 줄·포트폴리오 줄·공통 답변·학습)·이력서 최신 revision·지원 준비가 가리키면 409 `experience_in_use`(+ 쓰는 곳 수), 확인한 사실이 있으면 `include_confirmed=true`와 approve가 있어야 한다. 지우면 사실·근거는 cascade, 자격·학력은 연결만 끊고, 은퇴한 하위 경험은 위를 비운다. 이 경험을 가리키던 `possible_duplicate_of`·`merged_into_id`는 FK가 비운다.
+- 내보내기: `@schema_step("c0050")`, 합치기 키는 [backup.md](../operations/backup.md). 시험: `packages/core/tests/test_audit_fixes.py`.

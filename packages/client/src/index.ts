@@ -68,6 +68,7 @@ function experienceQuery(q: T.ExperienceQuery): Query {
     status: q.status,
     q: q.q,
     sort: q.sort,
+    duplicates: q.duplicates,
     limit: q.limit,
     offset: q.offset,
   };
@@ -223,6 +224,19 @@ export function createClient({
     createExperience: (body: T.ExperienceIn) => post<T.StatusOut>("/core/experiences", body),
     updateExperience: (experienceId: string, body: T.ExperiencePatch) =>
       patch<T.Experience>(`/core/experiences/${id(experienceId)}`, body),
+    /** source 경험들을 이 경험에 합친다 (approve 필요). 400 merge_self·experience_not_active 등 */
+    mergeExperiences: (targetId: string, body: T.MergeIn) =>
+      post<T.MergeOut>(`/core/experiences/${id(targetId)}/merge`, body),
+    /** 지우기. 쓰는 곳이 있으면 409 experience_in_use (+references). 확인한 사실이 있으면 includeConfirmed */
+    deleteExperience: (experienceId: string, includeConfirmed = false) =>
+      json<T.DeleteExperienceOut>("DELETE", `/core/experiences/${id(experienceId)}`, {
+        query: includeConfirmed ? { include_confirmed: true } : undefined,
+      }),
+    /** "같은 경험일 수 있음" 표시 지우기 (다른 경험이다) */
+    dismissDuplicateHint: async (experienceId: string) => {
+      await request("DELETE", `/core/experiences/${id(experienceId)}/duplicate-hint`);
+    },
+    extractionSuggestions: () => get<T.ExtractionSuggestions>("/core/extraction-suggestions"),
     addClaim: (experienceId: string, body: T.ClaimIn) =>
       post<T.StatusOut>(`/core/experiences/${id(experienceId)}/claims`, body),
     /** 주장 여러 개의 짧은 보기 (문서 근거 표시용). 없는 ID는 빠진다. */
@@ -232,6 +246,8 @@ export function createClient({
       patch<T.StatusOut>(`/core/claims/${id(claimId)}`, body),
     confirmClaim: (claimId: string, body: T.ConfirmIn = {}) =>
       post<T.StatusOut>(`/core/claims/${id(claimId)}/confirm`, body),
+    /** 한 경험·한 원본·고른 사실을 한 번에 확인 (approve 필요, 200개까지) */
+    confirmClaims: (body: T.BatchConfirmIn) => post<T.BatchConfirmOut>("/core/claims/confirm-batch", body),
     disputeClaim: (claimId: string) => post<T.StatusOut>(`/core/claims/${id(claimId)}/dispute`),
     retireClaim: (claimId: string) => post<T.StatusOut>(`/core/claims/${id(claimId)}/retire`),
     attachSpan: (claimId: string, spanId: string) =>

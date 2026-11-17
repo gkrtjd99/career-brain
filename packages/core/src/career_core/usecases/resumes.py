@@ -42,6 +42,7 @@ from career_core.db.models import (
 from career_core.domain.brain import CONFIRMED_STATUSES
 from career_core.domain.document_export import ExportError, export_summary, inspect_export
 from career_core.domain.documents import BlockInput, Finding, check_document
+from career_core.domain.experience_match import SAME, ExperienceKey, best_match, same_statement
 from career_core.domain.resume import (
     CONTACT_FIELDS,
     CREDENTIAL_SECTION,
@@ -274,13 +275,30 @@ async def _load(
     by_type: dict[str, list[str]] = {}
     for t, i in records:
         by_type.setdefault(t, []).append(i)
+    # c0050: 합친 경험(보관, merged_into_id)은 대상 경험으로 읽는다 (revision은 고치지 않는 표다)
+    merged: dict[str, str] = {}
     if ids := _uuids(by_type.get("experience", [])):
-        for e in (
-            await s.scalars(
-                select(Experience).where(Experience.id.in_(ids), Experience.status == ACTIVE)
-            )
-        ).all():
-            lk.records[("experience", str(e.id))] = experience_fields(_row(e, _EXP_COLS))
+        rows = (await s.scalars(select(Experience).where(Experience.id.in_(ids)))).all()
+        for e in rows:
+            if e.status != ACTIVE and e.merged_into_id is not None:
+                merged[str(e.id)] = str(e.merged_into_id)
+        targets = {
+            e.id: e
+            for e in (
+                await s.scalars(
+                    select(Experience).where(
+                        Experience.id.in_(
+                            [e.id for e in rows] + _uuids(sorted(set(merged.values())))
+                        ),
+                        Experience.status == ACTIVE,
+                    )
+                )
+            ).all()
+        }
+        for ref_id in ids:
+            e = targets.get(UUID(merged.get(str(ref_id), str(ref_id))))
+            if e is not None:
+                lk.records[("experience", str(ref_id))] = experience_fields(_row(e, _EXP_COLS))
     if ids := _uuids(by_type.get("education", [])):
         for e in (await s.scalars(select(Education).where(Education.id.in_(ids)))).all():
             lk.records[("education", str(e.id))] = education_fields(_row(e, _EDU_COLS))
@@ -302,14 +320,21 @@ async def _load(
     # 경험 → 그 경험과 바로 아래 경험 (성과 줄은 이 안의 사실에서)
     exp_ids = _uuids(by_type.get("experience", []))
     if exp_ids:
+        owner: dict[str, list[str]] = {}
         for e in exp_ids:
             lk.family[str(e)] = {str(e)}
+            real = merged.get(str(e), str(e))
+            lk.family[str(e)].add(real)
+            owner.setdefault(real, []).append(str(e))
         for child, parent in (
             await s.execute(
-                select(Experience.id, Experience.parent_id).where(Experience.parent_id.in_(exp_ids))
+                select(Experience.id, Experience.parent_id).where(
+                    Experience.parent_id.in_(_uuids(sorted(owner)))
+                )
             )
         ).all():
-            lk.family[str(parent)].add(str(child))
+            for ref_id in owner.get(str(parent), []):
+                lk.family[ref_id].add(str(child))
     if cids := _uuids(sorted(claims)):
         for c, e in (
             await s.execute(
@@ -839,6 +864,12 @@ async def delete_version(db: Database, actor: ActorContext, version_id: UUID) ->
 # ---------------------------------------------------------------- 저장 (수정 연산)
 
 
+def _exp_key(e: Experience) -> ExperienceKey:
+    return ExperienceKey(
+        e.id, e.title, e.organization, e.role, e.started_on, e.ended_on, bool(e.ongoing)
+    )
+
+
 async def _fill_all_ops(
     db: Database, actor: ActorContext, content: dict[str, Any], *, with_claims: bool
 ) -> list[dict[str, Any]]:
@@ -869,8 +900,20 @@ async def _fill_all_ops(
                 )
             )
         ).all()
+        # 합친 경험을 가리키는 항목은 합쳐 받은 경험이 이미 있는 것으로 본다.
+        old_refs = [UUID(i) for t, i in have if t == "experience"]
+        if old_refs:
+            for old, target in (
+                await s.execute(
+                    select(Experience.id, Experience.merged_into_id).where(
+                        Experience.id.in_(old_refs), Experience.merged_into_id.is_not(None)
+                    )
+                )
+            ).all():
+                have.add(("experience", str(target)))
         claims_by_exp: dict[UUID, list[str]] = {}
         if with_claims and exps:
+            seen: list[str] = []  # 같은 문장이 두 경험에 있으면 한 번만 넣는다
             for c in (
                 await s.scalars(
                     select(Claim)
@@ -882,10 +925,23 @@ async def _fill_all_ops(
                     .order_by(Claim.created_at)
                 )
             ).all():
+                if any(same_statement(c.statement, x) for x in seen):
+                    continue
+                seen.append(c.statement)
                 claims_by_exp.setdefault(c.experience_id, []).append(str(c.id))
+        placed = [_exp_key(e) for e in exps if ("experience", str(e.id)) in have]
+        placed_ids = {k.id for k in placed}
         for e in exps:
             if ("experience", str(e.id)) in have:
                 continue
+            key = _exp_key(e)
+            # 같은 경험일 수 있다고 표시된 짝이 이미 들어갔거나, 이름·곳·기간이 거의 같으면 건너뛴다.
+            if e.possible_duplicate_of in placed_ids:
+                continue
+            if best_match(key, placed)[0] == SAME:
+                continue
+            placed.append(key)
+            placed_ids.add(e.id)
             op: dict[str, Any] = {
                 "op": "add_item",
                 "section": EXPERIENCE_SECTION.get(e.kind, "activities"),
@@ -1369,6 +1425,8 @@ async def check_version(
         "version_id": str(v.id),
         "revision": prep.revision_no,
         "estimated_pages": pages,
+        # 서버 값은 어림이다 (domain.resume.estimate_pages). 미리보기는 실제로 잰 쪽 수를 쓴다.
+        "pages_estimated": True,
         "max_pages": v.max_pages,
         "blind": v.blind,
         "blind_suggested": blind_hint,
@@ -1403,9 +1461,13 @@ async def export_version(
         if fmt == "json"
         else await asyncio.to_thread(render_resume, fmt, prep.doc)
     )
+    # JSON은 키 이름("name" 28번)이 아니라 값 글만 본다 — 형식마다 같은 글을 같은 규칙으로 (검사 수가 같게)
+    inspected = _json_values_text(data) if fmt == "json" else data
     try:
         found: list[Finding] = await asyncio.to_thread(
-            inspect_export, "docx" if fmt == "docx" else ("html" if fmt == "html" else "md"), data
+            inspect_export,
+            "docx" if fmt == "docx" else ("html" if fmt == "html" else "md"),
+            inspected,
         )
     except ExportError as exc:
         raise ResumeRuleError(exc.code) from exc
@@ -1568,6 +1630,24 @@ def _period(f: dict[str, Any]) -> str | None:
     from career_core.domain.resume import period_text
 
     return period_text(f)
+
+
+def _json_values_text(data: bytes) -> bytes:
+    """JSON Resume의 글 값만 줄마다 (스키마 주소·meta 빼고). 키 이름은 보이는 글이 아니다."""
+    import json
+
+    def walk(v: Any):
+        if isinstance(v, str):
+            yield v
+        elif isinstance(v, list):
+            for x in v:
+                yield from walk(x)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                if k not in ("$schema", "meta"):
+                    yield from walk(x)
+
+    return "\n".join(walk(json.loads(data))).encode("utf-8")
 
 
 def export_text(fmt: str, data: bytes) -> str:

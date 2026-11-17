@@ -35,8 +35,10 @@ career-brain은 GitHub 레포를 받아 직접 실행한다. PyPI·npm·Docker H
 
 ```bash
 git clone https://github.com/gkrtjd99/career-brain.git && cd career-brain
-uv sync --package personal-api --no-dev            # 실행에 필요한 것만 (로컬 임베딩: --extra local-embed)
+uv sync --package personal-api --no-dev --extra pdf-render --extra korean   # 실행에 필요한 것 + 권장 선택 (아래 표)
 docker compose -f deploy/compose/compose.yaml up -d db   # 127.0.0.1:5432, 개발용 비밀번호
+cp .env.example .env                               # 모델 키 (선택). .env는 git에 올리지 않는다
+cp models.example.toml models.toml                 # 모델 설정 (선택, 없으면 모델 기능만 꺼진다: §3)
 uv run --no-sync personal-api migrate
 uv run --no-sync personal-api bootstrap            # API 토큰을 한 번만 출력한다. 안전한 곳에 보관
 uv run --no-sync personal-api demo                 # 선택: 가상 자료로 채운 데모 공간 + 그 토큰 (아래 "데모 공간")
@@ -44,6 +46,18 @@ npm ci && npm run build                            # 선택: apps/personal-web/d
 uv run --no-sync personal-api serve                # http://127.0.0.1:8000 (API + worker + 웹)
 ```
 
+설치되는 선택 기능 (2026-11-18 확인):
+
+| 명령 | 들어가는 선택(extra) |
+|---|---|
+| `uv sync --package personal-api --no-dev` | 없음 — 모델 SDK(`llm`)와 uvicorn만. 스캔·깨진 PDF의 PDFium 글(`pdf-render`), 형태소 분석(`korean`), 로컬 임베딩(`local-embed`), 외부 OAuth(`oauth`), 내보내기 암호화(`age`)는 **들어가지 않는다** |
+| 위 명령 + `--extra pdf-render --extra korean` | 권장. 쓸 것만 더한다: `--extra local-embed`, `--extra oauth`, `--extra age`, `--extra browser`(그 뒤 `playwright install chromium`) |
+| `uv sync` (개발, 레포 루트) | `local-embed`·`oauth`·`age`·`pdf-render`·`korean` + 개발 도구 |
+
+- `korean`은 설치만으로 켜지지 않는다: `.env`에 `CAREER_KOREAN_ANALYZER=kiwi` ([search.md](../architecture/search.md)).
+- `serve`·`migrate` 등은 `uv run --no-sync`로 부른다. `--no-sync`를 빼면 uv가 레포 루트 기준(개발 의존성 포함)으로 다시 맞춘다.
+- `.env`·`models.toml`은 레포 루트(실행하는 폴더)에서 읽는다. 다른 위치는 `CAREER_ENV_FILE`·`CAREER_MODELS_CONFIG`. 키는 `models.toml`에 넣지 않고 `.env`에 둔다.
+- `npm ci`(npm 11)의 `npm warn allow-scripts … tesseract.js … (postinstall: opencollective-postinstall || true)` 경고는 무시해도 된다: 후원 안내를 출력하는 스크립트라 실행되지 않아도 빌드·OCR에 영향이 없다 (`fsevents`도 macOS 선택 의존성).
 - 레포 루트에서 실행하면 `apps/personal-web/dist`가 있을 때 웹 앱을 같이 내준다. 다른 폴더는 `CAREER_WEB_DIR`.
 - 개발(`uv sync`, `uv run pytest`, `npm run dev`)은 [README](../../README.md#개발).
 - 개발용 DB(`deploy/compose`)의 비밀번호는 공개된 값이다. 이 기계 밖으로 포트를 열지 않는다.

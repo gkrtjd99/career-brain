@@ -101,6 +101,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0047 | `schema_step` | 새 표 `resume_versions`·`resume_revisions`·`resume_line_claims` (옛 묶음엔 빈 표). 본문 해시는 ID 칸을 빼고 만들어 새 ID로 복원해도 근거 상태가 그대로다 |
 | c0048 | `schema_step` | 새 표 `interview_preps`·`interview_prep_questions` (옛 묶음엔 빈 표). 합치기는 DB UNIQUE: 지원마다 준비 하나, 준비 안의 출처 열쇠(`source_key`) |
 | c0049 | `schema_step` | 새 표 `portfolio_items`·`portfolio_item_revisions`·`portfolio_line_claims`·`portfolio_images`·`portfolio_bundles`·`portfolio_bundle_items` (옛 묶음엔 빈 표). 이미지 바이트는 `blob_key`로 `blobs/`에 들어가 복원 후 sha256이 같다. `github_tokens`는 묶음에 넣지 않는다 |
+| c0050 | `schema_step` | `experiences.merged_into_id`·`merged_at`·`possible_duplicate_of = null` (옛 자료엔 합친 경험·같은 경험 표시가 없다), `extraction_runs.experiences_matched = 0`·`claims_attached = 0`·`suggestions = {}`. 두 경험 FK는 자기 표를 가리키므로 `DEFERRABLE INITIALLY IMMEDIATE`(복원 중 순서 무관) |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -278,8 +279,8 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `applications` | same_except | 제목·상태·결과 메모·제출 시각·`updated_at` | 지원은 진행하며 상태·메모가 바뀐다. 공고·공고 버전·만든 시각이 정체 |
   | `application_documents` | same_except | 제목·문항·제한·세는 규칙·현재 revision·`updated_at` | UNIQUE(지원, 문항 번호)는 문항 없는 문서(NULL)에 안 걸린다 |
   | `application_stages` | same_except | 순서·이름·일정·결과·결정 시각·메모·`updated_at` | 단계 기록을 고친다. 지원·제출본·종류·만든 시각이 정체 |
-  | `extraction_runs`·`job_fetch_runs` | same_except | 상태·결과 수·오류·메모·`updated_at` | 실행하며 채워지는 칸 |
-  | `experiences` | same_except | 상태·`updated_at`·종류·상위·시작/끝 달·진행 중·태그(c0031) | 확인과 정리(종류·상하·날짜·태그)만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행) |
+  | `extraction_runs`·`job_fetch_runs` | same_except | 상태·결과 수·오류·메모·`updated_at`, 추출의 `experiences_matched`·`claims_attached`·`suggestions`(c0050) | 실행하며 채워지는 칸 |
+  | `experiences` | same_except | 상태·`updated_at`·종류·상위·시작/끝 달·진행 중·태그(c0031), 합친 곳·합친 시각·같은 경험일 수 있음(c0050) | 확인과 정리(종류·상하·날짜·태그)만 바뀐다고 본다 (제목·조직·역할을 고치면 다른 행) |
   | `claims` | same_except | 상태·확인한 사람·확인 시각·`updated_at` | 문장·종류·기여가 정체 |
   | `company_pages` | same_except | 상태·오류·HTTP 상태·방식·최종 주소·제목·글·해시·가져온 시각·모델 호출·후보 수·메모·`updated_at` (c0033) | 가져오기 작업이 채우는 칸. 회사·입력 종류·주소·요청자·만든 시각이 정체 |
   | `company_facts` | same_except | 상태·확인한 사람·확인 시각·기준일·기준일 단위·`updated_at` (c0033) | 종류·본문·인용·인용 위치가 정체 (본문이나 인용을 고치면 다른 행) |

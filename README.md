@@ -47,8 +47,9 @@ http://127.0.0.1:8000 을 열고 설정 화면에 토큰을 넣는다. 인터넷
 **로컬 (uv)**
 
 ```bash
-uv sync --package personal-api --no-dev                  # 로컬 임베딩까지: --extra local-embed
+uv sync --package personal-api --no-dev --extra pdf-render --extra korean   # 선택 기능: install.md §1
 docker compose -f deploy/compose/compose.yaml up -d db   # 개발용 DB (127.0.0.1)
+cp .env.example .env && cp models.example.toml models.toml   # 선택: 모델 키·설정
 uv run --no-sync personal-api migrate
 uv run --no-sync personal-api bootstrap                  # 또는 demo
 npm ci && npm run build                                  # 웹 화면

@@ -25,6 +25,7 @@ from career_core.domain.postings import (
     MAX_CHOICE_OPTIONS,
     FieldName,
     classify_heading,
+    clean_question,
     is_heading_line,
 )
 
@@ -452,12 +453,12 @@ def _greeting_questions(data: dict) -> tuple[list[dict], list[int]]:
         prompt = q.get("question")
         if q.get("type") != GREETING_FREE_TEXT or not isinstance(prompt, str):
             continue
-        prompt = " ".join(prompt.split())[:1000]
+        prompt, paren = clean_question(prompt[:1000])
         if not prompt:
             continue
         limit = q.get("maxLength")
         ok = isinstance(limit, int) and not isinstance(limit, bool) and 0 < limit <= 100_000
-        out.append({"prompt": prompt, "char_limit": limit if ok else None})
+        out.append({"prompt": prompt, "char_limit": limit if ok else paren})
         index.append(i)
         if len(out) >= MAX_QUESTIONS:
             break

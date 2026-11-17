@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -914,6 +915,24 @@ def _gpa(f: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _title_role(f: Mapping[str, Any]) -> str | None:
+    """둘째 줄 "제목 · 역할". 조직이 없으면 제목이 첫 줄이라 역할만. 제목과 역할이 같으면 한 번만
+    ("백엔드 엔지니어 · 백엔드 엔지니어" → "백엔드 엔지니어"), 첫 줄과 같은 글도 되풀이하지 않는다."""
+    primary = f.get("organization") or f.get("title") or ""
+    parts: list[str] = []
+    for v in (f.get("title") if f.get("organization") else None, f.get("role")):
+        v = (v or "").strip()
+        if not v:
+            continue
+        key = " ".join(v.split()).casefold()
+        if key == " ".join(primary.split()).casefold() or key in (
+            " ".join(p.split()).casefold() for p in parts
+        ):
+            continue
+        parts.append(v)
+    return " · ".join(parts) or None
+
+
 def render_item(
     kind: str,
     item: Mapping[str, Any],
@@ -928,10 +947,7 @@ def render_item(
         return RenderItem(
             period=period_text(f),
             primary=f.get("organization") or f.get("title") or "",
-            secondary=" · ".join(
-                v for v in (f.get("title") if f.get("organization") else None, f.get("role")) if v
-            )
-            or None,
+            secondary=_title_role(f),
             lines=lines,
             tags=tuple(f.get("tags") or ()),
             ref_id=item["ref"]["id"],
@@ -969,10 +985,7 @@ def render_item(
     return RenderItem(
         period=f.get("period_text"),
         primary=f.get("organization") or f.get("title") or "",
-        secondary=" · ".join(
-            v for v in (f.get("title") if f.get("organization") else None, f.get("role")) if v
-        )
-        or None,
+        secondary=_title_role(f),
         tertiary=f.get("detail"),
         lines=lines,
     )
@@ -1063,26 +1076,157 @@ def build_render(
     )
 
 
-# 쪽 수 어림 (서버 검사·MCP용). 화면은 미리보기에서 실제로 잰 쪽 수를 쓴다.
-_CHARS_PER_LINE = {"one_column": 52, "two_column": 40, "korean_table": 30}
-_LINES_PER_PAGE = 46
+# 쪽 수 어림 (서버 검사·MCP용). 화면은 미리보기에서 실제로 잰 쪽 수를 쓴다 (``PAGINATE_JS``의 ``data-pages``).
+#
+# 인쇄용 HTML(``domain.resume_export._CSS``)과 같은 치수로 블록 높이를 mm로 어림하고, 같은 쪽 나눔 규칙(블록이
+# 넘치면 다음 쪽, 제목·항목 머리는 다음 블록과 함께)으로 쪽을 센다. 글자 폭은 글꼴을 모르므로 대략이다
+# (한글 0.88em, 영문·숫자 0.53em, 공백 0.28em, 낱말 단위 줄 바꿈 ``word-break: keep-all``). 2026-11-18에
+# Chrome 인쇄와 견주어 맞췄다 (docs/architecture/web.md 이력서). 그래도 어림이라 API는 ``pages_estimated: true``를 준다.
+_PAGE_H = 297.0 - 16 - 18  # mm, .page 위아래 여백을 뺀 높이
+_PAGE_W = 210.0 - 17 * 2
+_PT = 25.4 / 72
+_BODY_LINE = 10 * 1.55 * _PT  # 본문 10pt, 줄 높이 1.55
+_B = 1.2  # .b padding-bottom
+
+
+def _em(ch: str) -> float:
+    if ch == " ":
+        return 0.28
+    if ord(ch) >= 0x1100 and unicodedata.east_asian_width(ch) in ("W", "F"):
+        return 0.88
+    return 0.53
+
+
+def _lines(text: str, width_mm: float, size_pt: float = 10.0) -> int:
+    """낱말 단위로 줄을 채운 줄 수 (긴 낱말은 글자 단위로 꺾인다: overflow-wrap: anywhere)."""
+    if not text:
+        return 0
+    em = size_pt * _PT
+    room = width_mm / em
+    lines, used = 1, 0.0
+    for word in text.split(" "):
+        w = sum(_em(c) for c in word)
+        gap = 0.28 if used else 0.0
+        if used + gap + w <= room:
+            used += gap + w
+            continue
+        if used:
+            lines += 1
+        while w > room:  # 아주 긴 낱말
+            lines += 1
+            w -= room
+        used = w
+    return lines
+
+
+def _paginate(blocks: list[tuple[float, bool]]) -> int:
+    """``PAGINATE_JS``와 같은 규칙: 넘치는 블록은 다음 쪽으로, 바로 앞의 keep 블록(제목·항목 머리)도 같이.
+    쪽에 그 블록들뿐이면 넘쳐도 그 쪽에 둔다."""
+    pages = 1
+    page: list[tuple[float, bool]] = []
+    for h, keep in blocks:
+        page.append((h, keep))
+        if sum(x for x, _ in page) <= _PAGE_H + 0.3:
+            continue
+        carry = [page[-1]]
+        for prev in reversed(page[:-1]):
+            if not prev[1]:
+                break
+            carry.insert(0, prev)
+        if len(carry) == len(page):
+            continue
+        pages += 1
+        page = carry
+    return pages
+
+
+def _blocks_one(doc: RenderDoc) -> list[tuple[float, bool]]:
+    out: list[tuple[float, bool]] = []
+    p = doc.profile
+    if p is not None:
+        text_w = _PAGE_W - (36 if p.photo else 0)
+        h = 20 * 1.25 * _PT
+        if p.headline:
+            h += 1.5 + _lines(p.headline, text_w, 11) * 11 * 1.55 * _PT
+        contact = [v for v in (p.email, p.phone, p.address, p.birth_date, p.military) if v]
+        contact += [f"{lab} {url}" if lab else url for lab, url in p.links]
+        if contact:
+            h += 2 + _lines(" · ".join(contact), text_w) * _BODY_LINE
+        out.append((max(h, 40.0 if p.photo else 0.0) + 5 + _B, False))
+    for sec in doc.sections:
+        out.append((4 + 1.5 + 11.5 * 1.55 * _PT + 0.3 + 2 + _B, True))
+        if sec.kind == "skills":
+            text = " · ".join(it.primary for it in sec.items if it.primary)
+            out.append((_lines(text, _PAGE_W) * 10 * 1.7 * _PT + _B, False))
+            continue
+        for it in sec.items:
+            h = 1.5 + 10.5 * 1.55 * _PT
+            sub = " · ".join(v for v in (it.secondary, it.tertiary) if v)
+            h += _lines(sub, _PAGE_W) * _BODY_LINE
+            if it.tags and sec.kind == "project":
+                h += _lines(", ".join(it.tags), _PAGE_W, 9) * 9 * 1.55 * _PT
+            out.append((h + _B, bool(it.lines)))
+            out.extend((_lines(ln, _PAGE_W - 4) * _BODY_LINE + _B, False) for ln in it.lines)
+    return out
+
+
+def _blocks_two(doc: RenderDoc) -> list[tuple[float, bool]]:
+    out = _blocks_one(RenderDoc(doc.title, doc.template, doc.blind, doc.profile, ()))
+    cell = _PAGE_W - 30 - 5
+    for sec in doc.sections:
+        if sec.kind == "skills":
+            text = " · ".join(it.primary for it in sec.items if it.primary)
+            out.append((5 + 2 + _lines(text, cell) * 10 * 1.7 * _PT + _B, False))
+            continue
+        for n, it in enumerate(sec.items):
+            h = (5.3 if n == 0 else 3.7) + 10.5 * 1.55 * _PT
+            sub = " · ".join(v for v in (it.secondary, it.tertiary) if v)
+            h += _lines(sub, cell) * _BODY_LINE
+            if it.tags and sec.kind == "project":
+                h += _lines(", ".join(it.tags), cell, 9) * 9 * 1.55 * _PT
+            h += sum(_lines(ln, cell - 4) * _BODY_LINE + 0.4 for ln in it.lines)
+            out.append((h + _B, False))
+    return out
+
+
+def _blocks_table(doc: RenderDoc) -> list[tuple[float, bool]]:
+    out: list[tuple[float, bool]] = [(20 * 1.55 * _PT + 8 + _B, False)]
+    p = doc.profile
+    if p is not None:
+        rows = 3 + sum(bool(v) for v in (p.birth_date, p.address, p.military, p.links))
+        out.append((rows * (_BODY_LINE + 3.4) + 5 + _B, False))
+        if p.headline:
+            out.append((_lines(p.headline, _PAGE_W, 11) * 11 * 1.55 * _PT + _B, False))
+    cols = (27 - 4, 44 - 4, 38 - 4, _PAGE_W - 27 - 44 - 38 - 4)
+    for sec in doc.sections:
+        head = 3 + 1.5 + 11 * 1.55 * _PT
+        if sec.kind == "skills":
+            out.append((head + _B, True))
+            text = " · ".join(it.primary for it in sec.items if it.primary)
+            out.append((_lines(text, _PAGE_W - 4) * _BODY_LINE + 2.8 + _B, False))
+            continue
+        out.append((head + _BODY_LINE + 2.8 + _B, True))
+        for it in sec.items:
+            last = ([it.tertiary] if it.tertiary else []) + list(it.lines)
+            n = max(
+                _lines(it.period or "", cols[0]),
+                _lines(it.primary, cols[1]),
+                _lines(it.secondary or "", cols[2]),
+                sum(_lines(x, cols[3]) for x in last),
+                1,
+            )
+            out.append((n * _BODY_LINE + 2.8 + 0.6 * max(0, len(last) - 1) + _B, False))
+    return out
 
 
 def estimate_pages(doc: RenderDoc) -> int:
-    per = _CHARS_PER_LINE.get(doc.template, 52)
-    rows = 0.0
-    if doc.profile:
-        rows += 7 if doc.template == "korean_table" else 5
-    for sec in doc.sections:
-        rows += 2.5
-        if sec.kind == "skills":
-            rows += max(1, -(-sum(len(i.primary) + 3 for i in sec.items) // per))
-            continue
-        for it in sec.items:
-            rows += 1.6 if it.secondary or it.tertiary else 1.2
-            for ln in it.lines:
-                rows += max(1, -(-len(ln) // per))
-    return max(1, -(-int(rows) // _LINES_PER_PAGE))
+    if doc.template == "two_column":
+        blocks = _blocks_two(doc)
+    elif doc.template == "korean_table":
+        blocks = _blocks_table(doc)
+    else:
+        blocks = _blocks_one(doc)
+    return _paginate(blocks) if blocks else 1
 
 
 __all__ = [

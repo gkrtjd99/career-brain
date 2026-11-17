@@ -23,6 +23,7 @@ from sqlalchemy import select
 from career_core.db.models import Claim, Credential, Experience
 from career_core.db.session import Database
 from career_core.domain.brain import CONFIRMED_STATUSES
+from career_core.domain.experience_match import skill_tags
 from career_core.domain.korean import (
     MAX_ALIAS_CHARS,
     TechAliases,
@@ -183,8 +184,10 @@ async def skills_overview(
         return g
 
     tag_names: dict[str, str] = {}
+    # 전공·학위·자격증 이름·경험 제목(프로젝트 이름)인 태그는 기술로 세지 않는다 (옛 추출이 단 태그 포함)
+    titles = [e.title for e in exps]
     for e in exps:
-        for tag in e.tags or []:
+        for tag in skill_tags(e.tags or [], titles=titles):
             canon = aliases.canonical(tag)
             add(canon, tag).exps.setdefault(e.id, set()).add("tag")
             if canon not in aliases.table:

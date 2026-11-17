@@ -1602,6 +1602,22 @@ def _c0049_portfolio(arc) -> None:
     )
 
 
+@schema_step(
+    "c0050",
+    "같은 경험 합치기: experiences.merged_into_id·merged_at·possible_duplicate_of(null), "
+    "extraction_runs.experiences_matched·claims_attached(0)·suggestions({})",
+)
+def _c0050_experience_merge(arc) -> None:
+    if arc.has("core.experiences"):
+        arc.add_columns(
+            "core.experiences", merged_into_id=None, merged_at=None, possible_duplicate_of=None
+        )
+    if arc.has("core.extraction_runs"):
+        arc.add_columns(
+            "core.extraction_runs", experiences_matched=0, claims_attached=0, suggestions={}
+        )
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2464,6 +2480,10 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "experiences_created",
                 "claims_created",
                 "claims_dropped",
+                # c0050
+                "experiences_matched",
+                "claims_attached",
+                "suggestions",
                 "updated_at",
             )
         ),
@@ -2482,6 +2502,10 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "ended_on",
                 "ongoing",
                 "tags",
+                # c0050: 합치기·"같은 경험일 수 있음" 표시는 정리하며 바뀐다
+                "merged_into_id",
+                "merged_at",
+                "possible_duplicate_of",
             ),
             ("title", "organization", "role", "period_text"),
         ),

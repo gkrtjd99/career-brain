@@ -589,11 +589,23 @@ def tech_terms(text: str) -> list[str]:
     )
 
 
+# 요건에서 무엇을 하는 일인지 꾸미기만 하는 말 ("정산 도메인 경험", "물류 분야 경력"). 다른 낱말이 있으면 판정에서 뺀다
+# ("정산"만 있으면 맞은 것으로 본다). 이 말뿐인 요건이면 그대로 쓴다.
+REQUIREMENT_QUALIFIERS = frozenset(
+    ["도메인", "분야", "업계", "산업", "업무", "관련", "직무", "실무"]
+)
+
+
+def _drop_qualifiers(words: Sequence[str]) -> tuple[str, ...]:
+    kept = tuple(w for w in words if w not in REQUIREMENT_QUALIFIERS)
+    return kept or tuple(words)
+
+
 def key_terms(requirement: str) -> Terms:
     latin = tech_terms(requirement)
     if latin:
         return Terms(tuple(latin), True)
-    words = tuple(dict.fromkeys(korean_terms(requirement)))
+    words = _drop_qualifiers(tuple(dict.fromkeys(korean_terms(requirement))))
     analyzer = korean_analyzer()
     if not analyzer.morphological:
         return Terms(words, False)
@@ -602,7 +614,7 @@ def key_terms(requirement: str) -> Terms:
     chunks = [m.span() for m in _HANGUL_CHUNK.finditer(requirement or "")]
     by_chunk: dict[int, list[str]] = {}
     for w, start, _ in analyzer.content_spans(requirement):
-        if len(w) < 2 or w in KO_STOPWORDS:
+        if len(w) < 2 or w in KO_STOPWORDS or (w in REQUIREMENT_QUALIFIERS and w not in words):
             continue
         at = next((i for i, (a, b) in enumerate(chunks) if a <= start < b), -1 - start)
         if w not in by_chunk.setdefault(at, []):
