@@ -25,8 +25,22 @@
      - 같은 줄이 여러 목록(주요 업무·자격·우대·절차)에 들어가면 한 곳만 남긴다: 줄에 "우대"·"preferred"·"a plus"가 있으면 우대, 아니면 원문에서 그 줄 바로 앞의 섹션 제목, 그래도 모르면 앞 목록. 한 목록 안의 중복도 뺀다. `notes`의 `llm_deduped:N`.
      - 제목이 페이지 제목의 조각("SW 개발")이고 페이지 제목이 `회사｜[...] 직무` 꼴이면, 그 조각을 담은 부분에서 회사 이름·"채용 공고" 같은 꼬리를 뺀 더 긴 제목("[2026 하반기] SW 개발 직무")으로 넓힌다. 넓힌 값도 본문에서 인용으로 찾아야 쓴다.
 6. 버전 — 본문 해시가 같으면 새 버전도 LLM 호출도 없다 (`unchanged`). 확정한 공고가 바뀌면 `changed_fields` → `pending_changes`; 확정 값은 사용자가 다시 확인할 때까지 그대로.
-7. `POST .../confirm {version_id?, overrides, clear}` — 사용자가 고친 값은 근거 `user`. 마감은 ISO 날짜/시각 또는 `always`.
+7. `POST .../confirm {version_id?, overrides, clear}` — 사용자가 고친 값은 근거 `user`. 마감은 ISO 날짜/시각 또는 `always`, 접수 시작(`opens_at`)은 ISO 날짜/시각.
 8. 실패(`login_required`, `rate_limited`, `source_unavailable`, `too_large`, `unsupported_content`…)는 마감이 아니다. `POST .../manual-text`로 본문을 붙여넣을 수 있다.
+
+## 접수 시작·접수 상태·채용 시기
+
+- **접수 시작 `opens_at`** (항목, `fields`/`extracted` JSONB의 키 — 스키마 변경 없음): 원문이 접수 시작을 적었을 때만 채운다. 나인하이어 `reception.startAt`, 그리팅 `openingsInfo.openDate`(화면의 접수 기간 시작), LLM은 인용 안에 그 월·일 숫자가 있을 때만. 게시일(`posted_at`)·`createdAt`·오늘 날짜로 채우지 않는다. `always`는 받지 않는다. JSON-LD에는 접수 시작이 없다 (`jobStartDate`는 입사일이다).
+- **접수 상태 `lifecycle`** (목록·상세 응답, 저장하지 않고 요청마다 계산): 공간 표시 시간대(설정, 없으면 Asia/Seoul — 오늘 화면·복습과 같은 `workspace_zone`) 기준.
+  1. 마감이 지났으면 `closed`. 날짜만 있는 마감은 그날 끝(다음 날 0시)까지 접수 중, 시각이 있으면 그 시각까지. 시간대 없는 시각은 공간 시간대의 벽시계.
+  2. 접수 시작 전이면 `upcoming` (날짜만 있으면 그날 0시부터 시작).
+  3. 마감이 `always`면 `always`.
+  4. 마감이 있으면 `open`.
+  5. 마감이 없으면 `unknown` — 시작만 지난 공고도 여기다 (접수 중으로 단정하지 않는다). 가져오기 실패도 `unknown`이지 마감이 아니다.
+- **채용 시기 `season`**: `"2026-H1"`(1–6월)·`"2026-H2"`(7–12월). 마감 날짜 → 접수 시작 → 저장(없으면 추가)한 날 순으로 본다. 화면은 "2026 상반기"로 보인다.
+- `GET /core/job-postings?lifecycle=&status=` — 거름이 없으면 예전처럼 추가한 순 전체. `lifecycle`을 주면 그 상태만, 상태별 순서로: `open` 마감 가까운 순, `upcoming` 시작 가까운 순, `closed` 최근 마감 순, `always`·`unknown` 최근 저장 순. 모르는 값은 422 `invalid_lifecycle`·`invalid_status`.
+- **지원 요약 `application`** (목록·상세): `{id, status, questions, answered, submitted_at, stage}`. 지원이 여럿이면 철회하지 않은 가장 최근 것. `stage`는 지원 목록의 지금 전형 단계(아래)와 같다. `applications.read`가 없는 행위자에게는 `null`.
+- **한꺼번에 보관** `POST /core/job-postings/archive {ids}`·`POST /core/job-postings/unarchive {ids}` (`jobs.write`, 최대 200개) → `{changed: [id…]}`. 이 공간의 것만 바뀐다 (다른 공간 id는 조용히 0건). 보관을 풀면 저장한 적이 있는 공고는 `saved`, 아니면 `draft`.
 
 ## 채용 시스템 어댑터
 

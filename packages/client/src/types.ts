@@ -473,6 +473,7 @@ export const POSTING_FIELDS = [
   "employment_type",
   "career_level",
   "deadline",
+  "opens_at",
   "posted_at",
   "responsibilities",
   "requirements",
@@ -542,6 +543,34 @@ export interface PostingSummary {
   saved_at: IsoDateTime | null;
   /** c0033: 이은 회사 (회사 조사, 없으면 null) */
   company_id?: Uuid | null;
+  /** 접수 시작 (원문에 적혀 있을 때만, ISO 날짜/시각) */
+  opens_at?: string | null;
+  /** 접수 상태 (공간 시간대로 서버가 계산) */
+  lifecycle?: PostingLifecycle;
+  /** 채용 시기 "2026-H1"(1–6월) · "2026-H2"(7–12월). 마감 → 접수 시작 → 저장한 날 */
+  season?: string | null;
+  /** 이 공고의 지원 요약 (없으면 null) */
+  application?: PostingApplication | null;
+}
+
+export type PostingLifecycle = "upcoming" | "open" | "always" | "closed" | "unknown";
+
+/** 지금 전형 단계 (결과 전인 첫 단계, 다 끝났으면 마지막 단계) */
+export interface CurrentStage {
+  kind: StageKind;
+  name: string;
+  outcome: StageOutcome;
+  scheduled_at: IsoDateTime | null;
+}
+
+export interface PostingApplication {
+  id: Uuid;
+  status: ApplicationStatus;
+  /** 자기소개서 문항 수와 그중 글이 있는 수 */
+  questions: number;
+  answered: number;
+  submitted_at: IsoDateTime | null;
+  stage: CurrentStage | null;
 }
 
 /** 비전 호출 비용 확인 요청 (c0025). 금액은 USD 문자열, 토큰은 추정값 */
@@ -622,6 +651,9 @@ export interface Posting {
   runs: FetchRun[];
   /** c0033: 이은 회사 (회사 조사, 없으면 null) */
   company_id?: Uuid | null;
+  lifecycle?: PostingLifecycle;
+  season?: string | null;
+  application?: PostingApplication | null;
 }
 
 export interface ConfirmPostingIn {
@@ -731,6 +763,8 @@ export interface ApplicationSummary {
   /** 공고 문항 문서 수와 그중 아직 글이 없는 수 */
   questions: number;
   unwritten: number;
+  /** 지금 전형 단계 (제출본에 묶인 단계가 없으면 null) */
+  stage?: CurrentStage | null;
 }
 
 export interface DocumentSummary {

@@ -32,6 +32,17 @@ class SaveOut(BaseModel):
     error: str | None
 
 
+class PostingApplicationOut(BaseModel):
+    """이 공고의 지원 요약 (지원이 없으면 null)."""
+
+    id: UUID
+    status: str
+    questions: int
+    answered: int
+    submitted_at: datetime | None
+    stage: dict | None = None
+
+
 class SummaryOut(BaseModel):
     id: UUID
     canonical_url: str
@@ -45,6 +56,10 @@ class SummaryOut(BaseModel):
     created_at: datetime | None
     saved_at: datetime | None
     company_id: UUID | None = None  # c0033 (O13) 이은 회사
+    opens_at: str | None = None  # 접수 시작 (원문에 있을 때만)
+    lifecycle: str = "unknown"  # upcoming | open | always | closed | unknown (공간 시간대로 계산)
+    season: str | None = None  # 채용 시기 "2026-H2"
+    application: PostingApplicationOut | None = None
 
 
 class CostPartOut(BaseModel):
@@ -120,6 +135,9 @@ class PostingOut(BaseModel):
     latest: VersionOut | None
     runs: list[RunOut]
     company_id: UUID | None = None  # c0033 (O13) 이은 회사
+    lifecycle: str = "unknown"
+    season: str | None = None
+    application: PostingApplicationOut | None = None
 
 
 class ConfirmIn(BaseModel):
@@ -135,6 +153,14 @@ class ManualIn(BaseModel):
 class StatusOut(BaseModel):
     id: UUID
     status: str
+
+
+class BulkIn(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=uc.MAX_BULK)
+
+
+class BulkOut(BaseModel):
+    changed: list[UUID]
 
 
 def _rule(exc: PostingRuleError) -> HTTPException:
@@ -155,11 +181,22 @@ def add_posting_routes(router: APIRouter, deps, authorize) -> None:
         return [SaveOut.model_validate(r, from_attributes=True) for r in results]
 
     @router.get("/job-postings", response_model=list[SummaryOut])
-    async def index(actor: reader) -> list[SummaryOut]:
-        return [
-            SummaryOut.model_validate(p, from_attributes=True)
-            for p in await uc.list_postings(db, actor)
-        ]
+    async def index(
+        actor: reader, lifecycle: str | None = None, status: str | None = None
+    ) -> list[SummaryOut]:
+        try:
+            rows = await uc.list_postings(db, actor, lifecycle=lifecycle, status=status)
+        except PostingRuleError as exc:
+            raise _rule(exc) from exc
+        return [SummaryOut.model_validate(p, from_attributes=True) for p in rows]
+
+    @router.post("/job-postings/archive", response_model=BulkOut)
+    async def archive_many(actor: writer, body: BulkIn) -> BulkOut:
+        return BulkOut(changed=await uc.archive_postings(db, actor, body.ids))
+
+    @router.post("/job-postings/unarchive", response_model=BulkOut)
+    async def unarchive_many(actor: writer, body: BulkIn) -> BulkOut:
+        return BulkOut(changed=await uc.archive_postings(db, actor, body.ids, archived=False))
 
     @router.get("/job-postings/{posting_id}", response_model=PostingOut)
     async def detail(actor: reader, posting_id: UUID) -> PostingOut:

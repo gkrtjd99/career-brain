@@ -11,6 +11,7 @@ from __future__ import annotations
 import ipaddress
 import re
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
@@ -53,6 +54,8 @@ class FieldName(StrEnum):
     EMPLOYMENT_TYPE = "employment_type"
     CAREER_LEVEL = "career_level"
     DEADLINE = "deadline"  # ISO 8601 날짜/시각, 또는 상시채용이면 "always"
+    # 접수 시작 (ISO 8601 날짜/시각). 원문이 접수 시작을 적었을 때만 채운다 — 게시일에서 추측하지 않는다
+    OPENS_AT = "opens_at"
     POSTED_AT = "posted_at"
     RESPONSIBILITIES = "responsibilities"  # 목록
     REQUIREMENTS = "requirements"  # 목록
@@ -81,6 +84,16 @@ TRACKING_PARAMS = re.compile(
     r"trackingId|from|share|si)$",
     re.IGNORECASE,
 )
+
+
+class Lifecycle(StrEnum):
+    """공고의 접수 상태 (저장한 값과 지금 시각으로 계산한다. 저장하지 않는다)."""
+
+    UPCOMING = "upcoming"  # 접수 시작 전
+    OPEN = "open"  # 접수 중 (마감이 오늘이거나 뒤)
+    ALWAYS = "always"  # 상시 채용
+    CLOSED = "closed"  # 마감이 지남
+    UNKNOWN = "unknown"  # 마감일이 없다 (가져오기 실패 포함: 실패는 마감이 아니다)
 
 
 class PostingRuleError(ValueError):
@@ -335,3 +348,65 @@ def is_heading_line(line: str) -> bool:
     if classify_heading(text) is not None:
         return True
     return bool(re.match(r"^[\[【<〈■□▶▷◆◇●○◎#].*", text)) and not text.endswith((".", "다"))
+
+
+# --- 접수 상태·시기 ------------------------------------------------------------------
+#
+# 날짜만 있는 값은 공간 표시 시간대의 그날로 본다: 마감 "2026-11-30"은 그날 끝(다음 날 0시 직전)까지 접수 중,
+# 접수 시작 "2026-12-01"은 그날 0시부터. 시각이 있는 값은 그 시각 그대로 (시간대가 없으면 공간 시간대).
+
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_when(value: object) -> date | datetime | None:
+    if not isinstance(value, str) or not value.strip() or value == "always":
+        return None
+    v = value.strip()
+    try:
+        return date.fromisoformat(v) if _ISO_DATE.match(v) else datetime.fromisoformat(v)
+    except ValueError:
+        return None
+
+
+def posting_moment(value: object, tz, *, end_of_day: bool = False) -> datetime | None:
+    """마감·접수 시작 값 → 시각(시간대 있음). 날짜만 있으면 그날 0시, ``end_of_day``면 다음 날 0시."""
+    when = _parse_when(value)
+    if when is None:
+        return None
+    if isinstance(when, datetime):
+        return when if when.tzinfo else when.replace(tzinfo=tz)
+    day = when + timedelta(days=1) if end_of_day else when
+    return datetime.combine(day, time(0), tzinfo=tz)
+
+
+def posting_lifecycle(deadline: object, opens_at: object, now: datetime, tz) -> Lifecycle:
+    """마감 지남 → 마감, 접수 시작 전 → 접수 예정, 상시 → 상시, 마감 전 → 접수 중, 마감일 없음 → 모름."""
+    close = posting_moment(deadline, tz, end_of_day=True)
+    if close is not None and now >= close:
+        return Lifecycle.CLOSED
+    start = posting_moment(opens_at, tz)
+    if start is not None and now < start:
+        return Lifecycle.UPCOMING
+    if deadline == "always":
+        return Lifecycle.ALWAYS
+    if close is not None:
+        return Lifecycle.OPEN
+    return Lifecycle.UNKNOWN
+
+
+def posting_season(deadline: object, opens_at: object, fallback: datetime | None, tz) -> str | None:
+    """채용 시기 "2026-H1"(1–6월)·"2026-H2"(7–12월). 마감 → 접수 시작 → 저장(추가)한 날 순으로 본다."""
+    day: date | None = None
+    for value in (deadline, opens_at):
+        when = _parse_when(value)
+        if isinstance(when, datetime):
+            day = (when if when.tzinfo else when.replace(tzinfo=tz)).astimezone(tz).date()
+        elif when is not None:
+            day = when
+        if day is not None:
+            break
+    if day is None and fallback is not None:
+        day = fallback.astimezone(tz).date()
+    if day is None:
+        return None
+    return f"{day.year}-H{1 if day.month <= 6 else 2}"

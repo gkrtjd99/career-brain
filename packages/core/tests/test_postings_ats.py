@@ -492,6 +492,7 @@ async def test_greenhouse_hosted_page(db, env):
     assert got["location"] == "Seoul, Korea"
     assert got["deadline"] == "2026-12-15"  # 날짜만이면 날짜만 (자정으로 바꾸지 않는다)
     assert got["posted_at"] == "2026-11-02T09:00:00-05:00"
+    assert "opens_at" not in got  # 게시일을 접수 시작으로 쓰지 않는다
     assert got["responsibilities"] == ["Build the fake payments API", "Operate batch jobs"]
     assert got["requirements"] == [
         "3+ years of Python",
@@ -512,6 +513,8 @@ async def test_greeting_page(db, env):
     got = values(view)
     assert got["title"] == "백엔드 개발자" and got["company"] == "가상그리팅 채용"
     assert got["deadline"] == "2026-11-30T14:59:59+00:00"
+    assert got["opens_at"] == "2026-11-01T00:00:00+00:00"  # 접수 기간 시작 (openDate)
+    assert refs(view)["opens_at"] == "greeting:opening.openingsInfo.openDate"
     assert got["location"] == "서울특별시 가상구 합성로 1"
     assert (got["employment_type"], got["career_level"]) == ("정규직", "경력 3년 이상")
     # "자격 요건" 아래 소제목([경험]·[스킬])은 같은 섹션

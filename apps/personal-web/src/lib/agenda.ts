@@ -11,7 +11,7 @@ import { CREDENTIAL_KIND_LABEL } from "./credentials";
 import { ASSESSMENT_KIND, STAGE_KIND } from "./labels";
 
 /** 오늘 화면 달력·일정의 한 칸. 날짜는 표시 시간대의 YYYY-MM-DD. */
-export type AgendaKind = "deadline" | "stage" | "test" | "expiry";
+export type AgendaKind = "deadline" | "opens" | "stage" | "test" | "expiry";
 
 export interface AgendaEvent {
   key: string;
@@ -28,6 +28,7 @@ export interface AgendaEvent {
 
 export const AGENDA_KIND: Record<AgendaKind, string> = {
   deadline: "마감",
+  opens: "접수 시작",
   stage: "전형",
   test: "시험",
   expiry: "만료",
@@ -40,7 +41,7 @@ export function postingName(p: Pick<PostingSummary, "title" | "canonical_url">) 
 }
 
 /**
- * 저장한 공고의 마감, 제출한 지원의 결과 전 전형 일정, 일정이 잡힌 시험, 자격·어학 성적의 만료일을 한 목록으로.
+ * 저장한 공고의 마감·접수 시작, 제출한 지원의 결과 전 전형 일정, 일정이 잡힌 시험, 자격·어학 성적의 만료일을 한 목록으로.
  * 같은 공고에 지원이 있으면 마감은 지원 화면으로 잇는다. 만료일은 적힌 것만 (서버가 계산하지 않는다).
  */
 export function buildAgenda(input: {
@@ -73,6 +74,23 @@ export function buildAgenda(input: {
       ...(a
         ? { to: "/applications/$applicationId", params: { applicationId: a.id } }
         : { to: "/postings/$postingId", params: { postingId: p.id } }),
+    });
+  }
+
+  for (const p of input.postings) {
+    // 접수 시작은 원문에 적힌 것만 (서버가 추측하지 않는다). 이미 지원을 만들었으면 띄우지 않는다
+    if (p.status !== "saved" || !p.opens_at || appByPosting.has(p.id)) continue;
+    const date = DATE_ONLY.test(p.opens_at) ? p.opens_at : dateKey(p.opens_at);
+    if (!date) continue;
+    out.push({
+      key: `opens-${p.id}`,
+      date,
+      at: DATE_ONLY.test(p.opens_at) ? null : p.opens_at,
+      kind: "opens",
+      title: p.company ?? postingName(p),
+      sub: p.company ? postingName(p) : "",
+      to: "/postings/$postingId",
+      params: { postingId: p.id },
     });
   }
 

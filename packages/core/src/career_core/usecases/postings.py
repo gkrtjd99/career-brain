@@ -19,7 +19,7 @@ import json
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -62,6 +62,7 @@ from career_core.domain.postings import (
     FetchError,
     FetchStatus,
     FieldName,
+    Lifecycle,
     PostingRuleError,
     PostingStatus,
     ats_request_allowed,
@@ -69,6 +70,9 @@ from career_core.domain.postings import (
     date_digits_in_quote,
     is_heading_line,
     normalize_url,
+    posting_lifecycle,
+    posting_moment,
+    posting_season,
 )
 from career_core.jobs.lease import guard_lease
 from career_core.llm import ChatMessage, ImageInput, ModelCallError, ModelDenied, ModelRequest
@@ -77,6 +81,7 @@ from career_core.ports import ACTOR_AGENT, ActorContext, BlobStore, ParseError
 from career_core.usecases.brain import NotFound
 from career_core.usecases.extraction import find_quote, parse_model_json
 from career_core.usecases.parsing import StepOutcome
+from career_core.usecases.workspace_settings import workspace_zone
 
 FETCH_JOB = "job_fetch"
 EXTRACT_PURPOSE = "job_extract"
@@ -191,6 +196,8 @@ Never guess dates, numbers, salary or conditions that are not written.
 Fields (omit when not in the text):
 - title, company, location, employment_type, career_level: short strings that appear in the quote
 - deadline: "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM" if a date is written; "always" for rolling/상시채용
+- opens_at: when applications open (접수 시작), "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", only if the text
+  states the start of the application period. Never use the posting date or today instead
 - posted_at: "YYYY-MM-DD"
 - responsibilities, requirements, preferred, process: lists; each item is a quote of one line/bullet
 - questions: application essay questions (자기소개서 문항) with char_limit if written, else null
@@ -278,7 +285,7 @@ def verify_llm_fields(raw: dict[str, Any], text: str) -> tuple[dict, int]:
                 s = _Scalar.model_validate(value)
                 hit = _ev_quote(text, s.quote)
                 ok = bool(hit)
-                if ok and name in (FieldName.DEADLINE, FieldName.POSTED_AT):
+                if ok and name in (FieldName.DEADLINE, FieldName.POSTED_AT, FieldName.OPENS_AT):
                     if s.value == "always":
                         ok = name == FieldName.DEADLINE and any(
                             k in hit[1]
@@ -1606,7 +1613,8 @@ def _validate_value(name: str, value: Any) -> Any:
     if not isinstance(value, str):
         raise PostingRuleError(f"invalid_{name}")
     value = " ".join(value.split())
-    if name in (FieldName.DEADLINE, FieldName.POSTED_AT) and value and value != "always":
+    dated = (FieldName.DEADLINE, FieldName.POSTED_AT, FieldName.OPENS_AT)
+    if name in dated and value and not (name == FieldName.DEADLINE and value == "always"):
         try:
             datetime.fromisoformat(value)
         except ValueError as exc:
@@ -1670,6 +1678,35 @@ async def archive_posting(db: Database, actor: ActorContext, posting_id: UUID) -
         return posting.status
 
 
+MAX_BULK = 200
+
+
+async def archive_postings(
+    db: Database, actor: ActorContext, posting_ids: list[UUID], *, archived: bool = True
+) -> list[UUID]:
+    """여러 공고를 한 번에 보관(또는 보관 풀기). 이 공간에 있는 것만 바뀐다. 바뀐 id 목록.
+
+    보관을 풀면 확인해 저장한 적이 있는 공고는 저장 공고로, 아니면 확인 전으로 돌아간다.
+    """
+    ids = list(dict.fromkeys(posting_ids))
+    if not ids:
+        return []
+    if len(ids) > MAX_BULK:
+        raise PostingRuleError("too_many_ids")
+    changed: list[UUID] = []
+    async with db.workspace_session(actor.workspace_id) as s:
+        rows = (await s.scalars(select(JobPosting).where(JobPosting.id.in_(ids)))).all()
+        for p in rows:
+            if archived and p.status != PostingStatus.ARCHIVED:
+                p.status = PostingStatus.ARCHIVED.value
+            elif not archived and p.status == PostingStatus.ARCHIVED:
+                p.status = (PostingStatus.SAVED if p.saved_at else PostingStatus.DRAFT).value
+            else:
+                continue
+            changed.append(p.id)
+    return changed
+
+
 async def purge_unconfirmed(
     db: Database, workspace_id: UUID, *, now: datetime | None = None
 ) -> int:
@@ -1702,6 +1739,24 @@ class PostingSummary:
     saved_at: datetime | None = None
     # c0033 (O13): 이은 회사 (없으면 None)
     company_id: UUID | None = None
+    # 접수 시작·접수 상태·채용 시기 (공간 시간대로 계산), 이 공고의 지원 요약 (없으면 None)
+    opens_at: str | None = None
+    lifecycle: str = Lifecycle.UNKNOWN.value
+    season: str | None = None
+    application: PostingApplication | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PostingApplication:
+    """공고 한 건의 지원 요약. 지원이 여럿이면 철회하지 않은 가장 최근 것."""
+
+    id: UUID
+    status: str  # draft | submitted | passed | rejected | withdrawn
+    questions: int  # 자기소개서 문항 수
+    answered: int  # 그중 글이 있는 수
+    submitted_at: datetime | None
+    # 지금 전형 단계 {kind, name, outcome, scheduled_at} (제출본에 묶인 단계가 없으면 None)
+    stage: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1747,6 +1802,9 @@ class PostingView:
     latest: VersionView | None
     runs: list[FetchRunView] = field(default_factory=list)
     company_id: UUID | None = None  # c0033 (O13)
+    lifecycle: str = Lifecycle.UNKNOWN.value
+    season: str | None = None
+    application: PostingApplication | None = None
 
 
 def _version_view(v: JobPostingVersion, *, with_text: bool = False) -> VersionView:
@@ -1765,13 +1823,69 @@ def _version_view(v: JobPostingVersion, *, with_text: bool = False) -> VersionVi
     )
 
 
-async def list_postings(db: Database, actor: ActorContext) -> list[PostingSummary]:
-    async with db.workspace_session(actor.workspace_id) as s:
-        postings = (
-            (await s.execute(select(JobPosting).order_by(JobPosting.created_at.desc())))
-            .scalars()
-            .all()
+async def _applications_by_posting(
+    db: Database, actor: ActorContext
+) -> dict[UUID, PostingApplication]:
+    """공고별 지원 요약. 지원 읽기 권한이 없으면 비운다."""
+    from career_core.domain.workspace import ACTION_SCOPES
+    from career_core.usecases.applications import list_applications
+
+    if not actor.has_scope(ACTION_SCOPES["applications.read"]):
+        return {}
+
+    out: dict[UUID, PostingApplication] = {}
+    for a in await list_applications(db, actor):  # 최근 것부터
+        prev = out.get(a.posting_id)
+        if prev is not None and not (prev.status == "withdrawn" and a.status != "withdrawn"):
+            continue
+        out[a.posting_id] = PostingApplication(
+            a.id,
+            a.status,
+            a.questions,
+            a.questions - a.unwritten,
+            a.submitted_at,
+            a.stage,
         )
+    return out
+
+
+_FAR = datetime.max.replace(tzinfo=UTC)
+_NEAR = datetime.min.replace(tzinfo=UTC)
+
+
+def _sort_key(p: PostingSummary, tz) -> tuple:
+    """접수 상태별 정렬: 접수 중은 마감 가까운 순, 예정은 시작 가까운 순, 마감은 최근 마감 순, 나머지는 최근 저장 순."""
+    saved = p.saved_at or p.created_at or _NEAR
+    if p.lifecycle == Lifecycle.OPEN:
+        return (posting_moment(p.deadline, tz, end_of_day=True) or _FAR, 0)
+    if p.lifecycle == Lifecycle.UPCOMING:
+        return (posting_moment(p.opens_at, tz) or _FAR, 0)
+    if p.lifecycle == Lifecycle.CLOSED:
+        close = posting_moment(p.deadline, tz, end_of_day=True) or _NEAR
+        return (-close.timestamp(), 0)
+    return (-saved.timestamp(), 0)
+
+
+async def list_postings(
+    db: Database,
+    actor: ActorContext,
+    *,
+    lifecycle: str | None = None,
+    status: str | None = None,
+    now: datetime | None = None,
+) -> list[PostingSummary]:
+    """공고 목록. 거름이 없으면 추가한 순(최근부터) 전체. ``lifecycle``을 주면 그 상태만 상태별 순서로."""
+    if lifecycle is not None and lifecycle not in {x.value for x in Lifecycle}:
+        raise PostingRuleError("invalid_lifecycle")
+    if status is not None and status not in {x.value for x in PostingStatus}:
+        raise PostingRuleError("invalid_status")
+    now = now or utcnow()
+    async with db.workspace_session(actor.workspace_id) as s:
+        tz = await workspace_zone(s)
+        q = select(JobPosting).order_by(JobPosting.created_at.desc())
+        if status is not None:
+            q = q.where(JobPosting.status == status)
+        postings = (await s.execute(q)).scalars().all()
         last = {}
         rows = (
             (
@@ -1800,12 +1914,14 @@ async def list_postings(db: Database, actor: ActorContext) -> list[PostingSummar
         )
         for v in vrows:
             latest[v.posting_id] = v
+    apps = await _applications_by_posting(db, actor)
     out = []
     for p in postings:
         values = p.fields or {
             k: v["value"] for k, v in (latest[p.id].extracted if p.id in latest else {}).items()
         }
         run = last.get(p.id)
+        deadline, opens_at = values.get(FieldName.DEADLINE), values.get(FieldName.OPENS_AT)
         out.append(
             PostingSummary(
                 p.id,
@@ -1813,23 +1929,32 @@ async def list_postings(db: Database, actor: ActorContext) -> list[PostingSummar
                 p.status,
                 values.get(FieldName.TITLE),
                 values.get(FieldName.COMPANY),
-                values.get(FieldName.DEADLINE),
+                deadline,
                 p.pending_changes,
                 run.status if run else None,
                 run.error_code if run else None,
                 p.created_at,
                 p.saved_at,
                 p.company_id,
+                opens_at,
+                posting_lifecycle(deadline, opens_at, now, tz).value,
+                posting_season(deadline, opens_at, p.saved_at or p.created_at, tz),
+                apps.get(p.id),
             )
         )
+    if lifecycle is not None:
+        out = sorted((p for p in out if p.lifecycle == lifecycle), key=lambda p: _sort_key(p, tz))
     return out
 
 
-async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> PostingView:
+async def get_posting(
+    db: Database, actor: ActorContext, posting_id: UUID, *, now: datetime | None = None
+) -> PostingView:
     async with db.workspace_session(actor.workspace_id) as s:
         p = await s.get(JobPosting, posting_id)
         if p is None:
             raise NotFound("posting")
+        tz = await workspace_zone(s)
         v = await s.scalar(
             select(JobPostingVersion)
             .where(JobPostingVersion.posting_id == posting_id)
@@ -1859,6 +1984,8 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
                 )
             ).all()
         }
+    values = p.fields or {k: x["value"] for k, x in (v.extracted if v else {}).items()}
+    deadline, opens_at = values.get(FieldName.DEADLINE), values.get(FieldName.OPENS_AT)
     return PostingView(
         p.id,
         p.canonical_url,
@@ -1885,6 +2012,9 @@ async def get_posting(db: Database, actor: ActorContext, posting_id: UUID) -> Po
             for r in runs
         ],
         p.company_id,
+        posting_lifecycle(deadline, opens_at, now or utcnow(), tz).value,
+        posting_season(deadline, opens_at, p.saved_at or p.created_at, tz),
+        (await _applications_by_posting(db, actor)).get(p.id),
     )
 
 
