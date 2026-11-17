@@ -632,3 +632,25 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - downgrade는 `markdown` 행을 지우고 CHECK를 되돌린다.
 - 내보내기: `no_data_change("c0046")` (표 모양 그대로).
 - 시험: `packages/core/tests/test_markdown_export.py`.
+
+## 이력서 판본 (c0047, O17)
+
+`c0047` (`down_revision = c0046`). 브레인에서 나오는 이력서 (plan §19.5).
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `resume_versions` | 판본 하나: 종류(`master`·`role`·`posting`)·제목(1–200)·목표 직무(200자 이하)·위 판본 `parent_id`(FK `SET NULL (parent_id)`)·복사해 온 revision `source_revision_id`(`SET NULL`)·이은 지원 `application_id`(공고별만, `SET NULL`)·템플릿(`one_column`·`two_column`·`korean_table`)·블라인드·쪽 수 한도(1–10, 기본 2)·최신 revision 번호·만든 사람·시각 | 전체 |
+| `resume_revisions` | 판본 본문. `UNIQUE (version_id, revision_no)`, `UNIQUE (version_id, idempotency_key)`. 본문 JSON(`content`, 객체)·내용 해시·출처(`user`·`agent`·`copy`·`ai`)·이유·만든 사람·시각 | SELECT, INSERT |
+| `resume_line_claims` | revision의 줄 ↔ 확인한 사실. `UNIQUE (revision_id, line_id)`, revision이 지워지면 함께, 사실은 NO ACTION(지우지 않고 은퇴시킨다) | SELECT, INSERT |
+
+- 왜 새 표인가: 문서(`documents`)는 문단 글이고 근거가 문단에 붙는다. 이력서는 구역·항목·줄의 구조이고, 항목은 브레인 기록(경험·학력·자격·기술·프로필)을 가리키며 채울 때의 값을 복사해 둔다. 문서에 "구조 있는 종류"를 더하면 문서 검사·제출본·복사 규칙이 모두 두 갈래가 된다. 그래서 revision·409·멱등 키 규칙만 문서와 같게 하고 표는 나눴다.
+- 본문(`domain/resume.py`, 형식 1): 구역 목록(종류·제목·표시·순서) → 항목(`ref` = 기록 종류·ID 또는 사람이 쓴 항목, 채울 때의 값 `fields`, 그 값의 해시 `basis`, 프로필은 표시 고르기 `show`) → 줄(ID·글·출처 `claim`/`user`/`ai`, 사실이면 `claim_id`와 그때 문장의 해시). 해시는 `*_id` 칸을 뺀 값으로 만든다 — 묶음을 새 ID로 복원해도 해시가 같다.
+- 상태는 저장하지 않고 읽을 때 계산한다: 항목 `manual`·`ok`·`stale`(기록이 바뀜)·`missing`(기록이 없어짐), 줄 `none`(근거 없음)·`ok`·`stale`(문장이 바뀜)·`broken`(확인이 풀림·은퇴). 브레인이 바뀌어도 본문은 그대로이고 "다시 채우기"(`refill_item`)·"새 문장으로"(`refresh_line`)는 사람이 누르는 연산이다.
+- 계보: 직무별·공고별 판본은 위 판본의 최신 revision을 revision 1(출처 `copy`)로 복사하고 `source_revision_id`를 남긴다. 아래 판본이 있는 판본은 usecase가 지우지 않는다(`version_has_children`); FK의 `SET NULL (parent_id)`는 안전장치일 뿐이다.
+- 마스터는 공간당 하나지만 부분 UNIQUE 색인을 두지 않는다: 묶음을 기존 공간에 합치면 양쪽 마스터가 함께 들어올 수 있어서다. 만들 때 `pg_advisory_xact_lock(hashtext('resume-master:<공간>'))` 뒤 수를 세어 막는다(`master_exists`).
+- `fk_resume_versions_source_revision`(판본 ↔ revision 표 순환)과 `fk_resume_versions_parent`(같은 표)는 `DEFERRABLE INITIALLY IMMEDIATE` — 묶음 복원이 트랜잭션 끝에서 검사한다 (c0011·c0030과 같은 규칙).
+- 판본 설정(제목·직무·템플릿·블라인드·쪽 수 한도·이은 지원)은 본문이 아니라서 revision 없이 `PATCH`로 바뀐다.
+- 권한: `resume.read`(read)·`resume.write`(draft-write). 사람이 저장하면 revision 출처 `user`, 에이전트는 `agent`이고 에이전트가 쓴 줄은 `ai`(근거 없음).
+- 세 표 모두 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
+- 내보내기: 카탈로그로 자동 포함, `@schema_step("c0047")`(옛 묶음엔 빈 표). 합치기 키: 판본 same_except, revision·줄 근거는 DB UNIQUE.
+- 시험: `packages/core/tests/test_resumes.py`.

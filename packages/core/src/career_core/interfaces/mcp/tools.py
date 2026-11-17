@@ -690,6 +690,80 @@ async def _answer_asset_get(env: ToolEnv, a: AnswerGetArgs) -> Any:
     return {"note": ANSWER_NOTE, **jsonable(view)}
 
 
+# ---------------------------------------------------------------- 이력서 판본 (O17)
+
+RESUME_NOTE = (
+    "Resume lines with claim_id come from the user's confirmed claims; lines without claim_id are "
+    "unsupported (written by a person or an agent). Never invent facts, numbers or roles. Profile "
+    "contact details, birth date, address and photo are never returned."
+)
+
+
+class ResumeListArgs(Args):
+    application_id: UUID | None = None
+
+
+async def _resume_list(env: ToolEnv, a: ResumeListArgs) -> Any:
+    from career_core.usecases import resumes as resume_uc
+
+    rows = await resume_uc.list_versions(env.db, env.actor, application_id=a.application_id)
+    return {"note": RESUME_NOTE, "versions": [jsonable(r) for r in rows]}
+
+
+class ResumeGetArgs(Args):
+    version_id: UUID
+    revision: int | None = Field(default=None, ge=0)
+
+
+async def _resume_get(env: ToolEnv, a: ResumeGetArgs) -> Any:
+    """블라인드 판본이면 학교 이름도 뺀다. 체크리스트를 같이 준다."""
+    from career_core.usecases import resumes as resume_uc
+
+    view = await resume_uc.get_version(env.db, env.actor, a.version_id, revision=a.revision)
+    check = await resume_uc.check_version(env.db, env.actor, a.version_id, revision=a.revision)
+    return {
+        "note": RESUME_NOTE,
+        **resume_uc.agent_view(view, blind=view.summary.blind),
+        "checklist": check["checklist"],
+        "estimated_pages": check["estimated_pages"],
+    }
+
+
+class ResumeCreateArgs(Args):
+    kind: Literal["master", "role", "posting"]
+    title: str | None = Field(default=None, max_length=200)
+    parent_id: UUID | None = None
+    target_role: str | None = Field(default=None, max_length=200)
+    application_id: UUID | None = None
+    fill: bool = False
+    fill_claims: bool = False
+
+
+async def _resume_create(env: ToolEnv, a: ResumeCreateArgs) -> Any:
+    from career_core.usecases import resumes as resume_uc
+
+    new_id = await resume_uc.create_version(env.db, env.actor, **a.model_dump())
+    return {"id": str(new_id)}
+
+
+class ResumeEditArgs(Args):
+    version_id: UUID
+    base_revision: int = Field(ge=0)
+    operations: list[dict[str, Any]] = Field(min_length=1, max_length=100)
+    reason: str | None = Field(default=None, max_length=1000)
+    idempotency_key: str | None = Field(default=None, max_length=200)
+
+
+async def _resume_edit(env: ToolEnv, a: ResumeEditArgs) -> Any:
+    """웹과 같은 수정 연산. 에이전트가 쓴 줄은 origin=ai(근거 없음)로 남는다."""
+    from career_core.usecases import resumes as resume_uc
+
+    res = await resume_uc.save(
+        env.db, env.actor, a.version_id, **a.model_dump(exclude={"version_id"})
+    )
+    return jsonable(res)
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -1002,6 +1076,46 @@ TOOLS: tuple[Tool, ...] = (
         RunIdArgs,
         _run_cancel,
         read_only=False,
+    ),
+    Tool(
+        "resume_list",
+        "List resume versions (master, role, posting) with lineage, settings and counts of "
+        "unsupported lines.",
+        "resume.read",
+        ResumeListArgs,
+        _resume_list,
+        untrusted=True,
+    ),
+    Tool(
+        "resume_get",
+        "Get one resume version: sections, items (snapshot fields + state ok/stale/missing), lines "
+        "(claim-linked or unsupported, state ok/stale/broken) and the checklist. Blind versions omit "
+        "school names; profile contact details, birth date, address and photo are never returned.",
+        "resume.read",
+        ResumeGetArgs,
+        _resume_get,
+        untrusted=True,
+    ),
+    Tool(
+        "resume_create_version",
+        "Create a resume version. master (one per workspace, fill=true fills it from the brain), "
+        "role (copy of the master) or posting (copy of master or role, optional application_id).",
+        "resume.write",
+        ResumeCreateArgs,
+        _resume_create,
+        read_only=False,
+    ),
+    Tool(
+        "resume_edit",
+        "Apply edit operations to a resume version (add_item with ref or manual fields, add_line "
+        "with claim_id or text, update_line, move_item, order_items, set_section, refill_item, "
+        "refresh_line, remove_item, remove_line, fill_all, apply_prep_order). base_revision must be "
+        "the current revision. Text you write is stored as unsupported (origin ai).",
+        "resume.write",
+        ResumeEditArgs,
+        _resume_edit,
+        read_only=False,
+        untrusted=True,
     ),
 )
 

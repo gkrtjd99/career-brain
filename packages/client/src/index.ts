@@ -9,6 +9,7 @@ import { settingsEndpoints } from "./settings";
 import { systemEndpoints } from "./system";
 import { tokenEndpoints } from "./tokens";
 import { brainMeEndpoints } from "./brainMe";
+import { resumeEndpoints } from "./resumes";
 import type * as T from "./types";
 
 export * from "./companies";
@@ -22,6 +23,7 @@ export * from "./settings";
 export * from "./system";
 export * from "./tokens";
 export * from "./brainMe";
+export * from "./resumes";
 export * from "./types";
 
 export interface ClientOptions {
@@ -632,6 +634,7 @@ export function createClient({
     ...profileEndpoints({ request, get, patch }),
     ...prepEndpoints({ request, get, post }),
     ...brainMeEndpoints({ request, get, post, patch }),
+    ...resumeEndpoints({ request, get, post, patch }),
   };
 }
 

@@ -69,6 +69,13 @@ def export_filename(title: str, fmt: str) -> str:
 # ---------------------------------------------------------------- Markdown
 
 
+def md_escape(text: str) -> str:
+    """줄 앞의 Markdown 기호와 '<'를 글자 그대로 보이게 escape한다. 문단 안 줄바꿈은 Markdown 줄바꿈으로."""
+    text = text.replace("\\", "\\\\").replace("<", "\\<")
+    text = _MD_LINE_START.sub(lambda m: m.group(1) + "\\" + m.group(2), text)
+    return text.replace("\n", "  \n")
+
+
 def render_markdown(
     title: str, paragraphs: Sequence[str] = (), *, sections: Sequence[ExportSection] | None = None
 ) -> str:
@@ -76,13 +83,7 @@ def render_markdown(
 
     ``sections``를 주면 묶음마다 ``## 제목``·안내 줄·문단을 차례로 쓴다 (제출본 내보내기).
     """
-
-    def esc(text: str) -> str:
-        text = text.replace("\\", "\\\\").replace("<", "\\<")
-        text = _MD_LINE_START.sub(lambda m: m.group(1) + "\\" + m.group(2), text)
-        # 문단 안의 줄바꿈은 Markdown 줄바꿈(끝 공백 두 칸)으로
-        return text.replace("\n", "  \n")
-
+    esc = md_escape
     parts = [f"# {esc(title)}"]
     for sec in _sections(paragraphs, sections):
         if sec.heading:
@@ -191,9 +192,36 @@ def render_docx(
             )
         for p in sec.paragraphs:
             paras.append(f'<w:p><w:pPr><w:spacing w:after="160"/></w:pPr>{_run(p)}</w:p>')
+    return docx_package(title, "".join(paras))
+
+
+@dataclass(frozen=True, slots=True)
+class DocxMedia:
+    """DOCX에 넣는 그림 (이력서 증명사진, O17). ``rel_id``로 본문 ``<a:blip r:embed>``가 가리킨다."""
+
+    rel_id: str
+    name: str  # word/media/ 아래 파일 이름 (예: photo.jpeg)
+    mime: str  # image/jpeg | image/png
+    data: bytes
+
+
+_DOCX_NS = (
+    f'xmlns:w="{_W}" '
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+    'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" '
+    'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+    'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"'
+)
+
+
+def docx_package(title: str, body_xml: str, media: Sequence[DocxMedia] = ()) -> bytes:
+    """본문 XML(``<w:p>``·``<w:tbl>`` …)을 A4 DOCX 묶음으로. 같은 입력이면 같은 바이트(고정 시각).
+
+    문서 내보내기(``render_docx``)와 이력서 내보내기(``domain.resume_export``)가 같이 쓴다.
+    """
     document = (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
-        f'<w:document xmlns:w="{_W}"><w:body>{"".join(paras)}'
+        f"<w:document {_DOCX_NS}><w:body>{body_xml}"
         '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>'
         '<w:pgMar w:top="1134" w:right="1020" w:bottom="1134" w:left="1020" '
         'w:header="709" w:footer="709" w:gutter="0"/></w:sectPr>'
@@ -206,17 +234,45 @@ def render_docx(
         'core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">'
         f"<dc:title>{_xml_text(title)}</dc:title></cp:coreProperties>"
     )
+    content_types = _CONTENT_TYPES
+    parts: list[tuple[str, bytes]] = []
+    if media:
+        exts = {m.name.rsplit(".", 1)[-1]: m.mime for m in media}
+        defaults = "".join(
+            f'<Default Extension="{ext}" ContentType="{mime}"/>'
+            for ext, mime in sorted(exts.items())
+        )
+        content_types = content_types.replace(
+            '<Default Extension="xml"', defaults + '<Default Extension="xml"', 1
+        )
+        rels = "".join(
+            f'<Relationship Id="{m.rel_id}" Type="http://schemas.openxmlformats.org/'
+            f'officeDocument/2006/relationships/image" Target="media/{m.name}"/>'
+            for m in media
+        )
+        parts.append(
+            (
+                "word/_rels/document.xml.rels",
+                (
+                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/'
+                    f'relationships">{rels}</Relationships>'
+                ).encode(),
+            )
+        )
+        parts.extend((f"word/media/{m.name}", m.data) for m in media)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, data in (
-            ("[Content_Types].xml", _CONTENT_TYPES),
-            ("_rels/.rels", _RELS),
-            ("word/document.xml", document),
-            ("docProps/core.xml", core),
+            ("[Content_Types].xml", content_types.encode("utf-8")),
+            ("_rels/.rels", _RELS.encode("utf-8")),
+            ("word/document.xml", document.encode("utf-8")),
+            ("docProps/core.xml", core.encode("utf-8")),
+            *parts,
         ):
             info = zipfile.ZipInfo(name, date_time=_ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, data.encode("utf-8"))
+            z.writestr(info, data)
     return buf.getvalue()
 
 
@@ -318,11 +374,14 @@ def export_summary(findings: Sequence[Finding]) -> dict[str, Any]:
 __all__ = [
     "FORMATS",
     "MEDIA_TYPES",
+    "DocxMedia",
     "ExportError",
     "ExportSection",
+    "docx_package",
     "export_filename",
     "export_summary",
     "inspect_export",
+    "md_escape",
     "render",
     "render_docx",
     "render_html",

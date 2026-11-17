@@ -21,6 +21,7 @@ export function BrainIndex({ experiences, pendingExperiences }: { experiences: n
   const skills = useQuery({ queryKey: ["skills"], queryFn: api.skills });
   const shared = useQuery({ queryKey: ["shared-documents"], queryFn: api.sharedDocuments });
   const answers = useQuery({ queryKey: ["answer-assets"], queryFn: api.answerAssets });
+  const resumes = useQuery({ queryKey: ["resumes"], queryFn: () => api.resumes() });
   const submitted = useQuery({ queryKey: ["submitted-documents"], queryFn: api.submittedDocuments });
   const companies = useQuery({ queryKey: ["companies", ""], queryFn: () => api.companies("") });
   const references = useQuery({ queryKey: ["references", {}], queryFn: () => api.references() });
@@ -75,7 +76,18 @@ export function BrainIndex({ experiences, pendingExperiences }: { experiences: n
         />
       </Compartment>
       <Compartment title="나 · 내 글" note="내가 쓴 글입니다.">
-        <Row to="/documents" title="기본 문서" sub="이력서·포트폴리오" count={shared.data?.length ?? 0} />
+        <Row
+          to="/brain/resumes"
+          title="이력서"
+          sub="마스터 · 직무별 · 공고별"
+          count={resumes.data?.length ?? 0}
+          strong={[
+            (resumes.data ?? []).some((r) => r.unsupported_lines)
+              ? `근거 없는 줄 ${(resumes.data ?? []).reduce((n, r) => n + r.unsupported_lines, 0)}`
+              : null,
+          ]}
+        />
+        <Row to="/documents" title="기본 문서" sub="포트폴리오·경력기술서" count={shared.data?.length ?? 0} />
         <Row to="/brain/answers" title="공통 답변" count={answers.data?.length ?? 0} />
         <Row to="/brain/submissions" title="지난 제출본" count={submitted.data?.length ?? 0} />
       </Compartment>

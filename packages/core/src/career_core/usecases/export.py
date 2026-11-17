@@ -1566,6 +1566,14 @@ no_data_change(
 )
 
 
+@schema_step(
+    "c0047",
+    "이력서 판본 표 resume_versions·resume_revisions·resume_line_claims (옛 묶음에는 빈 표)",
+)
+def _c0047_resumes(arc) -> None:
+    arc.ensure_tables("core.resume_versions", "core.resume_revisions", "core.resume_line_claims")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2640,6 +2648,22 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
     ),
     # c0042 공통 답변: 종류는 고친다. 제목·본문이 정체 (고친 답변은 비슷한 행)
     "core.answer_assets": (SameExcept(("kind", "updated_at"), ("title", "body")),),
+    # c0047 이력서 판본: 제목·직무·템플릿·블라인드·쪽 수·현재 revision·이은 지원은 고친다. 종류·위 판본·복사한
+    # revision·만든 시각·만든 사람이 정체 (본문은 resume_revisions의 UNIQUE(판본, 번호)로 겹친다)
+    "core.resume_versions": (
+        SameExcept(
+            (
+                "title",
+                "target_role",
+                "template",
+                "blind",
+                "max_pages",
+                "current_revision",
+                "application_id",
+                "updated_at",
+            )
+        ),
+    ),
     # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)
     "core.company_facts": (
         SameExcept(

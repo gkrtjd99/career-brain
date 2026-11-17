@@ -397,6 +397,9 @@ async def test_every_workspace_table_is_exported_or_excluded(db):
         "fk_application_documents_source_revision",
         # c0030: 경험 → 부모 경험(같은 표)
         "fk_experiences_parent",
+        # c0047: 이력서 판본 → 위 판본(같은 표), 판본 → 복사한 revision(revision → 판본 순환)
+        "fk_resume_versions_parent",
+        "fk_resume_versions_source_revision",
     }
     assert plan.groups == ()
 

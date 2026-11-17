@@ -433,6 +433,14 @@ function Strip({
             >
               공고 보기
             </Link>
+            <span aria-hidden>·</span>
+            <Link
+              to="/brain/resumes"
+              search={{ application: app.id }}
+              className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-6"
+            >
+              이 공고용 이력서
+            </Link>
           </span>
         }
         actions={
