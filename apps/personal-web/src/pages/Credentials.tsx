@@ -20,7 +20,7 @@ import { formatDate } from "../lib/dates";
 const route = getRouteApi("/brain/credentials");
 
 const ROW = "-mx-2 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const COLS = "sm:grid-cols-[4.5rem_minmax(0,1.6fr)_6rem_6.5rem_7.5rem_5rem]";
+const COLS = "sm:grid-cols-[4.5rem_minmax(0,1.6fr)_5.5rem_8.5rem_7.5rem_4.5rem]";
 
 type SheetState = { credential: Credential | null } | null;
 

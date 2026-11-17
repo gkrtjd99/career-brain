@@ -342,6 +342,7 @@ export function SubmitDialog({
 }) {
   const [note, setNote] = useState("");
   const [ack, setAck] = useState(false);
+  const [warnAck, setWarnAck] = useState(false);
   // 제출 직전 재검사: 주민등록번호·본인 것이 아닌 연락처·대외비 표시. 지우지 않고, 확인을 받는다.
   const sensitive = useQuery({
     queryKey: ["sensitive-check", app.id, app.documents.map((d) => `${d.id}:${d.current_revision}`).join(",")],
@@ -350,6 +351,7 @@ export function SubmitDialog({
     staleTime: 0,
   });
   useEffect(() => setAck(false), [open, sensitive.data?.sensitive_hash]);
+  useEffect(() => setWarnAck(false), [open]);
   const hash = sensitive.data?.sensitive_hash ?? null;
   const submit = useMutation({
     mutationFn: () =>
@@ -384,6 +386,12 @@ export function SubmitDialog({
   const byDoc = new Map(checks?.documents.map((d) => [d.document_id, d]) ?? []);
   const filled = app.documents.filter((d) => d.current_revision > 0);
   const empty = app.documents.filter((d) => d.current_revision === 0);
+  // 남은 경고 (참고·민감 정보 제외 — 민감 정보는 아래에서 따로 확인받는다)
+  const warnings = filled.flatMap((d) =>
+    Object.entries(byDoc.get(d.id)?.summary ?? {})
+      .filter(([code, n]) => n > 0 && !["info", "sensitive"].includes(FINDING[code]?.group ?? "info"))
+      .map(([code, n]) => ({ doc: d.title, code, n })),
+  );
   return (
     <ConfirmDialog
       open={open}
@@ -397,7 +405,13 @@ export function SubmitDialog({
       description="지금 저장된 글을 그대로 고정합니다. 고정한 뒤에는 이 지원의 문서를 수정할 수 없고, 이후 경력·공고를 수정해도 제출본은 바뀌지 않습니다."
       confirmLabel={submit.isPending ? "고정하는 중" : "확인한 내용으로 고정"}
       busy={submit.isPending}
-      confirmDisabled={!filled.length || sensitive.isPending || sensitive.isError || (needsAck && !ack)}
+      confirmDisabled={
+        !filled.length ||
+        sensitive.isPending ||
+        sensitive.isError ||
+        (needsAck && !ack) ||
+        (warnings.length > 0 && !warnAck)
+      }
       onConfirm={() => submit.mutate()}
     >
       <ul className="divide-y divide-line border-y border-line">
@@ -428,6 +442,26 @@ export function SubmitDialog({
         </p>
       ) : null}
       {!filled.length ? <p className="mt-2 text-xs text-danger">저장한 글이 없어 고정할 수 없습니다.</p> : null}
+      {warnings.length ? (
+        <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2.5 text-[13px]">
+          <p className="font-semibold">남은 경고 {warnings.reduce((a, w) => a + w.n, 0)}개</p>
+          <ul className="mt-1.5 space-y-0.5">
+            {warnings.map((w) => (
+              <li key={`${w.doc}-${w.code}`} className="flex gap-2">
+                <span className={cn("font-medium", toneText(FINDING_GROUP[FINDING[w.code]!.group].tone))}>
+                  {FINDING[w.code]!.label}
+                  {w.n > 1 ? ` ${w.n}` : ""}
+                </span>
+                <span className="min-w-0 truncate text-xs leading-5 text-muted">{w.doc}</span>
+              </li>
+            ))}
+          </ul>
+          <label className="mt-2 flex min-h-9 items-start gap-2 py-1">
+            <Checkbox className="mt-1" checked={warnAck} onCheckedChange={(checked) => setWarnAck(checked)} />
+            <span>경고를 확인했고 이대로 고정합니다.</span>
+          </label>
+        </div>
+      ) : null}
       <ErrorText error={sensitive.error} className="mt-2" />
       {needsAck && sensitive.data ? (
         <div className="mt-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2.5 text-[13px]">

@@ -275,8 +275,12 @@ function Frame({
         open={submitting}
         onClose={() => setSubmitting(false)}
         onDone={() => {
+          // 고정 직후 바로 읽기 전용으로: 지원·문서(editable)·검사·준비를 모두 다시 읽는다
           qc.invalidateQueries({ queryKey: ["application", app.id] });
           qc.invalidateQueries({ queryKey: ["applications"] });
+          qc.invalidateQueries({ queryKey: ["document"] });
+          qc.invalidateQueries({ queryKey: ["application-checks", app.id] });
+          qc.invalidateQueries({ queryKey: prepKey(app.id) });
         }}
       />
       <StatusSheet app={app} open={withdrawing} onClose={() => setWithdrawing(false)} />

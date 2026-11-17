@@ -1,8 +1,8 @@
 import type { SaveUrlResult } from "@career-brain/client";
-import { Button, cn, Spinner, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
+import { Button, cn, Input, Label, Sheet, Spinner, Textarea, Tooltip, TooltipContent, TooltipTrigger } from "@career-brain/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { Plus, X } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ClipboardPaste, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { api } from "../../lib/api";
 import { ERROR_TEXT, FETCH_ERROR } from "../../lib/labels";
@@ -24,6 +24,7 @@ export function AddPostings() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [results, setResults] = useState<SaveUrlResult[] | null>(null);
+  const [paste, setPaste] = useState<{ url: string; text: string } | null>(null);
   const urls = extractUrls(text);
   const lines = Math.min(6, Math.max(1, text.split("\n").length));
   const save = useMutation({
@@ -59,6 +60,12 @@ export function AddPostings() {
             // 여러 URL을 붙여넣으면 줄마다 하나로 펴서 보인다
             const pasted = e.clipboardData.getData("text");
             const found = extractUrls(pasted);
+            // 주소가 아니라 공고 본문을 붙여넣었으면 본문 붙여넣기 창으로 옮긴다
+            if (found.length <= 1 && pasted.trim().length > 200) {
+              e.preventDefault();
+              setPaste({ url: found[0] ?? "", text: pasted.trim() });
+              return;
+            }
             if (found.length > 1) {
               e.preventDefault();
               setText((t) => [t.trim(), ...found].filter(Boolean).join("\n"));
@@ -92,7 +99,73 @@ export function AddPostings() {
       ) : null}
       <ErrorText error={save.error} className="mt-1.5" />
       {results ? <SaveResults results={results} onDismiss={() => setResults(null)} /> : null}
+      <button
+        type="button"
+        onClick={() => setPaste({ url: "", text: "" })}
+        className="mt-1 inline-flex min-h-9 items-center gap-1.5 text-[13px] text-muted hover:text-fg"
+      >
+        <ClipboardPaste size={14} /> 본문 붙여넣기 (메일·PDF로 받은 공고)
+      </button>
+      {paste ? <PasteSheet initial={paste} onClose={() => setPaste(null)} /> : null}
     </section>
+  );
+}
+
+/** 공고 본문을 직접 붙여넣어 추가: 서버는 주소를 가져오지 않고 붙여넣은 글로 추출한다 (보내기와 같은 규칙). */
+function PasteSheet({ initial, onClose }: { initial: { url: string; text: string }; onClose: () => void }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [url, setUrl] = useState(initial.url);
+  const [text, setText] = useState(initial.text);
+  const validUrl = /^https?:\/\/\S+\.\S+/.test(url.trim());
+  const add = useMutation({
+    mutationFn: () => api.capturePosting({ url: url.trim(), text: text.trim() }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ["postings"] });
+      onClose();
+      void navigate({ to: "/postings/$postingId", params: { postingId: r.posting_id } });
+    },
+  });
+  return (
+    <Sheet open onOpenChange={(o) => (o ? null : onClose())} title="공고 본문 붙여넣기" width="lg">
+      <form
+        className="space-y-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (validUrl && text.trim() && !add.isPending) add.mutate();
+        }}
+      >
+        <div>
+          <Label htmlFor="paste-url">공고 주소</Label>
+          <Input
+            id="paste-url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://"
+            inputMode="url"
+            spellCheck={false}
+          />
+          <p className="mt-1 text-xs text-muted">
+            같은 공고를 알아보는 데만 씁니다. 이 주소로 접속하지 않습니다. 메일로 받았다면 회사 채용 페이지 주소를 적어 주세요.
+          </p>
+        </div>
+        <div>
+          <Label htmlFor="paste-text">본문</Label>
+          <Textarea
+            id="paste-text"
+            value={text}
+            rows={14}
+            maxLength={60000}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="공고 본문 전체를 붙여넣으세요. 자격 요건·우대 사항·문항이 들어 있으면 됩니다."
+          />
+        </div>
+        <ErrorText error={add.error} />
+        <Button type="submit" variant="primary" disabled={!validUrl || !text.trim() || add.isPending}>
+          {add.isPending ? <Spinner /> : null} 공고 추가
+        </Button>
+      </form>
+    </Sheet>
   );
 }
 

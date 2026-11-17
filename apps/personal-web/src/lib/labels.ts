@@ -471,10 +471,10 @@ export const FINDING: Record<string, { label: string; group: FindingGroup }> = {
 };
 
 export const FINDING_GROUP: Record<FindingGroup, { label: string; tone: BadgeTone }> = {
-  limit: { label: "분량", tone: "danger" },
+  limit: { label: "분량 초과", tone: "danger" },
   risk: { label: "위험", tone: "danger" },
   manipulation: { label: "조작 의심", tone: "danger" },
-  evidence: { label: "근거", tone: "warn" },
+  evidence: { label: "근거 부족", tone: "warn" },
   sensitive: { label: "민감 정보", tone: "danger" },
   info: { label: "참고", tone: "neutral" },
 };
