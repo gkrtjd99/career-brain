@@ -8,7 +8,7 @@
 
   ``problem``·``role``은 사람이 쓴 글이라 늘 "근거 없음"이다. 줄은 이력서 줄(``domain.resume``)과 같은 모양
   ``{"id", "text", "claim_id", "basis", "origin"}``이고 같은 함수로 만든다: 확인한 사실에서 고른 줄은 그 사실을
-  계속 가리키고(``portfolio_line_claims``), 사실 문장이 바뀌면 "오래됨"(stale), 확인이 풀리면 "근거 끊김"(broken).
+  계속 가리키고(``portfolio_line_claims``), 사실 문장이 바뀌면 "오래됨"(stale), 확인이 풀리면 "근거 사라짐"(broken).
   ``claim_id``가 없는 줄은 "근거 없음"(none)이다. 결과 줄은 그 경험(과 바로 아래 경험)의 확인한 사실에서 고른다.
 - 공개 범위(항목·이미지 각각)::
 

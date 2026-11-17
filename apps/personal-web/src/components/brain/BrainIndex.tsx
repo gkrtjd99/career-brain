@@ -22,6 +22,7 @@ export function BrainIndex({ experiences, pendingExperiences }: { experiences: n
   const shared = useQuery({ queryKey: ["shared-documents"], queryFn: api.sharedDocuments });
   const answers = useQuery({ queryKey: ["answer-assets"], queryFn: api.answerAssets });
   const resumes = useQuery({ queryKey: ["resumes"], queryFn: () => api.resumes() });
+  const portfolio = useQuery({ queryKey: ["portfolio", "items"], queryFn: () => api.portfolioItems() });
   const submitted = useQuery({ queryKey: ["submitted-documents"], queryFn: api.submittedDocuments });
   const companies = useQuery({ queryKey: ["companies", ""], queryFn: () => api.companies("") });
   const references = useQuery({ queryKey: ["references", {}], queryFn: () => api.references() });
@@ -84,6 +85,17 @@ export function BrainIndex({ experiences, pendingExperiences }: { experiences: n
           strong={[
             (resumes.data ?? []).some((r) => r.unsupported_lines)
               ? `근거 없는 줄 ${(resumes.data ?? []).reduce((n, r) => n + r.unsupported_lines, 0)}`
+              : null,
+          ]}
+        />
+        <Row
+          to="/brain/portfolio"
+          title="포트폴리오"
+          sub="경험마다 한 항목"
+          count={portfolio.data?.length ?? 0}
+          strong={[
+            (portfolio.data ?? []).some((x) => x.lines.broken)
+              ? `근거 사라짐 ${(portfolio.data ?? []).reduce((n, x) => n + x.lines.broken, 0)}`
               : null,
           ]}
         />

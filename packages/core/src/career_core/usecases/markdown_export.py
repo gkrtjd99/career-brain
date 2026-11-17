@@ -1107,7 +1107,7 @@ async def _write_portfolio(w, d: _Data, claims: dict[UUID, Claim], exp_link) -> 
             except ValueError:
                 c = None
             if c is None or c.status not in CONFIRMED_STATUSES:
-                mark = " (근거 끊김)"
+                mark = " (근거 사라짐)"
         return f"- {_inline(ln.get('text'))}{mark}"
 
     for r in rows:

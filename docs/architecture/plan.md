@@ -134,7 +134,7 @@ PC·모바일 → Caddy → personal-web 정적 파일
 | 지원 준비 (c0037, §19.3) | application_preps | 공고 버전·문항별 후보 경험·근거·이유·빈 곳·회사 연결·참고 구성, 요건 충족표, 사람의 선택 (지원당 하나) |
 | 면접 준비 (계획, §19.4) | interview_preps, answer_assets | 예상 질문·출처, 쓸 경험, 사람이 쓴 답변 |
 | 이력서 (계획, §19.5) | resumes, resume_sections, resume_entries | 프로필·사진·자격은 브레인(§20)에서, 판본(마스터·직무·공고) 계보, 항목별 경험·주장 연결, 표시 설정 |
-| 포트폴리오 (계획, §19.6) | portfolio_items, portfolio_media, portfolios | 경험 연결, 링크·이미지·태그, 문제·역할·결과 구성, 묶음 순서 |
+| 포트폴리오 (c0049, §19.6) | portfolio_items, portfolio_item_revisions, portfolio_line_claims, portfolio_images, portfolio_bundles, portfolio_bundle_items, github_tokens | 경험 연결, 링크·이미지·태그, 문제·역할·한 일·결과 구성(revision), 결과 줄 ↔ 확인한 사실, 항목·이미지 공개 범위, 묶음 계보·순서, 비공개 저장소 토큰(암호문, 백업 제외) |
 
 공통 조건:
 - 개인 관계 테이블의 외래키에도 공간 일치 제약을 둔다. UUID만 맞으면 다른 공간의 자료를 연결할 수 있게 하지 않는다.
@@ -443,7 +443,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 | O21 | 프로필·증명사진 (§20) | O19 | 공간당 프로필 하나, 사진은 변환본만(EXIF 0), 규격별 여러 장·기본 하나, 이력서에서 쓸 수 있음 |
 | O22 | 연결·관리 (§21) | O03b, O08, O11 | 화면에서 만든 연결이 재시작 없이 호출됨, 응답·로그·장부·내보내기에 키 값 0건, 다른 공간 0건, restricted 선택 불가, 연결 시험 과금 0, 옛 주소 → 새 탭. 더함(c0046): Markdown으로 내보내기 — 증빙 바이트·글 0건, 기본은 확인한 사실만·민감 정보 0건, 위키 링크가 모두 있는 파일을 가리킴 |
 | O23 | 브레인 "나" 보강: 학력·프로필 더하기·기술·공통 답변·지난 제출본 (§20) | O20, O21, O07 | 학점 ≤ 만점(usecase·DB), 옛 학력 기록 → 학력 한 번에 옮기기, 병역·보훈·장애·희망 조건이 MCP·모델 호출에 0건, 기술은 따로 적지 않고 태그·확인한 사실·자격에서 모음(별칭으로 합치기·나누기), 공통 답변 근거는 확인한 사실만·쓴 곳 기록, 지난 제출본은 고정본만·다른 회사 이름 경고, 다른 공간 0건, 내보내기·복원 왕복 |
-| O18 | 포트폴리오 (§19.6) | O17 | 항목마다 경험 연결, 이미지는 브라우저에서 줄여 저장, 정적 HTML 묶음이 서버 없이 열림, 비공개 항목은 내보내기 0건 |
+| O18 | 포트폴리오 (§19.6) | O17 | 항목마다 경험 연결, 이미지는 브라우저에서 줄여 저장, 정적 HTML 묶음이 서버 없이 열림, 비공개 항목은 내보내기 0건. 구현(c0049): 항목은 경험 NOT NULL FK, 이미지는 브라우저에서 긴 변 1600px·1MiB 안으로 줄이고 서버가 다시 검사·메타데이터 제거, zip은 `file://`에서 상대 경로·CSP로 열림(시험이 외부 `src`·`href` 0건 확인), 나만 항목·이미지는 미리보기·HTML·zip·Markdown·MCP·HTTP에서 0건, 지원서에만은 공고별 묶음에서만 |
 
 진행 (2026-11-17): O01–O12 1차 구현 완료 (PR #1–#14). 남은 개선은 §18 백로그. O13–O18은 실사용 점검에서 나온 다음 단계(§19), 구현 순서 O15 → O17 → O18 → O13 → O14 → O16. 브레인 구조 지적(§20)으로 O19 → O20 → O21을 O17 앞에 넣는다: O22 → O19 → O20 → O21 → O15 → O17 → O18 → O13 → O14 → O16.
 
@@ -744,6 +744,17 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 묶음: 포트폴리오는 항목을 골라 순서를 정한 묶음이다(전체, 직무별, 공고별). 공고별 묶음은 O15에서 고른 경험부터 놓자고 제안한다.
 - 출력: PDF(웹 인쇄 화면, 항목 하나에 한두 쪽, 표지·목차), 정적 HTML 묶음(이미지 포함, 서버 없이 열림), 이력서 프로젝트 구역에서 항목으로 가는 링크. "나만" 이미지와 비공개 항목은 어떤 출력에도 들어가지 않는다.
 - 완료 기준: §16 O18.
+
+진행 (O18, c0049): 항목(`portfolio_items`: 경험 하나에 붙음, 제목·공개 범위·기술 태그·링크는 설정이라 revision 없이 `PATCH`)과 본문 revision(`portfolio_item_revisions`, 이력서와 같은 409·멱등 키·같은 내용이면 새 revision 없음), 줄 ↔ 확인한 사실(`portfolio_line_claims`), 이미지(`portfolio_images`), 묶음(`portfolio_bundles`·`portfolio_bundle_items`), 비공개 저장소 토큰(`github_tokens`).
+- 본문: 문제·내 역할(사람이 쓴 글이라 늘 "근거 없음") → 한 일·결과 줄. 줄은 그 경험의 확인한 사실에서 고르거나 직접 쓴다(직접 쓴 줄은 "근거 없음"). 사실 문장이 바뀌면 "사실이 바뀜"(`stale`), 확인이 풀리면 "근거 사라짐"(`broken`) — 저절로 바뀌지 않고 "새 문장으로"(`refresh_line`)를 사람이 누른다. 만들 때 "확인한 사실로 채우기"(`fill`)는 사실을 한 일·결과로 나눠 넣는다.
+- 공개 범위: 항목과 이미지마다 공개 가능(`public`)·지원서에만(`application`)·나만(`private`). 올린 이미지는 "나만"으로 시작한다(회사 내부 화면이 섞이기 쉽다). 전체·직무별 묶음은 공개 가능만, 공고별 묶음은 지원서에만까지 낸다. 나만은 어떤 출력에도 없다. 묶음 없이 보는 Markdown·MCP 항목은 공개 가능 규칙이다.
+- 이미지: 사진 변환 도구의 디코더(`lib/imageShrink.ts`, HEIC 안내 포함)로 브라우저에서 긴 변 1600px·1MiB 안으로 줄여 PNG/JPEG로 다시 인코딩해 올린다. 서버는 형식·크기·용량을 다시 검사하고 메타데이터를 한 번 더 지운 바이트만 BlobStore에 둔다(항목당 12장, 같은 파일은 한 번). 바이트를 모델·MCP로 보내는 경로가 없고 색인하지 않는다.
+- GitHub 가져오기: `https://github.com/<owner>/<repo>`만 받는다. 공개 REST API(`api.github.com`·`raw.githubusercontent.com`만 허용, 공고 가져오기와 같은 주소 검사)로 저장소 정보와 README를 읽어 README를 원본(목적 경험, `origin_url` = 저장소 주소)으로 넣는다 — README에서 뽑은 사실도 다른 원본처럼 사람이 확인해야 근거가 된다. 별·포크·날짜는 참고 정보로만 보여 주고 근거로 쓰지 않는다. 403(남은 한도 0)·429는 "다시 해도 되는 시각"과 함께 알린다. 비공개 저장소는 공간 관리자가 넣은 토큰(선택, `SecretBox` 암호문·끝 4자리, 백업 제외)으로만 읽는다. 항목을 고르면 저장소 링크를 그 항목에 더한다.
+- 묶음: 전체·직무별·공고별, 계보는 이력서 판본처럼 위 묶음(`parent_id`)과 복사할 때의 위 묶음 revision(`source_revision`). 공고별은 지원에 잇고, 지원 준비(O15)에서 고른 경험의 항목부터 놓자고 제안한다(`apply_prep_order`). 아래 묶음이 있는 묶음은 지우지 않는다(`bundle_has_children`).
+- 출력: 미리보기 = 내보낸 HTML(sandbox iframe, 이력서와 같은 쪽 나눔 스크립트·CSP 해시). 표지·목차가 첫 쪽, 항목마다 새 쪽, 이미지 높이를 줄여 항목 하나가 한두 쪽. 인쇄용 HTML 하나(이미지 `data:`)와 정적 HTML 묶음 zip(`index.html` + `images/…`, 상대 경로·`img-src 'self' file:`, 서버 없이 `file://`로 열림). zip에 이력서 판본을 함께 넣으면(`resume.html`) 이력서의 프로젝트·경력 항목이 같은 경험의 포트폴리오 항목(`index.html#item-n`)으로 이어진다. 링크는 글로만 적는다. 만든 파일을 다시 읽어 숨김 글·민감 정보를 검사한다.
+- HTTP `/core/portfolio/items`·`/items/{id}`·`/revisions`·`/picker`·`/images`, `/core/portfolio/images/{id}`·`/file`, `/core/portfolio/bundles`·`/{id}`·`/items`·`/prep-order`·`/check`·`/preview`·`/export`·`/export/check`, `/core/portfolio/github/import`·`/token`. 권한 `portfolio.read`(read)·`portfolio.write`·`portfolio.import`(draft-write)·`portfolio.token`(workspace-admin, 비공개 저장소 가져오기도 이 권한). MCP는 읽기만: `portfolio_list`·`portfolio_get`(나만 항목·이미지 파일 없음, 결과 `untrusted_content`).
+- 웹: 브레인 › 나 · 내 글 › 포트폴리오(`/brain/portfolio`), 경험 화면의 "포트폴리오 항목 만들기", 지원 화면의 "이 공고용 포트폴리오", 이력서 편집기의 "포트폴리오 항목" 링크 ([web.md](web.md) "포트폴리오"). 표는 [database.md](database.md) "포트폴리오 (c0049)".
+- 아직 없음: MCP 쓰기 도구(항목·묶음 편집), 서버에서 이미지 줄이기(브라우저가 줄이지 못하는 형식은 받지 않는다), 끌어 옮기기(위로·아래로 버튼), 공개 호스팅(서비스 범위).
 
 ## 20. 브레인 구조 다시 잡기 (설계, 2026-11-17)
 

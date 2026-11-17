@@ -100,6 +100,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0046 | `no_data_change` | `export_runs.kind`에 `markdown` (Markdown으로 내보내기 기록, CHECK만 넓힘) |
 | c0047 | `schema_step` | 새 표 `resume_versions`·`resume_revisions`·`resume_line_claims` (옛 묶음엔 빈 표). 본문 해시는 ID 칸을 빼고 만들어 새 ID로 복원해도 근거 상태가 그대로다 |
 | c0048 | `schema_step` | 새 표 `interview_preps`·`interview_prep_questions` (옛 묶음엔 빈 표). 합치기는 DB UNIQUE: 지원마다 준비 하나, 준비 안의 출처 열쇠(`source_key`) |
+| c0049 | `schema_step` | 새 표 `portfolio_items`·`portfolio_item_revisions`·`portfolio_line_claims`·`portfolio_images`·`portfolio_bundles`·`portfolio_bundle_items` (옛 묶음엔 빈 표). 이미지 바이트는 `blob_key`로 `blobs/`에 들어가 복원 후 sha256이 같다. `github_tokens`는 묶음에 넣지 않는다 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -156,6 +157,8 @@ no_data_change("c0032", "색인·함수만")  # 내보내는 표의 모양이 �
 | 모델 키 (`.env`, `app.env`), `models.toml` | **빠짐** | 설정 파일. DB에 없다 |
 | 웹에서 만든 모델 연결·라우트·예산 (`model_connections`, `model_route_overrides`, `model_settings`) | 들어감 | 키 끝 4자리까지. c0030 |
 | 웹에서 넣은 모델 키 암호문 (`model_connection_secrets`), 암호 키(`secret.key`) | **빠짐** | 비밀. 복원하면 연결은 남고 키는 "다시 넣어야 함"(`needs_reentry`) |
+| 포트폴리오 항목·본문·이미지·묶음 (c0049) | 들어감 | 이미지 파일은 `blobs/`. 나만 항목·이미지도 들어간다(내 백업이다) |
+| GitHub 토큰 암호문 (`github_tokens`, c0049) | **빠짐** | 비밀. 복원한 공간에서 비공개 저장소를 읽으려면 토큰을 다시 넣는다 |
 | 서비스 계정·결제 (`platform`) | **빠짐** | career-service 소유 |
 
 묶음에는 개인 자료가 그대로 들어 있다. `--recipient`로 암호화하거나 서버 밖에 암호화해서 둔다. 해시는 무결성 검사(손상·부분 수정)이고 서명이 아니다.
@@ -285,6 +288,8 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `reference_notes` | same_except | 상태·확인한 사람·확인 시각·`updated_at` (c0035) | 참고 글·문항·문단 구성·소재·역량이 정체 (메모를 고치면 다른 행) |
   | `education` | same_except | 캠퍼스·전공·복수/부전공·상태·편입·입학/졸업 달·학점·만점·메모·증빙·경험·`updated_at` (c0040) | 학교와 학위 과정이 정체 (같은 학교의 학사·석사는 다른 행) |
   | `answer_assets` | same_except | 종류·`updated_at` (c0042) | 제목과 본문이 정체 (글을 고치면 다른 행) |
+  | `portfolio_items` | same_except | 제목·공개 범위·기술 태그·링크·최신 revision·`updated_at` (c0049) | 경험·만든 사람·만든 시각이 정체. 본문은 `UNIQUE (item_id, revision_no)`, 이미지는 `UNIQUE (item_id, sha256)`으로 겹침을 찾는다 |
+  | `portfolio_bundles` | same_except | 제목·직무·소개·이은 지원·revision·`updated_at` (c0049) | 종류·위 묶음·복사한 revision·만든 사람·만든 시각이 정체. 묶음 항목은 `UNIQUE (bundle_id, item_id)` |
   | `resume_versions` | same_except | 제목·목표 직무·템플릿·블라인드·쪽 수 한도·최신 revision·이은 지원·`updated_at` (c0047) | 종류·위 판본·복사해 온 revision·만든 사람·만든 시각이 정체. revision은 `UNIQUE (version_id, revision_no)`, 줄 근거는 `UNIQUE (revision_id, line_id)`로 겹침을 찾는다 |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |

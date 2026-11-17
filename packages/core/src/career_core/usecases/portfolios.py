@@ -3,7 +3,7 @@
 - 항목은 경험 하나에 붙는다(``experience_id`` 필수, 이 공간의 활성 경험만). 본문("문제 → 내 역할 → 한 일 → 결과")은
   revision으로만 바뀐다 — 이력서 판본과 같은 409(``base_revision``)·같은 요청 키·같은 내용이면 새 revision 없음.
   결과·한 일 줄은 그 경험(과 바로 아래 경험)의 **확인한 사실**에서 고르고(``portfolio_line_claims``), 직접 쓴 줄과
-  문제·내 역할 글은 "근거 없음"이다. 사실이 바뀌면 "오래됨", 확인이 풀리면 "근거 끊김"으로 보이고 저절로 바뀌지 않는다.
+  문제·내 역할 글은 "근거 없음"이다. 사실이 바뀌면 "오래됨", 확인이 풀리면 "근거 사라짐"으로 보이고 저절로 바뀌지 않는다.
 - 이미지는 브라우저가 줄여 다시 인코딩한 파일만 받는다. 서버는 형식(JPEG·PNG)·용량·크기를 다시 보고 메타데이터를
   한 번 더 지운다(``domain.profiles.strip_metadata``, 프로필 사진과 같은 코드). 넘으면 거부한다(다시 줄이지 않는다).
   이미지 바이트는 모델·MCP·검색 색인으로 가지 않는다.
@@ -957,7 +957,7 @@ async def _lineage(s: AsyncSession, b: PortfolioBundle) -> list[dict[str, Any]]:
 
 
 async def _prep_items(s: AsyncSession, application_id: UUID | None) -> list[UUID]:
-    """지원 준비에서 고른 경험 순서 → 그 경험의 항목 (나만 항목은 빼고, 경험마다 최근에 고친 순)."""
+    """지원 준비에서 고른 경험 순서 → 그 경험의 항목 (나만 항목은 빼고, 경험마다 최근에 수정한 순)."""
     from career_core.usecases.resumes import _prep_choice_order
 
     order = await _prep_choice_order(s, application_id)
@@ -1607,7 +1607,7 @@ async def check_bundle(db: Database, actor: ActorContext, bundle_id: UUID) -> di
 
 
 async def items_for_experiences(s: AsyncSession, exp_ids: Sequence[UUID]) -> dict[str, str]:
-    """경험 ID → 그 경험의 항목 하나 (나만 항목은 빼고 최근에 고친 것). 이력서 편집기의 "포트폴리오" 링크용."""
+    """경험 ID → 그 경험의 항목 하나 (나만 항목은 빼고 최근에 수정한 것). 이력서 편집기의 "포트폴리오" 링크용."""
     if not exp_ids:
         return {}
     out: dict[str, str] = {}

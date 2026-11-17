@@ -672,3 +672,25 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 두 표 모두 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
 - 내보내기: 카탈로그로 자동 포함, `@schema_step("c0048")`(옛 묶음엔 빈 표). 합치기 키는 DB UNIQUE(지원마다 준비 하나, 준비 안의 `source_key`).
 - 시험: `packages/core/tests/test_interview_prep.py`.
+
+## 포트폴리오 (c0049, O18)
+
+`c0049` (`down_revision = c0048`). 경험에 붙는 포트폴리오 항목과 골라 순서를 정한 묶음 (plan §19.6).
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `portfolio_items` | 항목 하나. 경험(`experience_id` NOT NULL, NO ACTION — 경험은 지우지 않고 보관한다)·제목(1–200)·공개 범위(`public`·`application`·`private`)·기술 태그(20개 이하)·링크 JSON 배열(종류 `repo`·`demo`·`article`·`video`, 10개 이하)·최신 revision 번호·만든 사람·시각 | 전체 |
+| `portfolio_item_revisions` | 항목 본문(문제·내 역할·한 일·결과). `UNIQUE (item_id, revision_no)`, `UNIQUE (item_id, idempotency_key)`. 본문 JSON·내용 해시·출처(`user`·`agent`)·이유 | SELECT, INSERT |
+| `portfolio_line_claims` | revision의 줄 ↔ 확인한 사실. `UNIQUE (revision_id, line_id)`, revision이 지워지면 함께, 사실은 NO ACTION | SELECT, INSERT |
+| `portfolio_images` | 스크린샷·구성도. 순서·종류(`screenshot`·`diagram`)·설명(200자 이하)·공개 범위(기본 `private`)·형식(`image/jpeg`·`image/png`)·가로·세로(16–1600)·크기(1MiB 이하)·sha256(`UNIQUE (item_id, sha256)`)·`blob_key`. 항목이 지워지면 함께 | 전체 |
+| `portfolio_bundles` | 묶음: 종류(`all`·`role`·`posting`)·제목·직무·소개(1000자 이하)·위 묶음 `parent_id`(FK `SET NULL (parent_id)`, `DEFERRABLE INITIALLY IMMEDIATE`)·복사할 때의 위 묶음 revision `source_revision`·이은 지원(공고별만, `SET NULL (application_id)`)·revision(항목 목록을 바꿀 때마다 오름, 409용). 전체 묶음은 위 묶음이 없다(CHECK) | 전체 |
+| `portfolio_bundle_items` | 묶음 안의 항목과 순서. `UNIQUE (bundle_id, item_id)`, 묶음·항목이 지워지면 함께 | 전체 |
+| `github_tokens` | 비공개 저장소를 읽는 사용자 토큰(선택). 공간마다 하나(`UNIQUE workspace_id`), `SecretBox`(Fernet) 암호문(4096바이트 이하)·끝 4자리 | 전체 |
+
+- 본문(`domain/portfolio.py`): 문제·내 역할은 글, 한 일·결과는 줄 목록(ID·글·출처 `claim`/`user`/`ai`, 사실이면 `claim_id`와 그때 문장의 해시). 줄 상태는 저장하지 않고 읽을 때 계산한다: `none`(근거 없음)·`ok`·`stale`(문장이 바뀜)·`broken`(확인이 풀림·은퇴). 연산은 `set_text`·`add_line`·`update_line`·`remove_line`·`move_line`·`refresh_line`.
+- 공개 범위 규칙(`visible_in`): 전체·직무별 묶음과 묶음 없는 보기(Markdown·MCP 항목)는 `public`만, 공고별 묶음은 `application`까지. `private`은 어디에도 없다. 이미지는 항목과 이미지 둘 다 보여야 나간다.
+- 이미지 바이트는 BlobStore(원본과 같은 저장소)에 있고 다른 행이 같은 key를 쓰지 않으면 지울 때 함께 지운다. 모델·MCP·검색 색인으로 가는 경로가 없다.
+- 권한: `portfolio.read`(read)·`portfolio.write`(draft-write)·`portfolio.import`(draft-write, GitHub 공개 저장소 가져오기)·`portfolio.token`(workspace-admin, 토큰 넣기·지우기와 비공개 저장소 가져오기).
+- 모든 표 FORCE RLS, 다른 공간 행은 복합 FK `(workspace_id, id)`가 막는다.
+- 내보내기: 카탈로그로 자동 포함(이미지 파일은 `blobs/`), `@schema_step("c0049")`(옛 묶음엔 빈 표). `github_tokens`는 `EXCLUDED_TABLES`(비밀). 합치기 키: 항목·묶음 same_except, revision·줄 근거·이미지·묶음 항목은 DB UNIQUE.
+- 시험: `packages/core/tests/test_portfolio.py`.

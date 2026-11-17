@@ -443,6 +443,14 @@ function Strip({
             </Link>
             <span aria-hidden>·</span>
             <Link
+              to="/brain/portfolio"
+              search={{ application: app.id }}
+              className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-6"
+            >
+              이 공고용 포트폴리오
+            </Link>
+            <span aria-hidden>·</span>
+            <Link
               to="/applications/$applicationId/interview"
               params={{ applicationId: app.id }}
               className="inline-flex min-h-9 items-center underline underline-offset-2 hover:text-fg sm:min-h-6"

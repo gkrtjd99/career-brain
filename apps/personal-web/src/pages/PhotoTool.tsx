@@ -14,6 +14,7 @@ import {
 } from "react";
 import { PageHeader } from "../components/common";
 import { SaveToProfile } from "../components/profile/SaveToProfile";
+import { decodeErrorText, decodeFile, type DecodedImage } from "../lib/imageShrink";
 import * as P from "../lib/photo";
 
 /**
@@ -32,13 +33,7 @@ const BACKGROUNDS: [string, string][] = [
 const GUIDE_HEAD_TOP = 0.1;
 const GUIDE_CHIN = 0.8;
 
-interface Source {
-  img: CanvasImageSource;
-  width: number;
-  height: number;
-  name: string;
-  close: () => void;
-}
+type Source = DecodedImage;
 
 type SizeMode = "preset" | "px" | "cm";
 
@@ -63,47 +58,6 @@ interface Output {
 }
 
 class UnsupportedFormat extends Error {}
-
-function isHeic(file: File) {
-  return /hei[cf]/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
-}
-
-/** EXIF 방향을 따라 연다. createImageBitmap이 못 열면 <img>로 한 번 더 (Safari는 HEIC를 이쪽으로 연다). */
-async function decodeFile(file: File): Promise<Source> {
-  try {
-    const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
-    if (bmp.width && bmp.height)
-      return { img: bmp, width: bmp.width, height: bmp.height, name: file.name, close: () => bmp.close() };
-  } catch {
-    /* 아래 <img> 경로 */
-  }
-  const url = URL.createObjectURL(file);
-  try {
-    const el = new Image();
-    el.src = url;
-    await el.decode();
-    if (!el.naturalWidth || !el.naturalHeight) throw new Error("empty");
-    return {
-      img: el,
-      width: el.naturalWidth,
-      height: el.naturalHeight,
-      name: file.name,
-      close: () => URL.revokeObjectURL(url),
-    };
-  } catch (e) {
-    URL.revokeObjectURL(url);
-    throw e;
-  }
-}
-
-function decodeErrorText(file: File): string {
-  if (isHeic(file))
-    return (
-      "이 브라우저는 HEIC/HEIF 사진을 열지 못합니다. 아이폰이면 사진 앱에서 JPG로 내보내거나 " +
-      "설정 → 카메라 → 포맷을 '높은 호환성'으로 바꿔 찍은 뒤 다시 올려 주세요. Safari에서는 열릴 수 있습니다."
-    );
-  return "이 파일을 사진으로 읽지 못했습니다. JPG·PNG·WebP 파일인지 확인하세요.";
-}
 
 async function renderOutput(
   src: Source,
