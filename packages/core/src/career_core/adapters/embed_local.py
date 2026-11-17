@@ -3,6 +3,7 @@
 설치: `career-core[local-embed]`. 모델 파일은 처음 쓸 때 한 번 받는다 (`model_dir`).
 자료가 이 기계 밖으로 나가지 않으므로 게이트웨이가 egress 검사를 하지 않는다.
 모델은 처음 호출할 때 올리고, 프로세스가 살아 있는 동안 재사용한다.
+같은 엔드포인트가 검색 결과 다시 정렬(`routes.rerank`, fastembed `TextCrossEncoder`)도 맡는다.
 
 어휘 자르기 (potion-multilingual-128M): 다국어 Unigram 토크나이저(어휘 50만 개)가 상주 메모리의 대부분이다.
 한국어·영어 자료에 나올 수 없는 토큰(허용 글자 밖의 글자가 든 토큰: 키릴·아랍·가나 문자, 이모지 등)을
@@ -30,6 +31,7 @@ from career_core.llm.types import (
     EMBED_QUERY,
     EmbeddingCompletion,
     ModelCallError,
+    RerankCompletion,
     TokenUsage,
     UsagePart,
 )
@@ -267,6 +269,33 @@ class LocalEmbeddingClient:
                     raise ModelCallError("model_not_found") from exc
                 self._models[name] = model
             return model
+
+    def _cross_encoder(self, name: str) -> Any:
+        """검색 결과 다시 정렬용 cross-encoder (`routes.rerank`). 임베딩 모델과 같은 캐시·내리기를 쓴다."""
+        key = "rerank:" + name
+        with self._lock:
+            model = self._models.get(key)
+            if model is None:
+                try:
+                    from fastembed.rerank.cross_encoder import TextCrossEncoder
+                except ImportError as exc:
+                    raise ModelCallError("local_rerank_not_installed") from exc
+                try:
+                    model = TextCrossEncoder(name, cache_dir=self._cache_dir, threads=self._threads)
+                except ValueError as exc:
+                    raise ModelCallError("model_not_found") from exc
+                self._models[key] = model
+            return model
+
+    def _rerank(self, model: str, query: str, documents: Sequence[str]) -> tuple[float, ...]:
+        engine = self._cross_encoder(model)
+        return tuple(float(x) for x in engine.rerank(query, list(documents), batch_size=32))
+
+    async def rerank(self, model: str, query: str, documents: Sequence[str]) -> RerankCompletion:
+        scores = await asyncio.to_thread(self._rerank, model, query, list(documents))
+        self._touch()
+        usage = TokenUsage(input_tokens=len(query) * len(documents) + sum(map(len, documents)))
+        return RerankCompletion(scores=scores, model=model, parts=(UsagePart(model, usage),))
 
     def _run(self, model: str, texts: Sequence[str], input_type: str) -> list[tuple[float, ...]]:
         engine = self._model(model)

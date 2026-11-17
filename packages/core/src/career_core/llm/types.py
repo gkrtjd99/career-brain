@@ -162,3 +162,37 @@ class EmbeddingResult:
     cost_usd: str | None
     cost_basis: str
     call_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RerankCompletion:
+    """다시 정렬 어댑터의 원시 결과: 글마다 점수 하나(클수록 질문에 맞음, 보낸 순서 그대로).
+
+    장부 기록을 위해 ModelCompletion과 같은 이름의 필드를 둔다.
+    """
+
+    scores: tuple[float, ...]
+    model: str
+    parts: tuple[UsagePart, ...] = ()
+    request_id: str | None = None
+    stop_reason: str | None = None
+    reported_cost_usd: Decimal | None = None
+
+    @property
+    def usage(self) -> TokenUsage:
+        total = TokenUsage()
+        for part in self.parts:
+            total = total + part.usage
+        return total
+
+
+@dataclass(frozen=True, slots=True)
+class RerankResult:
+    """게이트웨이가 돌려주는 다시 정렬 결과. 점수는 보낸 글 순서 그대로."""
+
+    scores: tuple[float, ...]
+    endpoint: str
+    model: str
+    cost_usd: str | None
+    cost_basis: str
+    call_id: str

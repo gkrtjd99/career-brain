@@ -4,6 +4,8 @@
 
     uv run python -m career_core.evals.search_eval --models models.toml
 
+설정에 `routes.rerank`가 있으면 다시 정렬한 결과도 따로 잰다 (`keyword+rr`, `hybrid+rr`).
+
 (임시 DB를 만들 수 있는 관리자 접속: `CAREER_TEST_ADMIN_URL`, 기본은 로컬 docker compose)
 """
 
@@ -13,7 +15,8 @@ import argparse
 import asyncio
 import json
 import tempfile
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field, replace
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -102,14 +105,25 @@ class Score:
     hit1: int = 0
     hit5: int = 0
     total: int = 0
+    rr: float = 0.0  # MRR@10의 합 (10위 밖은 0)
+    seconds: list[float] = field(default_factory=list)  # 질문마다 검색 시간
 
-    def add(self, rank: int | None) -> None:
+    def add(self, rank: int | None, seconds: float | None = None) -> None:
         self.total += 1
         self.hit1 += rank == 1
         self.hit5 += rank is not None and rank <= 5
+        self.rr += 1 / rank if rank is not None and rank <= 10 else 0.0
+        if seconds is not None:
+            self.seconds.append(seconds)
 
     def __str__(self) -> str:
-        return f"recall@1 {self.hit1}/{self.total}  recall@5 {self.hit5}/{self.total}"
+        mrr = self.rr / self.total if self.total else 0.0
+        out = f"recall@1 {self.hit1}/{self.total}  recall@5 {self.hit5}/{self.total}  MRR {mrr:.3f}"
+        if self.seconds:
+            ms = sorted(x * 1000 for x in self.seconds)
+            p95 = ms[min(len(ms) - 1, int(len(ms) * 0.95))]
+            out += f"  p50 {ms[len(ms) // 2]:.0f}ms p95 {p95:.0f}ms"
+        return out
 
 
 def rank_of(hits, expect: str) -> int | None:
@@ -119,17 +133,37 @@ def rank_of(hits, expect: str) -> int | None:
     return None
 
 
+PRIVATE = frozenset({"private"})
+Mode = tuple[ModelGateway | None, bool]  # (게이트웨이, 다시 정렬)
+
+
+async def _timed(db, actor, q: str, gw, rerank: bool, **kw):
+    started = time.perf_counter()
+    result = await search(db, actor, q, gateway=gw, limit=10, rerank=rerank, **kw)
+    if rerank and not result.reranked and result.rerank_note not in (None, "single_word"):
+        raise SystemExit(f"rerank failed: {result.rerank_note}")
+    return result, time.perf_counter() - started
+
+
 async def evaluate(
-    db: Database, actor: ActorContext, fx: dict, gateway: ModelGateway | None
+    db: Database,
+    actor: ActorContext,
+    fx: dict,
+    gateway: ModelGateway | None,
+    *,
+    modes: dict[str, Mode] | None = None,
 ) -> dict[str, dict[str, Score]]:
-    """{"keyword"|"hybrid": {"keyword"|"paraphrase"|"all"|"alias"|"alias_off": Score}}
+    """{"keyword"|"hybrid"|…: {"keyword"|"paraphrase"|"all"|"alias"|"alias_off": Score}}
 
     `all`은 30문항(keyword + paraphrase)만 센다. `alias`는 별칭 질문(`alias_queries`, 공간 별칭 사전으로
-    넓힘), `alias_off`는 같은 질문을 넓히지 않고 (비교용).
+    넓힘), `alias_off`는 같은 질문을 넓히지 않고 (비교용). `modes`를 주지 않으면 키워드만과 결합(게이트웨이).
     """
     out: dict[str, dict[str, Score]] = {}
-    modes = {"keyword": None, "hybrid": gateway} if gateway else {"keyword": None}
-    for mode, gw in modes.items():
+    if modes is None:
+        modes = {"keyword": (None, False)}
+        if gateway:
+            modes["hybrid"] = (gateway, False)
+    for mode, (gw, rerank) in modes.items():
         scores = {
             "keyword": Score(),
             "paraphrase": Score(),
@@ -138,13 +172,13 @@ async def evaluate(
             "alias_off": Score(),
         }
         for q in fx["queries"]:
-            result = await search(db, actor, q["q"], gateway=gw, limit=5)
+            result, took = await _timed(db, actor, q["q"], gw, rerank)
             r = rank_of(result.hits, q["expect"])
             scores[q["type"]].add(r)
-            scores["all"].add(r)
+            scores["all"].add(r, took)
         for q in fx.get("alias_queries", []):
             for key, expand in (("alias", True), ("alias_off", False)):
-                result = await search(db, actor, q["q"], gateway=gw, limit=5, expand_aliases=expand)
+                result, _ = await _timed(db, actor, q["q"], gw, rerank, expand_aliases=expand)
                 scores[key].add(rank_of(result.hits, q["expect"]))
         out[mode] = scores
     return out
@@ -161,18 +195,30 @@ async def _main(models_path: str | None) -> None:
         try:
             ws, subject = await create_workspace(db, name="eval", owner_display_name="eval")
             actor = ActorContext(subject, ws, scopes_for_role(Role.OWNER))
-            gateway = (
-                ModelGateway(db, config, PriceBook.load(*config.price_files))
-                if config.embedding_route()
-                else None
-            )
+            prices = PriceBook.load(*config.price_files)
+            gateway = ModelGateway(db, config, prices) if config.embedding_route() else None
+            modes: dict[str, Mode] = {"keyword": (None, False)}
+            if config.rerank_route():
+                # 키워드 + 다시 정렬: 임베딩 라우트를 뺀 설정
+                no_embed = {k: v for k, v in config.routes.items() if k != "embed"}
+                keyword_rr = ModelGateway(db, replace(config, routes=no_embed), prices)
+                modes["keyword+rr"] = (keyword_rr, True)
+            if gateway:
+                modes["hybrid"] = (gateway, False)
+                if config.rerank_route():
+                    modes["hybrid+rr"] = (gateway, True)
             await seed(db, LocalBlobStore(Path(tmp)), actor, load_fixture())
             if gateway:
                 await run_until_idle(db, index_handlers(IndexDeps(db, gateway)))
                 print("embedding space:", gateway.embedding_space())
-            for mode, scores in (await evaluate(db, actor, load_fixture(), gateway)).items():
+            if route := config.rerank_route():
+                print(f"rerank: {route.endpoint}/{route.model} top_n {config.rerank.top_n}")
+                # 모델을 먼저 올린다 (첫 질문의 시간에 올리는 시간이 섞이지 않게)
+                await keyword_rr.rerank(actor, "warm up", ["a", "b"], data_classes=PRIVATE)
+            fx = load_fixture()
+            for mode, scores in (await evaluate(db, actor, fx, gateway, modes=modes)).items():
                 for kind, score in scores.items():
-                    print(f"{mode:8} {kind:10} {score}")
+                    print(f"{mode:10} {kind:10} {score}")
         finally:
             await db.dispose()
 

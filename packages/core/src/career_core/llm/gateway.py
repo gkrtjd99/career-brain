@@ -22,6 +22,7 @@ from career_core.llm.config import (
     BILLING_METERED,
     EMBED_PURPOSE,
     KIND_LOCAL,
+    RERANK_PURPOSE,
     EndpointConfig,
     ModelsConfig,
     Route,
@@ -35,6 +36,8 @@ from career_core.llm.types import (
     ModelDenied,
     ModelRequest,
     ModelResult,
+    RerankCompletion,
+    RerankResult,
 )
 from career_core.policies import ProviderEgressPolicy
 from career_core.ports import (
@@ -43,6 +46,7 @@ from career_core.ports import (
     EgressPolicy,
     EmbeddingClient,
     ModelClient,
+    RerankClient,
 )
 
 ClientFactory = Callable[[EndpointConfig, str | None], "ModelClient | EmbeddingClient"]
@@ -572,8 +576,119 @@ class ModelGateway:
             call_id=str(call_id),
         )
 
+    # ------------------------------------------------------------ 검색 결과 다시 정렬
+
+    @property
+    def rerank_top_n(self) -> int:
+        return self._config.rerank.top_n
+
+    def rerank_status(self) -> str | None:
+        """다시 정렬을 쓸 수 없는 이유 (쓸 수 있으면 None): ``no_route`` 또는 ``api_key_missing``.
+
+        라우트가 없으면 검색은 RRF 순서 그대로다 (호출·장부 기록 없음).
+        """
+        route = self._config.rerank_route()
+        if route is None:
+            return "no_route"
+        endpoint = self._config.endpoints[route.endpoint]
+        if endpoint.api_key_env and not self._env.get(endpoint.api_key_env):
+            return "api_key_missing"
+        return None
+
+    def rerank_leaves_host(self) -> bool:
+        route = self._config.rerank_route()
+        return route is not None and self._config.endpoints[route.endpoint].leaves_host
+
+    def rerank_allows(self, actor: ActorContext, data_class: str) -> bool:
+        """보내기 전에 결과마다 등급을 거르기 위한 미리보기. 실제 판단은 rerank()가 다시 한다."""
+        route = self._config.rerank_route()
+        if route is None:
+            return False
+        endpoint = self._config.endpoints[route.endpoint]
+        if not endpoint.leaves_host:
+            return True
+        return self._egress.allows(actor, endpoint.name, data_class, RERANK_PURPOSE)
+
+    async def rerank(
+        self,
+        actor: ActorContext,
+        query: str,
+        documents: Sequence[str],
+        *,
+        data_classes: frozenset[str],
+    ) -> RerankResult:
+        """검색 결과 발췌를 질문에 맞는 순서로 점수 매긴다 (점수는 보낸 순서 그대로).
+
+        로컬 cross-encoder면 이 기계 안에서 끝난다. 그 밖의 연결은 대화 모델에 목록을 보내고 순서를 받는다:
+        다른 호출과 같은 순서(egress·단가·예산·장부, ``purpose = 'rerank'``)를 지난다.
+        """
+        if self._overlay is not None:
+            scoped = await self.view(actor.workspace_id)
+            return await scoped.rerank(actor, query, documents, data_classes=data_classes)
+        route = self._config.rerank_route()
+        if route is None:
+            raise ModelDenied("no_route")
+        endpoint = self._config.endpoints[route.endpoint]
+        if endpoint.kind != KIND_LOCAL:
+            from career_core.llm.rerank import build_request, parse_ranking
+
+            res = await self.run(
+                actor, RERANK_PURPOSE, build_request(query, documents, data_classes)
+            )
+            return RerankResult(
+                scores=parse_ranking(res.text, len(documents)),
+                endpoint=res.endpoint,
+                model=res.model,
+                cost_usd=res.cost_usd,
+                cost_basis=res.cost_basis,
+                call_id=res.call_id,
+            )
+        plan = _Plan(route, endpoint, endpoint.price_as)
+        purpose = RERANK_PURPOSE
+        denial = await self._precheck(actor, purpose, data_classes, plan)
+        if denial:
+            await self._record(actor, purpose, plan, status="denied", error_code=denial)
+            raise ModelDenied(denial)
+        started = time.perf_counter()
+        client = self._client(endpoint, None)
+        try:
+            if not isinstance(client, RerankClient):
+                raise ModelCallError("rerank_not_supported")
+            completion = await client.rerank(route.model, query, list(documents))
+            if len(completion.scores) != len(documents):
+                raise ModelCallError("rerank_count_mismatch")
+        except ModelCallError as exc:
+            await self._record(
+                actor, purpose, plan, status="error", error_code=exc.code, latency=started
+            )
+            raise
+        except Exception as exc:
+            await self._record(
+                actor, purpose, plan, status="error", error_code=type(exc).__name__, latency=started
+            )
+            raise
+        cost, basis = self._cost(plan, completion)
+        call_id = await self._record(
+            actor,
+            purpose,
+            plan,
+            status="ok",
+            completion=completion,
+            cost=cost,
+            basis=basis,
+            latency=started,
+        )
+        return RerankResult(
+            scores=completion.scores,
+            endpoint=endpoint.name,
+            model=completion.model,
+            cost_usd=str(cost.usd) if cost.usd is not None else None,
+            cost_basis=basis,
+            call_id=str(call_id),
+        )
+
     def _cost(
-        self, plan: _Plan, completion: ModelCompletion | EmbeddingCompletion
+        self, plan: _Plan, completion: ModelCompletion | EmbeddingCompletion | RerankCompletion
     ) -> tuple[Cost, str]:
         metered = plan.endpoint.billing == BILLING_METERED
         if metered and completion.reported_cost_usd is not None:
@@ -601,7 +716,7 @@ class ModelGateway:
         *,
         status: str,
         error_code: str | None = None,
-        completion: ModelCompletion | EmbeddingCompletion | None = None,
+        completion: ModelCompletion | EmbeddingCompletion | RerankCompletion | None = None,
         cost: Cost | None = None,
         basis: str | None = None,
         latency: float | None = None,

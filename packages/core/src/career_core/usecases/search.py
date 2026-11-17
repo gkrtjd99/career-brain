@@ -12,6 +12,10 @@
   찾고 결과의 `record`가 `reference`다 (내 경험이 아니다). 증빙 원본(`proof`)의 글은 어떤 경우에도 결과에 없다.
 - 학습 메모(`study_note`)·오답(`study_mistake`)은 `kinds`로 요청하면 찾는다. 결과의 `record`는 `study`로,
   경험(`experience`)과 구분한다. 학습 기록은 경험의 근거가 아니다 (경험 제목·주장 상태를 붙이지 않는다).
+- 다시 정렬(선택, `routes.rerank`): `rerank=True`로 부르고 라우트가 있을 때만 RRF 순서의 앞 `top_n`개를
+  질문과 결과 발췌(snippet)로 다시 정렬한다. 나머지는 RRF 순서 그대로 뒤에 둔다. 라우트가 없거나 실패하면
+  RRF 순서 그대로다. 기계 밖으로 나가는 연결이면 그 연결이 허용한 등급의 결과만 보내고(restricted는 보내지
+  않음), 보내지 않은 결과는 제자리에 둔다. `score`는 RRF 점수 그대로다.
 """
 
 from __future__ import annotations
@@ -130,6 +134,32 @@ LIMIT :k
 )
 
 
+# 다시 정렬에 보낼 결과의 자료 등급 (indexing.TARGETS_SQL과 같은 규칙: 주장은 근거 원본 중 가장 높은 등급,
+# 근거가 없으면 private, 블록은 원본 등급, 그 밖은 private). 기계 밖으로 나가는 연결일 때만 본다.
+DATA_CLASS_SQL = """
+SELECT 'claim' AS kind, c.id,
+       COALESCE((
+           SELECT max(CASE s.data_class WHEN 'restricted' THEN 2 WHEN 'private' THEN 1 ELSE 0 END)
+           FROM core.claim_evidence ce
+           JOIN core.source_spans sp ON sp.id = ce.source_span_id
+           JOIN core.document_blocks b ON b.id = sp.document_block_id
+           JOIN core.parse_runs pr ON pr.id = b.parse_run_id
+           JOIN core.source_versions sv ON sv.id = pr.source_version_id
+           JOIN core.sources s ON s.id = sv.source_id
+           WHERE ce.claim_id = c.id
+       ), 1) AS rank
+FROM core.claims c WHERE c.id = ANY(CAST(:claims AS uuid[]))
+UNION ALL
+SELECT 'block', b.id, CASE s.data_class WHEN 'restricted' THEN 2 WHEN 'private' THEN 1 ELSE 0 END
+FROM core.document_blocks b
+JOIN core.parse_runs pr ON pr.id = b.parse_run_id
+JOIN core.source_versions sv ON sv.id = pr.source_version_id
+JOIN core.sources s ON s.id = sv.source_id
+WHERE b.id = ANY(CAST(:blocks AS uuid[]))
+"""
+_CLASS_NAMES = {0: "public", 1: "private", 2: "restricted"}
+
+
 @dataclass(frozen=True, slots=True)
 class SearchHit:
     kind: str
@@ -158,6 +188,8 @@ class SearchHit:
     study_title: str | None = None
     # c0032: 원본 용도. 참고 원본의 글이면 reference (record도 reference)
     purpose: str = "experience"
+    # 다시 정렬한 결과만: 다시 정렬한 묶음(앞 top_n개) 안에서의 순위
+    rerank_rank: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +211,9 @@ class SearchResult:
     notes: list[str] = field(default_factory=list)
     # 키워드 검색에 더한 별칭 표기 (없으면 빈 목록). 의미 검색(질문 임베딩)에는 넣지 않는다.
     expanded_terms: list[ExpandedTerm] = field(default_factory=list)
+    # 다시 정렬했는가. 요청했고 라우트가 있는데 못 했으면 rerank_note에 이유 (순서는 RRF 그대로)
+    reranked: bool = False
+    rerank_note: str | None = None
 
 
 _HANGUL_TOKEN = re.compile(r"[가-힣]+")
@@ -334,9 +369,12 @@ async def search(
     limit: int = 10,
     expand_aliases: bool = True,
     include_reference: bool = False,
+    rerank: bool = False,
 ) -> SearchResult:
     """`expand_aliases=False`면 별칭으로 넓히지 않는다 (평가 비교용).
-    `include_reference=True`면 참고 원본의 글도 찾는다 (결과의 `record = reference`)."""
+    `include_reference=True`면 참고 원본의 글도 찾는다 (결과의 `record = reference`).
+    `rerank=True`면 `routes.rerank`가 있을 때 앞 결과를 다시 정렬한다 (사람·AI가 순서대로 읽는 검색 화면·MCP).
+    여러 번 묶어 부르는 곳(지원 준비·연결 후보)은 점수만 쓰므로 부르지 않는다."""
     purposes = [EXPERIENCE, REFERENCE] if include_reference else [EXPERIENCE]
     query = " ".join((query or "").split())[:MAX_QUERY_CHARS]
     kinds = tuple(k for k in kinds if k in ALL_KINDS) or KINDS
@@ -427,7 +465,89 @@ async def search(
     ordered = sorted(
         merged,
         key=lambda k: (-scores[k], merged[k].keyword_rank is None, k[0], str(k[1])),
-    )[:limit]
-    hits = [replace(merged[k], score=round(scores[k], 6)) for k in ordered]
+    )
+    reranked, rerank_note = False, None
+    if rerank and gateway is not None and gateway.rerank_status() != "no_route":
+        head_n = max(gateway.rerank_top_n, 2)
+        head = [replace(merged[k], score=round(scores[k], 6)) for k in ordered[:head_n]]
+        head, reranked, rerank_note = await _rerank(db, actor, gateway, query, head)
+        hits = (head + [replace(merged[k], score=round(scores[k], 6)) for k in ordered[head_n:]])[
+            :limit
+        ]
+    else:
+        hits = [replace(merged[k], score=round(scores[k], 6)) for k in ordered[:limit]]
     mode = "hybrid" if semantic_rows else "keyword"
-    return SearchResult(query, hits, mode, None if semantic_rows else note, expanded_terms=expanded)
+    return SearchResult(
+        query,
+        hits,
+        mode,
+        None if semantic_rows else note,
+        expanded_terms=expanded,
+        reranked=reranked,
+        rerank_note=rerank_note,
+    )
+
+
+async def _data_classes(db: Database, actor: ActorContext, hits: list[SearchHit]) -> list[str]:
+    """결과마다 자료 등급. 찾지 못한 결과는 restricted로 본다 (보내지 않는다)."""
+    claims = [h.id for h in hits if h.kind == "claim"]
+    blocks = [h.id for h in hits if h.kind == "block"]
+    found: dict[tuple[str, UUID], int] = {}
+    if claims or blocks:
+        async with db.workspace_session(actor.workspace_id) as s:
+            rows = await s.execute(text(DATA_CLASS_SQL), {"claims": claims, "blocks": blocks})
+            found = {(r.kind, r.id): r.rank for r in rows}
+    out = []
+    for h in hits:
+        if h.kind in ("claim", "block"):
+            out.append(_CLASS_NAMES.get(found.get((h.kind, h.id), 2), "restricted"))
+        else:
+            out.append("private")  # 인터뷰 답·학습 기록 (색인과 같은 규칙)
+    return out
+
+
+async def _rerank(
+    db: Database,
+    actor: ActorContext,
+    gateway: ModelGateway,
+    query: str,
+    head: list[SearchHit],
+) -> tuple[list[SearchHit], bool, str | None]:
+    """앞 결과를 다시 정렬한다. 보낼 수 없는 결과는 제자리에, 보낸 결과끼리 자리를 바꾼다.
+
+    보내는 글은 결과의 발췌(snippet) 그대로다. 실패하면 받은 순서 그대로 돌려준다.
+    낱말 하나짜리 질문(`MySQL`, `k8s`)은 다시 정렬하지 않는다: 그 낱말이 든 결과를 찾는 질문인데,
+    cross-encoder는 짧은 질문의 점수가 고르지 않아 낱말이 든 결과를 뒤로 미는 일이 있었다 (search.md 측정).
+    """
+    if len(head) < 2:
+        return head, False, None
+    if len(query.split()) < 2:
+        return head, False, "single_word"
+    if (status := gateway.rerank_status()) is not None:
+        return head, False, status
+    if gateway.rerank_leaves_host():
+        if not actor.has_scope("egress"):
+            return head, False, "egress_scope_required"
+        classes = await _data_classes(db, actor, head)
+        sendable = [i for i, dc in enumerate(classes) if gateway.rerank_allows(actor, dc)]
+        sent_classes = frozenset(classes[i] for i in sendable)
+    else:
+        sendable = list(range(len(head)))  # 이 기계 안에서 끝난다
+        sent_classes = frozenset({"private"})
+    if len(sendable) < 2:
+        return head, False, "nothing_to_send"
+    try:
+        res = await gateway.rerank(
+            actor, query, [head[i].snippet for i in sendable], data_classes=sent_classes
+        )
+    except ModelDenied as exc:
+        return head, False, f"denied:{exc.code}"
+    except ModelCallError as exc:
+        return head, False, f"error:{exc.code}"
+    except Exception as exc:  # noqa: BLE001 - 선택 단계: 어떤 실패든 RRF 순서로 돌아간다 (장부에 남음)
+        return head, False, f"error:{type(exc).__name__}"
+    order = sorted(range(len(sendable)), key=lambda j: (-res.scores[j], j))
+    out = list(head)
+    for slot, j in zip(sendable, order, strict=True):
+        out[slot] = head[sendable[j]]
+    return [replace(h, rerank_rank=i) for i, h in enumerate(out, start=1)], True, None

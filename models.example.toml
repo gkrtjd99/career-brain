@@ -38,7 +38,7 @@ data_classes = ["public"]
 # data_classes = ["public", "private"]
 
 # --- 로컬 임베딩 (fastembed, CPU). 설치: `uv sync --extra local-embed` 또는 이미지 빌드 시 EXTRAS=local-embed.
-# 자료가 기계 밖으로 나가지 않으므로 restricted 자료까지 색인한다. 채팅 라우트에는 쓸 수 없다.
+# 자료가 기계 밖으로 나가지 않으므로 restricted 자료까지 색인한다. 채팅 라우트에는 쓸 수 없다 (embed·rerank만).
 # 모델 파일은 처음 쓸 때 받는다 (CAREER_MODEL_DIR 또는 model_dir).
 # [endpoints.embed-local]
 # preset = "local"
@@ -67,6 +67,11 @@ interview = "claude/claude-opus-5-5"     # 인터뷰 질문 생성
 # 바꾼 뒤에는 `personal-api reindex`로 다시 색인한다. 모델·차원이 다른 벡터는 섞지 않는다.
 # 비교: docs/architecture/search.md "임베딩만 비교"
 embed = "openai/text-embedding-3-large"
+# 검색 결과 다시 정렬 (선택, 기본 꺼짐). default로 넘어가지 않는다. 검색 화면·MCP 검색의 앞 결과(top_n)를 다시 정렬한다.
+# 권장: 로컬 cross-encoder (위 [endpoints.embed-local]을 켠다). 바꿔 말한 질문에서 R@1이 크게 오르지만
+# 모델 파일 0.57GB, 사용 중 RAM ~1.3GB, 질문당 0.4~1.4초가 든다. 비교: docs/architecture/search.md "결과 다시 정렬"
+# 대화 모델 연결도 가리킬 수 있다(결과 발췌를 보낸다, restricted는 보내지 않음). 재지 않았고 권하지 않는다.
+# rerank = "embed-local/BAAI/bge-reranker-v2-m3-int8"
 # 판정 모델 (참고 의견만: 자동 연결·충족 판정 없음). 없으면 기준선(검색 점수·단어 일치)만. default로 넘어가지 않는다.
 # judge_claim = "claude/claude-haiku-5-5"        # 학습 연결 후보: "이 주장이 요건을 보여 주는가" + 이유
 # judge_visibility = "claude/claude-haiku-5-5"   # 지원 문서 요건 가시성 + 문서 속 인용
@@ -76,6 +81,9 @@ embed = "openai/text-embedding-3-large"
 [embedding]
 dimensions = 1024  # OpenAI text-embedding-3만. 3-large는 1024와 3072의 정확도가 같고, pgvector HNSW 색인은 2000차원까지.
 # batch_size = 64
+
+# [rerank]
+# top_n = 20  # 다시 정렬할 앞 결과 수 (2~50). 10이면 시간이 절반, 정확도는 조금 낮다.
 
 [budget]
 monthly_usd = "20"           # 공간별 이번 달(UTC) 종량제 지출이 이 값에 닿으면 호출을 막는다

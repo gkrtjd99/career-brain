@@ -506,6 +506,8 @@ export interface SearchHit {
   study_title?: string | null;
   /** c0032: 원본 용도 (experience | reference) */
   purpose?: SourcePurpose;
+  /** 다시 정렬(routes.rerank)한 결과만: 앞 묶음 안의 순위. score는 RRF 점수 그대로 */
+  rerank_rank?: number | null;
 }
 
 /** 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api) */
@@ -523,6 +525,9 @@ export interface SearchResult {
   include_reference?: boolean;
   hits: SearchHit[];
   expanded_terms?: ExpandedTerm[];
+  /** 앞 결과를 다시 정렬했는지 (routes.rerank가 있을 때만). 못 했으면 rerank_note에 이유 */
+  reranked?: boolean;
+  rerank_note?: string | null;
 }
 
 // ---------------------------------------------------------------- job postings
