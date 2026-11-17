@@ -31,7 +31,7 @@ worker ─▶ claim_job ─▶ process_run ─┼─ 단계 실행 → 위치 �
 
   | 작업 | 위치 |
   |---|---|
-  | 원본 파싱 (PDF·DOCX·HTML·텍스트) | `usecases/parsing.py` (`parser.parse`) |
+  | 원본 파싱 (PDF·DOCX·PPTX·XLSX·HWPX·HTML·텍스트) | `usecases/parsing.py` (`parser.parse`) |
   | 공고 HTML 고르기·어댑터·본문 정리·목록 후보, JSON-LD·채용 시스템 API 해석 | `usecases/postings.py` |
   | 공고 PDF 글자 정리, 스캔 PDF 쪽 렌더링, 이미지 해시 | `usecases/postings.py`, `adapters/pdf_render.py` |
   | 문서 DOCX 만들기·검사 | `usecases/documents.py` |
