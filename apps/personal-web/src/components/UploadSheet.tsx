@@ -60,14 +60,23 @@ function pastedFile(text: string, title: string) {
 }
 
 /** 자료 올리기 → 용도 확인 → 읽기(파싱) → (내 경험 자료면) 경험 추출 요청. 진행 상태를 그대로 보여준다. */
-export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function UploadSheet({
+  open,
+  onClose,
+  purpose: initialPurpose = "experience",
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** 처음 고른 용도 (증빙 서류 화면에서 열면 proof). 사람이 바꿀 수 있다 */
+  purpose?: SourcePurpose;
+}) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<"file" | "paste">("file");
   const [file, setFile] = useState<File | null>(null);
   const [pasted, setPasted] = useState("");
   const [title, setTitle] = useState("");
   const [dataClass, setDataClass] = useState("private");
-  const [purpose, setPurpose] = useState<SourcePurpose>("experience");
+  const [purpose, setPurpose] = useState<SourcePurpose>(initialPurpose);
   // 사람이 용도를 직접 고르면 제안으로 덮지 않는다
   const [picked, setPicked] = useState(false);
   // DOCX 숨김 서식 글(w:vanish)을 원본 블록에서 뺄지 (기본은 넣고 검사가 경고)
@@ -114,7 +123,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
   });
   const suggested = ask ? (suggestion.data?.suggested_purpose ?? null) : null;
   useEffect(() => {
-    if (suggested && !picked) setPurpose(suggested);
+    if (suggested && !picked && initialPurpose === "experience") setPurpose(suggested);
   }, [suggested, picked]);
 
   const upload = useMutation({
@@ -164,13 +173,17 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
   }, [extracted, qc]);
   const parsed = !!parse && PARSE_DONE.has(parse.status);
   const finished = kept === "experience" ? !!extracted : parsed;
+  // 증빙은 읽기가 끝나면 서버가 자격·이수 후보를 뽑는다 (로컬 규칙)
+  useEffect(() => {
+    if (parsed && kept === "proof") void qc.invalidateQueries({ queryKey: ["credentials"] });
+  }, [parsed, kept, qc]);
 
   const reset = () => {
     setFile(null);
     setPasted("");
     setTitle("");
     setDropHidden(false);
-    setPurpose("experience");
+    setPurpose(initialPurpose);
     setPicked(false);
     setUploaded(null);
     setExtractionId(null);

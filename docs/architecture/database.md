@@ -475,3 +475,21 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 공고 묶기: 연결되지 않은 공고 중 회사 이름의 `name_key`가 회사 이름·별칭과 같은 것을 제안만 한다. 연결은 사람이 `link-postings`로.
 - 내보내기: 세 표는 카탈로그로 자동 포함. `@schema_step("c0033")`가 옛 묶음에 빈 표와 `job_postings.company_id = null`을 넣는다. 대기 중인 `company_fetch`는 `pending_work`로 다시 큐에 들어간다. 삭제 기록(tombstone) 대상은 아니다.
 - 시험: `packages/core/tests/test_companies.py` (이름 키·기준일, 인용 필수·DB CHECK, HTTP 오류·권한, URL 가져오기·후보 검증, 붙여넣기+모델, 공고 묶기·다른 공간 0건, 문서 근거 거부, MCP 도구, 내보내기 왕복).
+
+
+## 자격·이수 기록 (c0034, O20)
+
+`c0034` (`down_revision = c0033`). 자격증·어학 성적·수료·수상·학력을 한 표에 둔다 (plan §20). 증빙 원본은 `sources`(용도 `proof`)에 그대로 있고, 이 표는 원문의 **위치만** 가리킨다 — 증빙 글을 옮겨 적지 않는다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `credentials` | 종류(`license`·`language`·`course`·`award`·`degree`·`other`)·이름(NOT NULL, 200자)·발급 기관·번호·취득일·만료일·시작/종료일(수료·재직 기간)·점수(등급 포함 글)·시간(1–10000)·상세. 상태 `extracted`(확인 전 후보)/`self_confirmed`/`evidence_supported`, 확인한 사람·시각. 출처 `source_id`·`parse_run_id`·`experience_id`(셋 다 FK `ON DELETE SET NULL (col)`), `field_spans` jsonb `{칸: {block, start, end, page}}` | 전체 |
+
+- CHECK: 종류·상태, 글 길이, 시간 범위, `expires_on >= acquired_on`, `ended_on >= started_on`, `evidence_supported`면 `source_id` 필수, 확인한 상태면 확인 시각 필수, `field_spans`는 object. 부분 색인 `ix_credentials_source`(`source_id`), `ix_credentials_expires`(`expires_on`). RLS·앱 role 권한은 다른 공간 표와 같다.
+- 항목 뽑기 (`career_core.domain.credentials`, 순수 코드): 증빙의 파싱 블록에서 종류(학력 → 재직·경력 → 수료 → 수상 → 어학 시험 이름 → 자격)를 고르고 이름표("자격증명", "발급기관", "취득일", "유효기간", "점수"…)와 서명 줄("…이사장", "…원장")에서 값을 찾는다. 날짜는 일까지 있는 것만 (숫자·한국어·영어 꼴). 값마다 위치를 남기고, 위치가 없는 값은 채우지 않는다. 만료일은 원문에 적힌 것만 — "2년 유효" 같은 규칙으로 계산하지 않는다. 주민등록번호(§11 민감 정보 검사)는 어느 칸에도 들어가지 않는다.
+- 언제: worker가 증빙 파싱을 끝낼 때(`parsing._finish`, 실패해도 파싱 결과는 남는다)와 `POST /core/sources/{id}/extract-credentials`. 다시 뽑으면 같은 원본의 확인 전 후보를 바꾸고, 확인한 기록이 있으면 `already_recorded`로 아무것도 만들지 않는다. 모델·외부 OCR은 부르지 않는다 (사진 증빙은 읽은 글이 없어 `no_text`).
+- 쓰기: 사람이 만들면 `self_confirmed`(증빙을 이으면 `evidence_supported`), agent가 만들면 `extracted`. 확인(`confirm`)은 사람만 (`human_confirmation_required`). 칸을 고치면 그 칸의 위치는 지운다.
+- 번호: 보기는 끝 4자리만(`number_masked`). `reveal=true`는 `credentials.write` 권한이 있어야 하고 감사 기록(`credential_number_reveal`)을 남긴다.
+- 원본 내려받기 `GET /core/sources/{id}/original` (`sources.read`): 저장한 sha256과 같을 때만 보낸다 (다르면 409 `original_changed`). 파일 이름·형식 그대로, `nosniff`·`no-store`. 제한 등급 원본은 감사 기록(`source_original_download`).
+- 내보내기: 카탈로그로 자동 포함, `@schema_step("c0034")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 same_except (종류·이름·기관·번호·날짜·점수·시간이 정체). manifest `proofs`가 증빙 원본 행·파일을 표시한다.
+- 시험: `packages/core/tests/test_credentials.py` (뽑기 규칙과 위치, 만료일 추측 0, 주민등록번호, 증빙 파싱 → 후보·모델/OCR 호출 0, HTTP·권한·다른 공간 0건, 오늘 일정, 내려받기 해시·감사, 내보내기 왕복, MCP, migration).

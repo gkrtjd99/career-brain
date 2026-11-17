@@ -46,6 +46,7 @@ blobs/<sha256>                     행이 참조하는 원본 파일 (업로드 
 
 manifest의 `pending_work`(대기 작업)는 c0014에서 더한 선택 키다. 없는 묶음도 그대로 읽는다.
 `tombstone_tables`(삭제 기록 대상 표 목록)는 형식 2에서 더했다 (c0018에서 대상 표가 4개 → 16개로 늘었다).
+`proofs`(c0034)는 증빙 원본 표시다: `{sources: [원본 id], blobs: [파일 key]}`, 원본 목록의 해당 항목에도 `purpose: "proof"`. 묶음 안의 id 그대로라 새 ID로 복원하면 복원 뒤 id와 다를 수 있다. 읽기만 하는 안내 키라 없는 묶음도 그대로 읽는다.
 
 #### 형식 버전 올리기 (`format_upgrade`)
 
@@ -87,6 +88,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0031 | `schema_step` | `experiences`에 `kind = 'other'`·`parent_id = null`·`ongoing`·`tags = []`, `started_on`/`ended_on`은 migration과 같이 원문 기간이 분명할 때만 |
 | c0032 | `schema_step` | `sources`에 `purpose = 'experience'` (옛 묶음의 원본은 모두 경험 추출 대상이었다). 원본 파일·버전 해시는 그대로 — 증빙 원본도 바이트 그대로 복원된다 |
 | c0033 | `schema_step` | 새 표 `companies`·`company_pages`·`company_facts` (옛 묶음엔 빈 표), `job_postings.company_id = null` (옛 공고는 회사에 잇지 않은 상태) |
+| c0034 | `schema_step` | 새 표 `credentials` (옛 묶음엔 빈 표) |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -229,6 +231,7 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `claims` | same_except | 상태·확인한 사람·확인 시각·`updated_at` | 문장·종류·기여가 정체 |
   | `company_pages` | same_except | 상태·오류·HTTP 상태·방식·최종 주소·제목·글·해시·가져온 시각·모델 호출·후보 수·메모·`updated_at` (c0033) | 가져오기 작업이 채우는 칸. 회사·입력 종류·주소·요청자·만든 시각이 정체 |
   | `company_facts` | same_except | 상태·확인한 사람·확인 시각·기준일·기준일 단위·`updated_at` (c0033) | 종류·본문·인용·인용 위치가 정체 (본문이나 인용을 고치면 다른 행) |
+  | `credentials` | same_except | 상태·확인한 사람·확인 시각·원본·경험·파싱 실행·원문 위치·상세·`updated_at` (c0034) | 확인·연결만 바뀐다고 본다. 종류·이름·기관·번호·날짜·점수·시간이 정체 |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |
   | `approvals` | same_except | 결정·사용·무효 칸·`updated_at` | 행위·대상·대상 버전·내용 해시·요청 시각이 정체 |

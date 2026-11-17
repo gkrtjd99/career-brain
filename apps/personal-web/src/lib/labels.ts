@@ -196,6 +196,26 @@ export function noteLabel(note: string): string {
 
 /** 서버 오류 코드 → 사람이 읽는 문장 */
 export const ERROR_TEXT: Record<string, string> = {
+  // 자격·이수 (c0034)
+  credential_name_required: "이름은 비울 수 없습니다.",
+  credential_kind_required: "종류를 골라 주세요.",
+  credential_name_too_long: "이름이 너무 깁니다.",
+  credential_issuer_too_long: "발급 기관이 너무 깁니다.",
+  credential_number_too_long: "번호가 너무 깁니다.",
+  credential_score_too_long: "점수·등급이 너무 깁니다.",
+  credential_detail_too_long: "메모가 너무 깁니다.",
+  invalid_credential_acquired_on: "취득일은 날짜여야 합니다.",
+  invalid_credential_expires_on: "만료일은 날짜여야 합니다.",
+  invalid_credential_started_on: "시작일은 날짜여야 합니다.",
+  invalid_credential_ended_on: "종료일은 날짜여야 합니다.",
+  invalid_hours: "시간은 1 이상의 정수여야 합니다.",
+  expires_before_acquired: "만료일이 취득일보다 앞섭니다.",
+  ended_before_started: "종료일이 시작일보다 앞섭니다.",
+  source_not_found: "자료를 찾을 수 없습니다.",
+  source_not_proof: "증빙 서류로 올린 자료가 아닙니다.",
+  experience_not_found: "경험을 찾을 수 없습니다.",
+  original_missing: "원본 파일이 없습니다.",
+  original_changed: "저장한 원본과 내용이 달라 내려보내지 않았습니다. 원본을 다시 올려 주세요.",
   // 원본 용도 (c0032)
   source_has_confirmed_claims:
     "확인한 주장이 이 자료를 근거로 쓰고 있어 용도를 바꿀 수 없습니다. 그 주장을 먼저 보관하세요.",
