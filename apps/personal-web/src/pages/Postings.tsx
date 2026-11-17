@@ -1,31 +1,79 @@
-import type { PostingStatus, PostingSummary, SaveUrlResult } from "@career-brain/client";
-import { Badge, Button, cn, Spinner, Textarea } from "@career-brain/ui";
+import type { PostingSummary } from "@career-brain/client";
+import { Button, cn, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { getRouteApi } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
-import { DdayBadge } from "../components/DdayBadge";
+import { AddPostings } from "../components/postings/AddPostings";
+import { PostingRows, SeasonGroup } from "../components/postings/PostingRows";
 import { api } from "../lib/api";
-import { formatDate, formatDeadline } from "../lib/dates";
-import { hostOf } from "../lib/format";
-import { ERROR_TEXT, FETCH_ERROR, FETCH_STATUS, FIELD_LABEL, POSTING_STATUS } from "../lib/labels";
+import { parseDeadline } from "../lib/dates";
+import { seasonLabel } from "../lib/postings";
 
-const MAX_URLS = 20;
+const route = getRouteApi("/postings");
 
-/** 붙여넣은 글에서 URL만 뽑는다 (줄바꿈·공백·쉼표 구분, 중복 제거). */
-export function extractUrls(text: string): string[] {
-  const found = text.match(/https?:\/\/[^\s<>"'，,]+/gi) ?? [];
-  return [...new Set(found.map((u) => u.replace(/[).,;]+$/, "")))];
+/** 목록 보기: 접수 상태 넷 + 확인할 공고 + 보관 */
+export type PostingsView = "open" | "upcoming" | "always" | "closed" | "attention" | "archived";
+export const POSTINGS_VIEWS: readonly PostingsView[] = ["open", "upcoming", "always", "closed", "attention", "archived"];
+
+const SEGMENTS: { value: PostingsView; label: string }[] = [
+  { value: "open", label: "접수 중" },
+  { value: "upcoming", label: "접수 예정" },
+  { value: "always", label: "상시" },
+  { value: "closed", label: "마감" },
+];
+
+const EMPTY: Record<PostingsView, string> = {
+  open: "접수 중인 공고가 없습니다. 위에 공고 URL을 붙여넣으면 확인한 뒤 여기에 쌓입니다.",
+  upcoming: "접수 시작 전인 공고가 없습니다. 공고에 접수 시작일이 적혀 있으면 여기에 모입니다.",
+  always: "상시 채용 공고가 없습니다.",
+  closed: "마감한 공고가 없습니다. 마감일이 지난 공고는 시기별로 여기에 모입니다.",
+  attention: "확인할 공고가 없습니다.",
+  archived: "보관한 공고가 없습니다.",
+};
+
+const time = (v: string | null | undefined, fallback: number) => {
+  const d = v ? (v === "always" ? null : parseDeadline(v)) : null;
+  return d ? d.getTime() : fallback;
+};
+const savedTime = (p: PostingSummary) => new Date(p.saved_at ?? p.created_at ?? 0).getTime();
+
+/** 서버 정렬과 같다: 접수 중은 마감 가까운 순(마감일 모름은 끝), 예정은 시작 가까운 순, 마감은 최근 마감 순, 나머지는 최근 저장 순 */
+function sortFor(view: PostingsView, items: PostingSummary[]) {
+  const by = (f: (p: PostingSummary) => number) => [...items].sort((a, b) => f(a) - f(b));
+  if (view === "open") return by((p) => (p.lifecycle === "unknown" ? Infinity : time(p.deadline, Infinity)));
+  if (view === "upcoming") return by((p) => time(p.opens_at, Infinity));
+  if (view === "closed") return by((p) => -time(p.deadline, 0));
+  return by((p) => -savedTime(p));
 }
 
-type Filter = "active" | PostingStatus;
+function group(items: PostingSummary[]) {
+  const saved = items.filter((p) => p.status === "saved");
+  const lc = (p: PostingSummary) => p.lifecycle ?? "unknown";
+  const draft = items.filter((p) => p.status === "draft");
+  return {
+    open: saved.filter((p) => lc(p) === "open" || lc(p) === "unknown"),
+    upcoming: saved.filter((p) => lc(p) === "upcoming"),
+    always: saved.filter((p) => lc(p) === "always"),
+    closed: saved.filter((p) => lc(p) === "closed"),
+    attention: draft,
+    archived: items.filter((p) => p.status === "archived"),
+    pending: draft.filter((p) => p.last_fetch_status === "pending").length,
+    failed: draft.filter((p) => p.last_fetch_status === "failed").length,
+  };
+}
 
 export function PostingsPage() {
+  const { show: view = "open" } = route.useSearch();
+  const navigate = route.useNavigate();
   const qc = useQueryClient();
-  const [text, setText] = useState("");
-  const [results, setResults] = useState<SaveUrlResult[] | null>(null);
-  const [filter, setFilter] = useState<Filter>("active");
-  const urls = extractUrls(text);
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const setView = (v: PostingsView) => {
+    setSelecting(false);
+    setSelected(new Set());
+    void navigate({ search: v === "open" ? {} : { show: v } });
+  };
 
   const list = useQuery({
     queryKey: ["postings"],
@@ -33,219 +81,211 @@ export function PostingsPage() {
     // 가져오는 중인 공고가 있으면 상태를 따라간다.
     refetchInterval: (q) => (q.state.data?.some((p) => p.last_fetch_status === "pending") ? 2500 : false),
   });
-  const save = useMutation({
-    mutationFn: () => api.savePostings(urls.slice(0, MAX_URLS)),
-    onSuccess: (r) => {
-      setResults(r);
-      setText("");
+  const archive = useMutation({
+    mutationFn: (ids: string[]) => (view === "archived" ? api.unarchivePostings(ids) : api.archivePostings(ids)),
+    onSuccess: () => {
+      setSelected(new Set());
+      setSelecting(false);
       qc.invalidateQueries({ queryKey: ["postings"] });
     },
   });
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <PageHeader
-        title="공고"
-        subtitle="URL마다 그 페이지 한 건만 가져옵니다. 확인해서 저장한 공고만 지원 준비에 쓰입니다."
-      />
+    <div className="mx-auto max-w-3xl">
+      <PageHeader title="공고" />
+      <AddPostings />
 
-      <div className="space-y-10">
-        <section>
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (urls.length) save.mutate();
+      <Loaded query={list}>
+        {(items) => (
+          <Body
+            items={items}
+            view={view}
+            setView={setView}
+            selecting={selecting}
+            setSelecting={(on) => {
+              setSelecting(on);
+              if (!on) setSelected(new Set());
             }}
-          >
-            <label htmlFor="posting-urls" className="mb-2 block text-[15px] font-semibold">
-              URL 붙여넣기
-            </label>
-            <Textarea
-              id="posting-urls"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              placeholder={"https://example.com/jobs/123\nhttps://example.com/jobs/456"}
-              className="min-h-24 font-mono text-[13px]"
-            />
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <Button type="submit" variant="primary" disabled={!urls.length || save.isPending}>
-                {save.isPending ? <Spinner /> : null}
-                {urls.length ? `${Math.min(urls.length, MAX_URLS)}건 가져오기` : "가져오기"}
-              </Button>
-              <span className="text-[13px] text-muted">
-                {urls.length > MAX_URLS
-                  ? `한 번에 ${MAX_URLS}건까지. 앞의 ${MAX_URLS}건만 보냅니다.`
-                  : "한 줄에 하나씩. 같은 공고는 한 건으로 합칩니다."}
-              </span>
-            </div>
-            <ErrorText error={save.error} />
-          </form>
-          {results ? <SaveResults results={results} onDismiss={() => setResults(null)} /> : null}
-        </section>
+            selected={selected}
+            toggle={toggle}
+            fetching={list.isFetching}
+          />
+        )}
+      </Loaded>
 
-        <Loaded query={list}>
-          {(items) => {
-            const counts = {
-              active: items.filter((p) => p.status !== "archived").length,
-              draft: items.filter((p) => p.status === "draft").length,
-              saved: items.filter((p) => p.status === "saved").length,
-              archived: items.filter((p) => p.status === "archived").length,
-            };
-            const shown = items.filter((p) => (filter === "active" ? p.status !== "archived" : p.status === filter));
-            return (
-              <section>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <h2 className="text-[15px] font-semibold">가져온 공고</h2>
-                  {list.isFetching ? <Spinner /> : null}
-                </div>
-                <div className="mb-2 flex flex-wrap gap-1" role="radiogroup" aria-label="상태">
-                  {(
-                    [
-                      ["active", "전체"],
-                      ["draft", "확인 필요"],
-                      ["saved", "저장됨"],
-                      ["archived", "보관"],
-                    ] as [Filter, string][]
-                  ).map(([v, label]) => (
-                    <button
-                      key={v}
-                      type="button"
-                      role="radio"
-                      aria-checked={filter === v}
-                      onClick={() => setFilter(v)}
-                      className={cn(
-                        "inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-[13px] transition-colors duration-150",
-                        filter === v ? "bg-subtle font-medium text-fg" : "text-muted hover:text-fg",
-                      )}
-                    >
-                      {label}
-                      <span className="tabular-nums text-muted">{counts[v]}</span>
-                    </button>
-                  ))}
-                </div>
-                {shown.length ? (
-                  <ul className="divide-y divide-line border-t border-line">
-                    {shown.map((p) => (
-                      <PostingRow key={p.id} p={p} />
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="border-t border-line pt-3 text-sm text-muted">
-                    {filter === "active" ? (
-                      "아직 가져온 공고가 없습니다. 위에 공고 URL을 붙여넣으면 여기에 쌓입니다."
-                    ) : (
-                      <>
-                        이 상태의 공고가 없습니다.{" "}
-                        <button
-                          type="button"
-                          onClick={() => setFilter("active")}
-                          className="underline underline-offset-2 hover:text-fg"
-                        >
-                          전체 보기
-                        </button>
-                      </>
-                    )}
-                  </p>
-                )}
-              </section>
-            );
-          }}
-        </Loaded>
-      </div>
+      {selecting ? (
+        <div className="sticky bottom-[calc(4rem+env(safe-area-inset-bottom))] z-20 mt-4 flex items-center gap-2 rounded-md border border-line bg-surface px-3 py-2 shadow-[0_4px_16px_rgb(0_0_0/0.08)] md:bottom-4">
+          <span className="min-w-0 flex-1 text-[13px] tabular-nums">
+            {selected.size ? `${selected.size}개 고름` : "보관할 공고를 고르세요"}
+          </span>
+          <Button variant="ghost" onClick={() => setSelecting(false)}>
+            취소
+          </Button>
+          <Button
+            variant="primary"
+            disabled={!selected.size || archive.isPending}
+            onClick={() => archive.mutate([...selected])}
+          >
+            {archive.isPending ? <Spinner /> : null}
+            {view === "archived" ? "보관 풀기" : "보관"}
+          </Button>
+        </div>
+      ) : null}
+      <ErrorText error={archive.error} className="mt-2" />
     </div>
   );
 }
 
-function PostingRow({ p }: { p: PostingSummary }) {
-  const fetch = p.last_fetch_status ? FETCH_STATUS[p.last_fetch_status] : null;
-  // 배지는 손대야 하는 상태 하나만: 목록 페이지·비용 확인 > 확인 필요. 가져오는 중은 스피너, 실패는 아래 빨간 줄.
-  const needsFetchAction = p.last_fetch_status === "listing" || p.last_fetch_status === "needs_confirmation";
+function Body({
+  items,
+  view,
+  setView,
+  selecting,
+  setSelecting,
+  selected,
+  toggle,
+  fetching,
+}: {
+  items: PostingSummary[];
+  view: PostingsView;
+  setView: (v: PostingsView) => void;
+  selecting: boolean;
+  setSelecting: (on: boolean) => void;
+  selected: Set<string>;
+  toggle: (id: string) => void;
+  fetching: boolean;
+}) {
+  const g = useMemo(() => group(items), [items]);
+  const shown = useMemo(() => sortFor(view, g[view]), [view, g]);
+  const review = g.attention.length - g.pending - g.failed;
+  const special = view === "attention" || view === "archived";
+
   return (
-    <li>
-      <Link
-        to="/postings/$postingId"
-        params={{ postingId: p.id }}
-        className="-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{p.title ?? <span className="text-muted">제목 없음</span>}</div>
-          <div className="truncate text-[13px] text-muted tabular-nums">
+    <section className="mt-8">
+      {g.attention.length && view !== "attention" ? (
+        <p className="-mt-3 mb-4 flex flex-wrap items-center gap-x-1 text-[13px]">
+          <button
+            type="button"
+            onClick={() => setView("attention")}
+            className="-mx-1 inline-flex min-h-9 items-center rounded-md px-1 font-medium underline-offset-2 hover:underline"
+          >
             {[
-              p.company,
-              hostOf(p.canonical_url),
-              p.deadline ? `마감 ${formatDeadline(p.deadline)}` : null,
-              p.saved_at ? `저장 ${formatDate(p.saved_at)}` : p.created_at ? `추가 ${formatDate(p.created_at)}` : null,
+              review ? `확인할 공고 ${review}` : null,
+              g.failed ? `가져오기 실패 ${g.failed}` : null,
+              g.pending ? `가져오는 중 ${g.pending}` : null,
             ]
               .filter(Boolean)
               .join(" · ")}
+          </button>
+        </p>
+      ) : null}
+
+      <div className="mb-3 flex items-center gap-2">
+        {special ? (
+          <h2 className="min-w-0 flex-1 text-[15px] font-semibold">
+            {view === "attention" ? "확인할 공고" : "보관한 공고"}{" "}
+            <span className="font-normal text-muted tabular-nums">{shown.length}</span>
+          </h2>
+        ) : (
+          <div
+            role="radiogroup"
+            aria-label="접수 상태"
+            className="-mx-1 flex min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none]"
+          >
+            {SEGMENTS.map((s) => (
+              <button
+                key={s.value}
+                type="button"
+                role="radio"
+                aria-checked={view === s.value}
+                onClick={() => setView(s.value)}
+                className={cn(
+                  "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[13px] whitespace-nowrap transition-colors duration-150",
+                  view === s.value ? "bg-subtle font-medium text-fg" : "text-muted hover:text-fg",
+                )}
+              >
+                {s.label}
+                <span className="text-muted tabular-nums">{g[s.value].length}</span>
+              </button>
+            ))}
           </div>
-          {p.last_fetch_status === "failed" ? (
-            <div className="mt-0.5 text-[13px] text-danger">
-              가져오기 실패 · {FETCH_ERROR[p.last_fetch_error ?? ""] ?? p.last_fetch_error} · 마감으로 처리하지 않음
-            </div>
-          ) : null}
-          {p.pending_changes.length ? (
-            <div className="mt-0.5 text-[13px]">
-              변경 확인 필요: {p.pending_changes.map((f) => FIELD_LABEL[f as keyof typeof FIELD_LABEL] ?? f).join(", ")}
-            </div>
-          ) : null}
+        )}
+        {fetching ? <Spinner /> : null}
+        {special ? (
+          <Button variant="ghost" size="sm" onClick={() => setView("open")}>
+            목록으로
+          </Button>
+        ) : null}
+        {shown.length && view !== "attention" && !selecting ? (
+          <Button variant="ghost" size="sm" onClick={() => setSelecting(true)}>
+            고르기
+          </Button>
+        ) : null}
+      </div>
+
+      {!shown.length ? (
+        <p className="border-t border-line pt-3 text-sm text-muted">{EMPTY[view]}</p>
+      ) : view === "closed" ? (
+        <ClosedBySeason items={shown} selecting={selecting} selected={selected} toggle={toggle} />
+      ) : (
+        <PostingRows items={shown} selecting={selecting} selected={selected} onToggle={toggle} />
+      )}
+
+      {view === "attention" && shown.length ? (
+        <p className="mt-3 text-[13px] text-muted">
+          확인해서 저장한 공고만 지원 준비에 쓰입니다. 확인하지 않은 공고는 7일 뒤 정리됩니다.
+        </p>
+      ) : null}
+
+      {g.archived.length && view !== "archived" ? (
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={() => setView("archived")}
+            className="-mx-2 inline-flex min-h-9 items-center rounded-md px-2 text-[13px] text-muted hover:text-fg"
+          >
+            보관 <span className="ml-1 tabular-nums">{g.archived.length}</span>
+          </button>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 text-right">
-          {p.last_fetch_status === "pending" ? (
-            <span className="inline-flex items-center gap-1.5 text-[13px] text-muted">
-              <Spinner className="h-3 w-3" /> {fetch?.label}
-            </span>
-          ) : needsFetchAction && fetch ? (
-            <Badge tone={fetch.tone}>{fetch.label}</Badge>
-          ) : p.status === "draft" ? (
-            <Badge tone="warn">{POSTING_STATUS.draft.label}</Badge>
-          ) : p.status === "archived" ? (
-            <span className="text-[13px] text-muted">{POSTING_STATUS.archived.label}</span>
-          ) : null}
-          <DdayBadge deadline={p.deadline} />
-        </div>
-      </Link>
-    </li>
+      ) : null}
+    </section>
   );
 }
 
-function SaveResults({ results, onDismiss }: { results: SaveUrlResult[]; onDismiss: () => void }) {
+function ClosedBySeason({
+  items,
+  selecting,
+  selected,
+  toggle,
+}: {
+  items: PostingSummary[];
+  selecting: boolean;
+  selected: Set<string>;
+  toggle: (id: string) => void;
+}) {
+  // items는 최근 마감 순: 시기도 최근부터
+  const seasons: { key: string; rows: PostingSummary[] }[] = [];
+  for (const p of items) {
+    const key = p.season ?? "";
+    const last = seasons[seasons.length - 1];
+    const found = last?.key === key ? last : seasons.find((s) => s.key === key);
+    if (found) found.rows.push(p);
+    else seasons.push({ key, rows: [p] });
+  }
   return (
-    <div className="mt-6">
-      <div className="mb-1 flex items-center justify-between gap-3">
-        <h3 className="text-sm font-medium">요청 결과</h3>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="-mr-2 h-9 rounded-md px-2 text-[13px] text-muted hover:text-fg"
-        >
-          닫기
-        </button>
-      </div>
-      <ul className="divide-y divide-line border-t border-line">
-        {results.map((r, i) => (
-          <li key={`${r.url}-${i}`} className="flex min-h-11 items-center gap-3 py-2 text-[13px]">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{r.url}</span>
-            {r.error ? (
-              <span className="shrink-0 text-danger">{FETCH_ERROR[r.error] ?? ERROR_TEXT[r.error] ?? r.error}</span>
-            ) : r.deduplicated ? (
-              <span className="shrink-0 text-muted">이미 있는 공고</span>
-            ) : (
-              <span className="shrink-0">가져오는 중</span>
-            )}
-            {r.posting_id ? (
-              <Link
-                to="/postings/$postingId"
-                params={{ postingId: r.posting_id }}
-                className="shrink-0 font-medium underline-offset-2 hover:underline"
-              >
-                열기
-              </Link>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+    <div className="border-t border-line">
+      {seasons.map((s) => (
+        <SeasonGroup key={s.key} label={seasonLabel(s.key)} count={s.rows.length} defaultOpen={seasons.length === 1}>
+          <PostingRows items={s.rows} selecting={selecting} selected={selected} onToggle={toggle} />
+        </SeasonGroup>
+      ))}
     </div>
   );
 }

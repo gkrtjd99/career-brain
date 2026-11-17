@@ -5,7 +5,7 @@ import type { AgendaEvent, AgendaKind } from "../../lib/agenda";
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
-/** 종류는 색 대신 작은 표시의 모양으로: 마감 = 채운 점, 전형 = 빈 점, 시험 = 점선 점, 만료 = 빈 네모 */
+/** 종류는 색 대신 작은 표시의 모양으로: 마감 = 채운 점, 접수 시작 = 흐린 점, 전형 = 빈 점, 시험 = 점선 점, 만료 = 빈 네모 */
 export function KindMark({ kind, className }: { kind: AgendaKind; className?: string }) {
   return (
     <span
@@ -14,6 +14,7 @@ export function KindMark({ kind, className }: { kind: AgendaKind; className?: st
         "inline-block size-1.5 shrink-0",
         kind === "expiry" ? "border border-fg" : "rounded-full",
         kind === "deadline" && "bg-fg",
+        kind === "opens" && "bg-muted",
         kind === "stage" && "border border-fg",
         kind === "test" && "border border-dashed border-muted",
         className,

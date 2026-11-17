@@ -31,6 +31,7 @@ from career_core.db.base import utcnow
 from career_core.db.models import (
     Application,
     ApplicationDocument,
+    ApplicationStage,
     ApplicationSubmission,
     DocumentClaim,
     DocumentRevision,
@@ -137,6 +138,22 @@ class ApplicationSummary:
     # 공고 문항(kind=question) 문서 수와, 그중 아직 글이 없는 수
     questions: int = 0
     unwritten: int = 0
+    # 지금 전형 단계 {kind, name, outcome, scheduled_at}: 결과 전인 첫 단계, 다 끝났으면 마지막 단계
+    stage: dict | None = None
+
+
+def current_stage(stages: Sequence[ApplicationStage]) -> dict | None:
+    """순서대로 놓인 전형 단계에서 지금 단계. 결과 전인 첫 단계, 없으면 마지막 단계."""
+    if not stages:
+        return None
+    ordered = sorted(stages, key=lambda r: r.position)
+    st = next((r for r in ordered if r.outcome == "pending"), ordered[-1])
+    return {
+        "kind": st.kind,
+        "name": st.name,
+        "outcome": st.outcome,
+        "scheduled_at": st.scheduled_at.isoformat() if st.scheduled_at else None,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -631,6 +648,9 @@ async def list_applications(db: Database, actor: ActorContext) -> list[Applicati
             questions[aid] = questions.get(aid, 0) + 1
             if current == 0 or not (rev_counts or {}).get("chars_with_spaces"):
                 unwritten[aid] = unwritten.get(aid, 0) + 1
+        stages: dict[UUID, list[ApplicationStage]] = {}
+        for st in (await s.scalars(select(ApplicationStage))).all():
+            stages.setdefault(st.application_id, []).append(st)
     out = []
     for a in apps:
         f = postings[a.posting_id].fields or {}
@@ -648,6 +668,7 @@ async def list_applications(db: Database, actor: ActorContext) -> list[Applicati
                 a.created_at,
                 questions.get(a.id, 0),
                 unwritten.get(a.id, 0),
+                current_stage(stages.get(a.id, [])),
             )
         )
     return out

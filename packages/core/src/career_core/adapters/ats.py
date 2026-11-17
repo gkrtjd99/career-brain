@@ -391,6 +391,13 @@ def from_ninehire(page: PageData) -> tuple[dict, str | None]:
         iso(reception.get("startAt") or r.get("createdAt")),
         ev_structured(f"{p}.reception.startAt"),
     )
+    # 접수 시작: 접수 기간의 시작이 적혀 있을 때만 (createdAt은 접수 시작이 아니다)
+    put(
+        out,
+        FieldName.OPENS_AT,
+        iso(reception.get("startAt")),
+        ev_structured(f"{p}.reception.startAt"),
+    )
     content = _dict(props.get("jobPosting")).get("content")
     if not isinstance(content, str):
         return out, None
@@ -539,6 +546,13 @@ def from_greeting(page: PageData) -> tuple[dict, str | None]:
     put(
         out,
         FieldName.POSTED_AT,
+        iso(info.get("openDate")),
+        ev_structured(f"{p}.openingsInfo.openDate"),
+    )
+    # 그리팅 화면의 접수 기간은 openDate ~ dueDate다: 접수 시작으로도 쓴다
+    put(
+        out,
+        FieldName.OPENS_AT,
         iso(info.get("openDate")),
         ev_structured(f"{p}.openingsInfo.openDate"),
     )

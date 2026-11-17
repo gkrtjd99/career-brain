@@ -315,6 +315,8 @@ async def test_ninehire_posting(db, env):
     assert ex["employment_type"]["value"] == "정규직"
     assert ex["career_level"]["value"] == "신입"
     assert ex["deadline"]["value"] == "2026-11-20T14:59:59+00:00"
+    assert ex["opens_at"]["value"] == "2026-11-01T00:00:00+00:00"  # reception.startAt
+    assert ex["opens_at"]["evidence"]["ref"] == "ninehire:recruitment.reception.startAt"
     assert ex["location"]["value"] == "가상테크 판교 사옥"
     full = await uc.get_version(db, owner, r.posting_id, v.id)
     assert "데이터 파이프라인 구축과 운영" in full.text

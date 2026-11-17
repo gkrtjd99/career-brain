@@ -11,8 +11,8 @@ import {
 } from "@career-brain/client";
 import { Badge, Button, cn, Highlight, Input, Section, Sheet, Spinner, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, Link } from "@tanstack/react-router";
-import { Archive, ExternalLink, FileText, RefreshCw, Trash2, Plus } from "lucide-react";
+import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
+import { Archive, ExternalLink, FileText, PenLine, RefreshCw, Trash2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { CompanyLine } from "../components/companies/CompanyLine";
@@ -20,8 +20,9 @@ import { DdayBadge } from "../components/DdayBadge";
 import { ChoiceQuestions, CostConfirmation } from "../components/postings/PostingExtras";
 import { useCreateApplication } from "./Applications";
 import { api } from "../lib/api";
-import { ddayLabel, formatDateTime, formatDeadline } from "../lib/dates";
+import { ddayLabel, formatDateTime, formatDeadline, toLocalInput } from "../lib/dates";
 import { hostOf } from "../lib/format";
+import { applicationLabel, timingLabel, timingSoon } from "../lib/postings";
 import {
   ADAPTER_LABEL,
   FETCH_ERROR,
@@ -34,6 +35,8 @@ import {
 
 const route = getRouteApi("/postings/$postingId");
 const REVIEW_FIELDS: PostingField[] = ["title", "company", "deadline"];
+// 비어 있어도 늘 보이는 칸 (접수 시작은 비어 있는 게 보통이라 확인 필요로 표시하지 않는다)
+const ALWAYS_SHOWN: PostingField[] = [...REVIEW_FIELDS, "opens_at"];
 const isList = (f: PostingField) => POSTING_LIST_FIELDS.includes(f);
 
 // ---------------------------------------------------------------- 편집 상태
@@ -108,8 +111,11 @@ function PostingView({ p }: { p: Posting }) {
     (p.latest?.extracted.title?.value as string | undefined) ??
     hostOf(p.canonical_url);
   const deadline = (p.fields.deadline ?? p.latest?.extracted.deadline?.value) as string | undefined;
+  const opensAt = (p.fields.opens_at ?? p.latest?.extracted.opens_at?.value) as string | undefined;
+  const timing = { deadline: deadline ?? null, opens_at: opensAt ?? null, lifecycle: p.lifecycle };
   const st = POSTING_STATUS[p.status];
   const pendingRun = run?.status === "pending";
+  const failedRun = run?.status === "failed" || (!p.latest && !pendingRun && run?.status !== "listing");
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -118,13 +124,17 @@ function PostingView({ p }: { p: Posting }) {
         title={title}
         subtitle={
           <span className="flex flex-wrap items-center gap-x-1.5">
-            <span className={p.status === "draft" ? "font-medium text-fg" : undefined}>{st.label}</span>
-            {ddayLabel(deadline) ? (
+            {p.status === "saved" ? (
               <>
+                <span className={cn("tabular-nums", timingSoon(timing) && "font-semibold text-fg")}>
+                  {timingLabel(timing)}
+                </span>
                 <span aria-hidden>·</span>
-                <DdayBadge deadline={deadline} />
+                <span className={p.application ? "text-fg" : undefined}>{applicationLabel(p.application)}</span>
               </>
-            ) : null}
+            ) : (
+              <span className={p.status === "draft" ? "font-medium text-fg" : undefined}>{st.label}</span>
+            )}
             <span aria-hidden>·</span>
             <a
               href={p.canonical_url}
@@ -138,7 +148,8 @@ function PostingView({ p }: { p: Posting }) {
         }
         actions={
           <>
-            <Button onClick={() => refetch.mutate()} disabled={refetch.isPending || pendingRun}>
+            {p.status === "saved" ? <WriteApplication p={p} /> : null}
+            <Button variant="ghost" onClick={() => refetch.mutate()} disabled={refetch.isPending || pendingRun}>
               <RefreshCw size={14} className={pendingRun ? "animate-spin" : undefined} /> 다시 가져오기
             </Button>
             {p.status !== "archived" ? (
@@ -162,6 +173,7 @@ function PostingView({ p }: { p: Posting }) {
               새 값을 확인하고 다시 저장하세요.
             </div>
           ) : null}
+          {failedRun ? <ManualText postingId={p.id} open onDone={invalidate} /> : null}
           <ChoiceQuestions p={p} />
           {p.latest || p.status !== "draft" ? (
             <ReviewForm
@@ -171,11 +183,7 @@ function PostingView({ p }: { p: Posting }) {
               onSaved={invalidate}
             />
           ) : null}
-          <ManualText
-            postingId={p.id}
-            open={run?.status === "failed" || (!p.latest && !pendingRun && run?.status !== "listing")}
-            onDone={invalidate}
-          />
+          {failedRun ? null : <ManualText postingId={p.id} open={false} onDone={invalidate} />}
         </div>
 
         <aside className="mt-10 min-w-0 space-y-10 lg:mt-0">
@@ -183,7 +191,7 @@ function PostingView({ p }: { p: Posting }) {
             <Runs runs={p.runs} onVersion={setVersionId} />
           </Section>
           {p.status === "saved" ? (
-            <Section title="다음 단계">
+            <Section title="준비">
               <NextSteps p={p} />
             </Section>
           ) : null}
@@ -218,7 +226,7 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
   if (run.status === "pending")
     return (
       <p role="status" className="flex items-center gap-2 text-[13px] text-muted">
-        <Spinner /> 페이지를 가져오는 중입니다. worker가 켜져 있어야 합니다.
+        <Spinner /> 페이지를 가져오는 중입니다. 오래 걸리면 연결·관리 › 작업에서 상태를 보세요.
       </p>
     );
   if (run.status === "needs_confirmation") return <CostConfirmation run={run} postingId={posting.id} />;
@@ -384,42 +392,41 @@ function Versions({ p, onOpen }: { p: Posting; onOpen: (id: string) => void }) {
   );
 }
 
-/** 저장한 공고에서 지원·학습으로 넘어가는 길. */
-function NextSteps({ p }: { p: Posting }) {
-  const apps = useQuery({ queryKey: ["applications"], queryFn: api.applications });
+/** 지원서 쓰기: 지원이 없으면 만들고, 있으면 연다. 공고 머리의 주 행동. */
+function WriteApplication({ p }: { p: Posting }) {
+  const navigate = useNavigate();
   const create = useCreateApplication();
-  const app = apps.data?.find((a) => a.posting_id === p.id);
+  const app = p.application;
+  return (
+    <>
+      <Button
+        variant="primary"
+        disabled={create.isPending}
+        onClick={() =>
+          app
+            ? void navigate({ to: "/applications/$applicationId", params: { applicationId: app.id } })
+            : create.mutate(p.id)
+        }
+      >
+        {create.isPending ? <Spinner /> : <PenLine size={14} />} 지원서 쓰기
+      </Button>
+      {create.error ? <ErrorText error={create.error} className="basis-full" /> : null}
+    </>
+  );
+}
+
+/** 저장한 공고에서 학습으로 넘어가는 길. */
+function NextSteps({ p }: { p: Posting }) {
   const row =
     "-mx-2 flex min-h-11 flex-col justify-center rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-subtle/60";
   return (
-    <div className="text-[13px]">
-      {app ? null : (
-        <div className="mb-3">
-          <Button variant="primary" onClick={() => create.mutate(p.id)} disabled={create.isPending || apps.isLoading}>
-            <Plus size={14} /> 지원 만들기
-          </Button>
-          <ErrorText error={create.error} className="mt-1" />
-        </div>
-      )}
-      <ul className="divide-y divide-line border-t border-line">
-        {app ? (
-          <li>
-            <Link to="/applications/$applicationId" params={{ applicationId: app.id }} className={row}>
-              <span className="text-sm font-medium">지원서 열기</span>
-              <span className="text-muted tabular-nums">
-                문항 {app.questions}
-                {app.unwritten ? ` · 안 쓴 문항 ${app.unwritten}` : ""}
-              </span>
-            </Link>
-          </li>
-        ) : null}
-        <li>
-          <Link to="/study" search={{ tab: "coverage", posting: p.id }} className={row}>
-            <span className="text-sm font-medium">요건별 준비 상태 보기</span>
-          </Link>
-        </li>
-      </ul>
-    </div>
+    <ul className="divide-y divide-line border-t border-line text-[13px]">
+      <li>
+        <Link to="/study" search={{ tab: "coverage", posting: p.id }} className={row}>
+          <span className="text-sm font-medium">요건별 준비 상태 보기</span>
+        </Link>
+      </li>
+    </ul>
   );
 }
 
@@ -470,7 +477,7 @@ function ReviewForm({
   const set = (f: PostingField, v: string | EssayQuestion[]) => setDraft((d) => ({ ...d, [f]: v }));
   const missing = new Set(version?.missing ?? []);
   const fields = POSTING_FIELDS.filter(
-    (f) => showEmpty || REVIEW_FIELDS.includes(f) || fromDraft(f, draft[f]) !== null || version?.extracted[f],
+    (f) => showEmpty || ALWAYS_SHOWN.includes(f) || fromDraft(f, draft[f]) !== null || version?.extracted[f],
   );
   const hidden = POSTING_FIELDS.length - fields.length;
   const titleEmpty = fromDraft("title", draft.title) === null;
@@ -636,6 +643,13 @@ function FieldRow({
       <div className="min-w-0 space-y-1.5">
         {field === "questions" ? (
           <QuestionsEditor value={value as EssayQuestion[]} onChange={onChange} />
+        ) : field === "deadline" || field === "opens_at" ? (
+          <DateField
+            id={id}
+            value={value as string}
+            onChange={onChange}
+            allowAlways={field === "deadline"}
+          />
         ) : isList(field) ? (
           <Textarea
             id={id}
@@ -649,16 +663,10 @@ function FieldRow({
             id={id}
             value={value as string}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={
-              field === "deadline"
-                ? "2026-12-31 또는 2026-12-31T18:00, 상시면 always"
-                : field === "posted_at"
-                  ? "2026-11-01"
-                  : undefined
-            }
+            placeholder={field === "posted_at" ? "2026-11-01" : undefined}
           />
         )}
-        {field === "deadline" && typeof value === "string" && value.trim() ? (
+        {field === "deadline" && typeof value === "string" && value.trim() && value.trim() !== "always" ? (
           <div className="flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted tabular-nums">
             {formatDeadline(value.trim())}
             {ddayLabel(value.trim()) && value.trim() !== "always" ? (
@@ -673,6 +681,71 @@ function FieldRow({
           <EvidenceLine info={evidence} missing={missing} review={review} onOpen={onEvidence} />
         </div>
       </div>
+    </div>
+  );
+}
+
+// 날짜 칸의 값: "always" | "YYYY-MM-DD" | "YYYY-MM-DDTHH:MM"(시간대 없음 = 공간 시간대) | 시간대 있는 ISO.
+// 사람이 고치면 날짜만 또는 시간대 없는 벽시계로 보낸다 (서버가 공간 시간대로 읽는다).
+const NAIVE = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?$/;
+
+function splitWhen(value: string): { date: string; time: string; always: boolean } {
+  const v = value.trim();
+  if (v === "always") return { date: "", time: "", always: true };
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return { date: v, time: "", always: false };
+  const naive = NAIVE.exec(v);
+  if (naive) return { date: naive[1]!, time: naive[2]!, always: false };
+  const local = toLocalInput(v);
+  return local ? { date: local.slice(0, 10), time: local.slice(11, 16), always: false } : { date: "", time: "", always: false };
+}
+
+function DateField({
+  id,
+  value,
+  onChange,
+  allowAlways,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  allowAlways: boolean;
+}) {
+  const w = splitWhen(value);
+  const set = (next: Partial<typeof w>) => {
+    const n = { ...w, ...next };
+    onChange(n.always ? "always" : n.date ? (n.time ? `${n.date}T${n.time}` : n.date) : "");
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          type="date"
+          value={w.date}
+          disabled={w.always}
+          onChange={(e) => set({ date: e.target.value, time: e.target.value ? w.time : "" })}
+          className="w-40"
+        />
+        <Input
+          type="time"
+          value={w.time}
+          disabled={w.always || !w.date}
+          onChange={(e) => set({ time: e.target.value })}
+          aria-label={`${FIELD_LABEL[id.slice(3) as PostingField] ?? ""} 시각 (선택)`}
+          className="w-28"
+        />
+      </div>
+      {allowAlways ? (
+        <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-[13px]">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-fg"
+            checked={w.always}
+            onChange={(e) => set({ always: e.target.checked, date: e.target.checked ? "" : w.date, time: "" })}
+          />
+          상시 채용
+        </label>
+      ) : null}
     </div>
   );
 }

@@ -83,6 +83,8 @@ class ApplicationSummaryOut(BaseModel):
     created_at: datetime
     questions: int
     unwritten: int
+    # 지금 전형 단계 {kind, name, outcome, scheduled_at} (단계가 없으면 null)
+    stage: dict | None = None
 
 
 class DocumentSummaryOut(BaseModel):

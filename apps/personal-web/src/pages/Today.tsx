@@ -432,6 +432,7 @@ function ApplicationState({
 
 function agendaWhat(e: AgendaEvent, app: ApplicationSummary | undefined) {
   if (e.kind === "stage") return e.sub;
+  if (e.kind === "opens") return ["접수 시작", e.sub].filter(Boolean).join(" · ");
   if (e.kind === "expiry") return ["만료", e.sub].filter(Boolean).join(" · ");
   if (e.kind === "test") return ["시험", ...e.sub.split(" · ").filter((part) => part && part !== e.title)].join(" · ");
   if (!app) return "마감 · 지원 전";

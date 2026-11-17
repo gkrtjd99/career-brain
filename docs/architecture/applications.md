@@ -26,7 +26,7 @@ AI 수정안(선택) ─▶ 코드가 사실 변경·조작 문구 거부 ─▶
 | 메서드·경로 | 권한(행동 → scope) | 내용 |
 |---|---|---|
 | `POST /applications {posting_id, title?}` | `applications.write` → draft-write | 저장한 공고만. 문항마다 문서 생성 (201) |
-| `GET /applications` · `GET /applications/{id}` | `applications.read` → read | 목록(문항 수 `questions`, 아직 안 쓴 문항 `unwritten`)·상세(문서 요약, 제출본 ID) |
+| `GET /applications` · `GET /applications/{id}` | `applications.read` → read | 목록(문항 수 `questions`, 아직 안 쓴 문항 `unwritten`, 지금 전형 단계 `stage` = 결과 전인 첫 단계, 다 끝났으면 마지막 단계 `{kind, name, outcome, scheduled_at}`)·상세(문서 요약, 제출본 ID) |
 | `POST /applications/{id}/status {status, note?}` | `applications.write` | passed·rejected·withdrawn만. `submitted`는 제출로만 |
 | `POST /applications/{id}/documents` | `applications.write` | 문서 추가 (`kind`, `title`, 제한·세는 기준) |
 | `GET/PATCH /applications/{id}/documents/{doc}` | read / write | 최신(또는 `?revision=N`) 본문·블록·근거·글자 수. PATCH는 설정만 |

@@ -259,6 +259,13 @@ export function createClient({
     // 공고
     savePostings: (urls: string[]) => post<T.SaveUrlResult[]>("/core/job-postings", { urls }),
     postings: () => get<T.PostingSummary[]>("/core/job-postings"),
+    /** 접수 상태 하나만, 상태별 순서로 (접수 중: 마감 가까운 순, 예정: 시작 가까운 순, 마감: 최근 마감 순) */
+    postingsBy: (opts: { lifecycle?: T.PostingLifecycle; status?: T.PostingStatus }) =>
+      get<T.PostingSummary[]>("/core/job-postings", opts),
+    archivePostings: (ids: string[]) =>
+      post<{ changed: T.Uuid[] }>("/core/job-postings/archive", { ids }),
+    unarchivePostings: (ids: string[]) =>
+      post<{ changed: T.Uuid[] }>("/core/job-postings/unarchive", { ids }),
     posting: (postingId: string) => get<T.Posting>(`/core/job-postings/${id(postingId)}`),
     postingVersions: (postingId: string) =>
       get<T.PostingVersion[]>(`/core/job-postings/${id(postingId)}/versions`),

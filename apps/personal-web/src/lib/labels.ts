@@ -89,6 +89,7 @@ export const FIELD_LABEL: Record<PostingField, string> = {
   employment_type: "고용 형태",
   career_level: "경력 조건",
   deadline: "마감",
+  opens_at: "접수 시작",
   posted_at: "게시일",
   responsibilities: "주요 업무",
   requirements: "자격 요건",

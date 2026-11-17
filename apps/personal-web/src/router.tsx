@@ -16,7 +16,7 @@ import { CompaniesPage } from "./pages/Companies";
 import { ExperiencePage } from "./pages/Experience";
 import { NotFoundPage } from "./pages/NotFound";
 import { PostingPage } from "./pages/Posting";
-import { PostingsPage } from "./pages/Postings";
+import { POSTINGS_VIEWS, PostingsPage, type PostingsView } from "./pages/Postings";
 import { SearchPage } from "./pages/Search";
 import { SourcePage, SourcesPage } from "./pages/Sources";
 import type { ManageSearch, ManageTab } from "./pages/Manage";
@@ -212,6 +212,8 @@ const postingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/postings",
   beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { show?: PostingsView } =>
+    POSTINGS_VIEWS.includes(s.show as PostingsView) && s.show !== "open" ? { show: s.show as PostingsView } : {},
   component: PostingsPage,
 });
 
