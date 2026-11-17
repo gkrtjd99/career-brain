@@ -26,6 +26,7 @@ from career_core.usecases import applications as app_uc
 from career_core.usecases import approvals as approval_uc
 from career_core.usecases import brain as brain_uc
 from career_core.usecases import companies as company_uc
+from career_core.usecases import credentials as credential_uc
 from career_core.usecases import interviews as interview_uc
 from career_core.usecases import postings as posting_uc
 from career_core.usecases import runs as run_uc
@@ -490,6 +491,39 @@ async def _company_get(env: ToolEnv, a: CompanyArgs) -> Any:
     return {"record": "reference", "note": REFERENCE_NOTE, **view}
 
 
+# ---------------------------------------------------------------- 자격·이수 기록 (O20)
+
+CREDENTIAL_NOTE = (
+    "Credentials (licenses, language scores, courses, awards, degrees). Numbers are masked "
+    "(last 4 only). Proof documents themselves are never shared. Only status self_confirmed or "
+    "evidence_supported were confirmed by the user; extracted ones are unconfirmed candidates."
+)
+# 증빙 글의 위치·파싱 ID는 주지 않는다 (증빙 글은 MCP로 나가지 않는다)
+_CREDENTIAL_HIDDEN = ("field_spans", "parse_run_id", "number_masked")
+
+
+class CredentialListArgs(Args):
+    kind: Literal["license", "language", "course", "award", "degree", "other"] | None = None
+    # 기본은 확인한 기록만. 확인 전 후보(증빙에서 뽑고 사람이 아직 보지 않은 것)도 보려면 켠다
+    include_candidates: bool = False
+    expiring_within: int | None = Field(default=None, ge=0, le=3650)
+
+
+async def _credential_list(env: ToolEnv, a: CredentialListArgs) -> Any:
+    rows = await credential_uc.list_credentials(
+        env.db, env.actor, kind=a.kind, expiring_within=a.expiring_within
+    )
+    out = []
+    for r in rows:
+        if r.status == "extracted" and not a.include_candidates:
+            continue
+        item = jsonable(r)
+        for k in _CREDENTIAL_HIDDEN:
+            item.pop(k, None)
+        out.append(item)
+    return {"note": CREDENTIAL_NOTE, "credentials": out}
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -598,6 +632,18 @@ TOOLS: tuple[Tool, ...] = (
         "companies.read",
         CompanyArgs,
         _company_get,
+        untrusted=True,
+    ),
+    Tool(
+        "credential_list",
+        "List the user's credentials: licenses, language test scores, completed courses, awards, "
+        "degrees and other certificates, with issuer, score/grade, hours, acquired/expiry dates "
+        "(null when not written; never estimate them) and expiry state (expired | soon). Numbers "
+        "are masked to the last 4 characters. Confirmed records only unless "
+        "include_candidates=true. Read-only; proof document text and files are never returned.",
+        "credentials.read",
+        CredentialListArgs,
+        _credential_list,
         untrusted=True,
     ),
     Tool(

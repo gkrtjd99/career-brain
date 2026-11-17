@@ -12,6 +12,7 @@ lease 확인(``jobs.lease.guard_lease``): 블록 교체·끝 기록·제공자 �
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from uuid import UUID
@@ -20,7 +21,7 @@ from sqlalchemy import delete, func, select
 
 from career_core.db.models import DocumentBlock, ParseRun, Source, SourceVersion
 from career_core.db.session import Database
-from career_core.domain.sources import TERMINAL_PARSE_STATUSES, ParseStatus
+from career_core.domain.sources import TERMINAL_PARSE_STATUSES, ParseStatus, SourcePurpose
 from career_core.jobs.lease import guard_lease
 from career_core.ports import (
     ActorContext,
@@ -34,6 +35,8 @@ from career_core.ports import (
     ParserProvider,
 )
 from career_core.usecases.index_queue import request_index
+
+log = logging.getLogger(__name__)
 
 LOCAL_ORIGIN = "local"
 EGRESS_PURPOSE = "parse"
@@ -141,7 +144,33 @@ async def _finish(
             await request_index(s, ws)
         if pages_total is not None:
             run.pages_total = pages_total
+        if has_blocks:
+            await _proof_items(s, ws, run)
     return StepOutcome(done=True)
+
+
+async def _proof_items(s, ws: UUID, run: ParseRun) -> None:
+    """증빙 원본이면 읽은 글에서 자격·이수 후보를 로컬 규칙으로 뽑는다 (c0034, 모델 호출 없음).
+
+    뽑기가 실패해도 읽기 결과는 남긴다 (savepoint). 사람이 나중에 "항목 뽑기"로 다시 부를 수 있다.
+    """
+    source_id, purpose = (
+        await s.execute(
+            select(Source.id, Source.purpose)
+            .join(SourceVersion, SourceVersion.source_id == Source.id)
+            .where(SourceVersion.id == run.source_version_id)
+        )
+    ).one()
+    if purpose != SourcePurpose.PROOF:
+        return
+    from career_core.usecases.credentials import extract_in_session
+
+    await s.flush()
+    try:
+        async with s.begin_nested():
+            await extract_in_session(s, ws, source_id, run.requested_by)
+    except Exception as exc:  # noqa: BLE001 - 뽑기 실패가 읽기 결과를 되돌리지 않게
+        log.warning("credential extraction failed: %s", type(exc).__name__)
 
 
 def _missing_pages(result: LocalParseResult) -> list[int]:

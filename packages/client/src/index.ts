@@ -1,4 +1,5 @@
 import { companyEndpoints } from "./companies";
+import { credentialEndpoints } from "./credentials";
 import { liveEndpoints } from "./live";
 import { modelEndpoints } from "./models";
 import { settingsEndpoints } from "./settings";
@@ -7,6 +8,7 @@ import { tokenEndpoints } from "./tokens";
 import type * as T from "./types";
 
 export * from "./companies";
+export * from "./credentials";
 export * from "./live";
 export * from "./models";
 export * from "./settings";
@@ -590,6 +592,7 @@ export function createClient({
     ...settingsEndpoints({ get, json }),
     ...modelEndpoints({ request, get }),
     ...companyEndpoints({ request, get, post, patch }),
+    ...credentialEndpoints({ request, get, post, patch }),
   };
 }
 

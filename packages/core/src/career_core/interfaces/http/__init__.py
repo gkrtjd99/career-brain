@@ -37,6 +37,7 @@ from career_core.interfaces.http.activity import add_activity_routes
 from career_core.interfaces.http.applications import add_application_routes
 from career_core.interfaces.http.brain import add_brain_routes
 from career_core.interfaces.http.companies import add_company_routes
+from career_core.interfaces.http.credentials import add_credential_routes
 from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.models import add_model_routes
@@ -269,6 +270,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_search_routes(router, deps, authorize)
     add_posting_routes(router, deps, authorize)
     add_company_routes(router, deps, authorize)  # O13 회사 조사 (참고 지식)
+    add_credential_routes(router, deps, authorize)  # O20 자격·이수 기록, 증빙 서류함
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
     add_settings_routes(router, deps, authorize)  # c0021 공간 공용 설정

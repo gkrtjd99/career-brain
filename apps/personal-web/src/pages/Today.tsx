@@ -43,6 +43,11 @@ export function TodayPage() {
     queryKey: ["upcoming-assessments", 62],
     queryFn: () => api.upcomingAssessments({ days: 62 }),
   });
+  // 자격·어학 성적 만료 (달력이 두 달을 보이므로 62일)
+  const expiring = useQuery({
+    queryKey: ["credentials", "expiring", 62],
+    queryFn: () => api.credentials({ expiringWithin: 62 }),
+  });
   const activity = useQuery({
     queryKey: ["activity", 30],
     queryFn: () => api.activity({ limit: 30 }),
@@ -73,9 +78,10 @@ export function TodayPage() {
         applications: appList,
         stages,
         tests: tests.data ?? [],
+        credentials: expiring.data ?? [],
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [postings.data, apps.data, tests.data, stagesKey],
+    [postings.data, apps.data, tests.data, expiring.data, stagesKey],
   );
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -426,6 +432,7 @@ function ApplicationState({
 
 function agendaWhat(e: AgendaEvent, app: ApplicationSummary | undefined) {
   if (e.kind === "stage") return e.sub;
+  if (e.kind === "expiry") return ["만료", e.sub].filter(Boolean).join(" · ");
   if (e.kind === "test") return ["시험", ...e.sub.split(" · ").filter((part) => part && part !== e.title)].join(" · ");
   if (!app) return "마감 · 지원 전";
   if (app.status !== "draft") return "마감 · 제출함";
@@ -492,6 +499,9 @@ function Legend() {
       </span>
       <span className="inline-flex items-center gap-1.5">
         <KindMark kind="test" /> 시험
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <KindMark kind="expiry" /> 만료
       </span>
     </div>
   );

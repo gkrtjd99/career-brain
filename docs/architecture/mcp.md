@@ -110,6 +110,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `approval_request` · `approval_status` | `approvals.request` · `approvals.read` | `POST/GET /core/approvals` |
 | `run_start` · `run_status` · `run_cancel` | `runs.start` · `runs.read` · `runs.control` | `/core/runs…` |
 | `company_list` (`query`로 이름·별칭 찾기) · `company_get` (확인된 항목만, `include_candidates`로 후보 포함, 원문 글은 넣지 않음) — 읽기 전용, c0033 | `companies.read` | `GET /core/companies`, `/core/companies/{id}` |
+| `credential_list` (`kind`, `expiring_within` 일, `include_candidates`로 확인 전 후보 포함) — 읽기 전용, 번호는 끝 4자리만, 증빙 글·원문 위치 없음, c0034 | `credentials.read` | `GET /core/credentials` |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
 

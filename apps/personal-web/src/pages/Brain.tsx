@@ -6,6 +6,7 @@ import { ChevronRight, Plus, Search as SearchIcon, Upload } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { ReferenceEntry } from "../components/companies/ReferenceEntry";
+import { MeEntry } from "../components/credentials/MeEntry";
 import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/ExperienceForm";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
 import { UploadSheet } from "../components/UploadSheet";
@@ -115,6 +116,7 @@ export function BrainPage() {
         </>
       ) : null}
 
+      <MeEntry />
       <ReferenceEntry />
       <Link
         to="/brain/sources"

@@ -5,6 +5,7 @@ import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
+import { ProofPanel } from "../components/credentials/ProofPanel";
 import { PurposeChoice } from "../components/sources/PurposeChoice";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
@@ -266,6 +267,7 @@ export function SourcePage() {
             />
             <div className="max-w-2xl space-y-10">
               <PurposeSection src={src} parseDone={!!parse && ["complete", "partial"].includes(parse.status)} />
+              {src.purpose === "proof" ? <ProofPanel sourceId={src.id} /> : null}
               <Block title="처리">
                 <dl className="divide-y divide-line border-y border-line text-[13px]">
                   <Row name="읽기">

@@ -76,6 +76,10 @@ ACTION_SCOPES: dict[str, str] = {
     # c0033 (O13) 회사 조사: 참고 지식. 항목 후보 확인은 사람만 (usecase가 agent를 막는다)
     "companies.read": "read",
     "companies.write": "draft-write",
+    # c0034 (O20) 자격·이수 기록. 후보 확인은 사람만 (usecase가 agent를 막는다).
+    # 번호 원래 값 보기(reveal)도 쓰기 권한과 같은 범위 (보는 사람·편집하는 사람이 같다)
+    "credentials.read": "read",
+    "credentials.write": "draft-write",
 }
 
 

@@ -1,4 +1,4 @@
-import type { ExperienceKind, SearchKind, SourcePurpose } from "@career-brain/client";
+import type { CredentialKind, ExperienceKind, SearchKind, SourcePurpose } from "@career-brain/client";
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
@@ -97,6 +97,27 @@ export const sourceRoute = createRoute({
   path: "/brain/sources/$sourceId",
   beforeLoad: requireToken,
   component: SourcePage,
+});
+
+const CREDENTIAL_KINDS: CredentialKind[] = ["license", "language", "course", "award", "degree", "other"];
+
+/** 나 › 자격·이수. 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+export const credentialsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/credentials",
+  beforeLoad: requireToken,
+  // 종류 필터는 type (브레인의 kind와 이름이 겹치지 않게)
+  validateSearch: (s: Record<string, unknown>): { type?: CredentialKind } =>
+    CREDENTIAL_KINDS.includes(s.type as CredentialKind) ? { type: s.type as CredentialKind } : {},
+  component: lazyRouteComponent(() => import("./pages/Credentials"), "CredentialsPage"),
+});
+
+/** 나 › 증빙 서류 */
+const proofsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/proofs",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Proofs"), "ProofsPage"),
 });
 
 export type ExperienceTab = "claims" | "wiki" | "interview";
@@ -297,6 +318,8 @@ const routeTree = rootRoute.addChildren([
   brainRoute,
   sourcesRoute,
   sourceRoute,
+  credentialsRoute,
+  proofsRoute,
   experienceRoute,
   companiesRoute,
   companyRoute,

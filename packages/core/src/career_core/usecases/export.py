@@ -541,6 +541,10 @@ async def export_workspace(
         staging = Path(tmp)
         dump = await _dump_tables(db, ws, staging)
         blob_entries, missing = await _check_blobs(blobs, ws, dump.blob_keys)
+        proofs = await _proof_marks(db, ws)
+        for entry in blob_entries:
+            if entry["key"] in proofs["blobs"]:
+                entry["purpose"] = "proof"
         manifest = {
             "format": FORMAT,
             "format_version": FORMAT_VERSION,
@@ -566,6 +570,8 @@ async def export_workspace(
             "skipped": dump.plan.skipped,
             # 이 묶음의 core.deletions가 다루는 표 (v2). 삭제 기록을 다시 적용할 때 범위 안내.
             "tombstone_tables": sorted(TOMBSTONE_TABLES),
+            # c0034: 증빙 원본(자료 등급 restricted). 원본 파일은 blobs에 그대로, 여기서 따로 표시한다
+            "proofs": proofs,
         }
         partial = out.with_name(f".{out.name}.{uuid4().hex}.part")
         sealed = out.with_name(f".{out.name}.{uuid4().hex}.age")
@@ -711,6 +717,33 @@ async def _dump_tables(db: Database, ws: UUID, staging: Path) -> _Dump:
         for r in pending
     ]
     return _Dump(reports, blob_keys, name, plan, work)
+
+
+async def _proof_marks(db: Database, ws: UUID) -> dict[str, list[str]]:
+    """증빙 원본 ID와 그 파일 키 (manifest ``proofs``). 묶음을 받은 사람이 증빙 사본을 따로 다루게."""
+    async with db.workspace_session(ws) as s:
+        # 옛 migration head(c0032 전)의 DB에는 용도 칸이 없다: 증빙도 없다
+        has_purpose = await s.scalar(
+            text(
+                "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'core' "
+                "AND table_name = 'sources' AND column_name = 'purpose'"
+            )
+        )
+        if not has_purpose:
+            return {"sources": [], "blobs": []}
+        rows = (
+            await s.execute(
+                text(
+                    "SELECT s.id::text AS id, v.blob_key FROM core.sources s "
+                    "JOIN core.source_versions v ON v.source_id = s.id "
+                    "WHERE s.purpose = 'proof' ORDER BY s.id, v.blob_key"
+                )
+            )
+        ).all()
+    return {
+        "sources": sorted({r.id for r in rows}),
+        "blobs": sorted({r.blob_key for r in rows}),
+    }
 
 
 async def _check_blobs(
@@ -1415,6 +1448,14 @@ def _c0033_companies(arc) -> None:
     if arc.has("core.job_postings"):
         arc.add_columns("core.job_postings", company_id=None)
     arc.ensure_tables("core.companies", "core.company_pages", "core.company_facts")
+
+
+@schema_step(
+    "c0034",
+    "자격·이수 기록 표 credentials (옛 묶음에는 빈 표). 증빙 원본(blob)·해시는 그대로",
+)
+def _c0034_credentials(arc) -> None:
+    arc.ensure_tables("core.credentials")
 
 
 def _parents() -> dict[str, str | None]:
@@ -2413,6 +2454,34 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "notes",
                 "updated_at",
             )
+        ),
+    ),
+    # c0034 자격·이수 기록: 확인 상태·연결·상세·원문 위치는 바뀐다. 이름·번호·날짜·점수가 정체
+    "core.credentials": (
+        SameExcept(
+            (
+                "status",
+                "confirmed_by",
+                "confirmed_at",
+                "source_id",
+                "experience_id",
+                "parse_run_id",
+                "field_spans",
+                "detail",
+                "updated_at",
+            ),
+            (
+                "kind",
+                "name",
+                "issuer",
+                "number",
+                "acquired_on",
+                "expires_on",
+                "started_on",
+                "ended_on",
+                "score",
+                "hours",
+            ),
         ),
     ),
     # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)
