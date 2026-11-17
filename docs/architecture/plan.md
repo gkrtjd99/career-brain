@@ -421,6 +421,8 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 
 진행 (O13): 회사·원문(`company_pages`)·항목(`company_facts`)과 `job_postings.company_id`(c0033). 원문 인용 없는 항목은 저장되지 않음(DB도 원문 필수), 기준일 없는 재무 항목 거부(`finance_needs_as_of`), 기준일은 원문에 적힌 것만(연·월·일 단위), 1년 넘은 항목은 오래됨 표시. URL(공고와 같은 fetch 경로, worker `company_fetch`)·붙여넣기, 모델 후보(용도 `company_facts`)는 사람이 확인. 같은 이름 공고 연결 제안 → 사람이 연결. MCP는 읽기 전용 `company_list`·`company_get`(참고 지식 안내). 문서 근거로 쓸 수 없음(시험). 웹: 브레인 › 참고 › 회사, 회사 화면, 공고 화면의 회사 한 줄. 아직 없음: OpenDART 어댑터(19.1 (c)), 파일(PDF·이미지) 원문 — 지금은 글을 붙여넣는다, 지원 화면의 회사 요약.
 
+진행 (O21, c0036): 공간당 프로필 하나(`profiles`, `UNIQUE (workspace_id)`: 이름·영문 이름·생년월일(선택)·이메일·전화·주소·링크·한 줄 소개)와 증명사진(`profile_photos`: 규격 = 사진 변환 도구의 미리 정한 크기 id `cm-3x4`·`cm-3.5x4.5`·`cm-2.5x3`·`px-150x200` 또는 `custom`, 가로·세로 px·바이트·JPEG/PNG·`blob_key`). 사진은 변환본만: 서버도 JPEG APP1–15(EXIF·XMP·ICC…)·주석·JFIF 썸네일·EOI 뒤 바이트, PNG 글·시각·EXIF·ICC 덩어리를 지우고 지운 바이트만 BlobStore에 둔다(화소는 다시 인코딩하지 않음), 2MB·16–4000px·규격 비율 검사, 같은 바이트는 한 장. 기본 사진은 사진 표의 `is_default`가 아니라 `profiles.default_photo_id` 하나로 둔다 — 기존 공간에 묶음을 합칠 때 양쪽 기본 사진이 부딪히지 않는다(받는 공간 것이 남는다). 첫 사진이 기본, 기본을 지우면 남은 가장 최근 사진이 기본. 사진을 지우면 다른 행이 같은 파일을 쓰지 않을 때 BlobStore 파일도 지운다(`LocalBlobStore.delete`, 포트에는 선택 기능). 프로필·사진은 restricted로 다룬다: 모델로 보내는 경로·검색 색인이 없고 MCP는 `profile_summary`(이름·한 줄 소개·링크)만 — 생년월일·연락처·주소·사진은 주지 않는다. HTTP `GET/PUT /core/profile`, `GET/POST /core/profile/photos`, `GET …/{id}/file`, `PATCH`(기본으로 지정·규격), `DELETE`. 내보내기는 카탈로그로 자동 포함, 사진 바이트는 `blob_key`로 `blobs/`에 들어가 복원 후 해시가 같다(`schema_step c0036`). 웹: 브레인 › 나 › 프로필(`/brain/profile`), 사진 변환의 "프로필에 저장". 아직 없음: 이력서(O17)에서 프로필 쓰기·블라인드 모드, 사진 삭제의 삭제 기록(tombstone).
+
 개발 순서: career-brain(이 레포)을 먼저 완성한다. career-service는 완성된 career-brain을 참고해 이후에 개발하며, 두 레포를 동시에 개발하지 않는다.
 
 ## 17. 고정 회귀 시험

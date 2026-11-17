@@ -475,3 +475,19 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 공고 묶기: 연결되지 않은 공고 중 회사 이름의 `name_key`가 회사 이름·별칭과 같은 것을 제안만 한다. 연결은 사람이 `link-postings`로.
 - 내보내기: 세 표는 카탈로그로 자동 포함. `@schema_step("c0033")`가 옛 묶음에 빈 표와 `job_postings.company_id = null`을 넣는다. 대기 중인 `company_fetch`는 `pending_work`로 다시 큐에 들어간다. 삭제 기록(tombstone) 대상은 아니다.
 - 시험: `packages/core/tests/test_companies.py` (이름 키·기준일, 인용 필수·DB CHECK, HTTP 오류·권한, URL 가져오기·후보 검증, 붙여넣기+모델, 공고 묶기·다른 공간 0건, 문서 근거 거부, MCP 도구, 내보내기 왕복).
+
+## 프로필·증명사진 (c0036, O21)
+
+`c0036` (`down_revision = c0033`). 브레인 "나 › 프로필" (plan §20). 공간마다 프로필 하나와 사진 변환 도구가 만든 증명사진.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `profile_photos` | 변환본 한 장: `spec`(`cm-3x4`·`cm-3.5x4.5`·`cm-2.5x3`·`px-150x200`·`custom`, 사진 변환 도구의 `SIZE_PRESETS` id)·`width_px`/`height_px`(16–4000)·`bytes`(2MB 이하)·`mime`(`image/jpeg`·`image/png`)·`blob_key`·`sha256`(`blob_key = sha256`, 메타데이터를 지운 바이트의 해시). `UNIQUE (workspace_id, sha256)` | 전체 |
+| `profiles` | 공간당 하나 (`uq_profiles_workspace`). 이름·영문 이름(100자)·생년월일(NULL 가능, 1900-01-01 이후)·이메일(254)·전화(40)·주소(200)·`links`(jsonb 배열 `[{label, url}]`, 10개 이하)·한 줄 소개(200)·`default_photo_id`. FK (`workspace_id, default_photo_id`) → `profile_photos`, `ON DELETE SET NULL (default_photo_id)` | 전체 |
+
+- 기본 사진을 사진 표의 `is_default` + 부분 유일 색인으로 두지 않은 이유: 기존 공간에 묶음을 합치면(`merge_workspace`) 양쪽의 기본 사진이 부분 색인에서 부딪혀 합치기 전체가 실패한다. 프로필 칸 하나면 프로필이 공간당 하나라 받는 공간의 프로필·기본 사진이 남고 들어온 사진은 기본이 아닌 사진으로 더해진다. 칸이 비어 있거나 없는 사진을 가리키면 usecase가 가장 최근 사진을 기본으로 보여 준다 (사진이 있으면 기본은 늘 하나).
+- 규칙 (usecase `career_core.usecases.profiles`, 규칙 `career_core.domain.profiles`): 받은 바이트에서 JPEG APP1–APP15(EXIF·XMP·ICC·IPTC, Adobe APP14 색 변환 표시만 남김)·COM·JFIF 썸네일·EOI 뒤 바이트, PNG의 `IHDR PLTE IDAT IEND tRNS gAMA cHRM sRGB sBIT pHYs` 밖 덩어리를 빼고 그 결과만 저장한다 (원본은 어디에도 두지 않는다). 화소 데이터는 다시 인코딩하지 않는다. 깨진 파일(CRC·길이·SOF/SOS 없음)·다른 형식은 거부. 규격이 있으면 비율이 ±1.5% 안이어야 한다(dpi 자유). 공간당 30장.
+- 자료 등급: restricted(개인 식별 정보)로 다룬다. 모델 게이트웨이로 보내는 경로와 검색 색인이 없다. MCP는 `profile_summary`(이름·한 줄 소개·링크)만.
+- 사진을 지우면 같은 key를 가리키는 행이 이 공간에 남지 않을 때 BlobStore 파일도 지운다 (내보내기와 같은 `blob_columns` 규칙으로 찾는다).
+- 내보내기: 두 표는 카탈로그로 자동 포함, `blob_key`라 사진 바이트가 `blobs/`에 들어간다. `@schema_step("c0036")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 DB UNIQUE(`profiles`는 공간, `profile_photos`는 sha256). 삭제 기록(tombstone) 대상은 아니다.
+- 시험: `packages/core/tests/test_profiles.py` (메타데이터 지우기, 공간당 하나, 규칙·권한, 지운 바이트만 저장, 크기·형식·비율 상한, 기본 하나·지우면 옮김, 다른 공간 404, 내보내기 왕복 해시, 합치기에서 기본 사진, MCP 요약).

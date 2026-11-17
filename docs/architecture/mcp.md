@@ -110,8 +110,11 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `approval_request` · `approval_status` | `approvals.request` · `approvals.read` | `POST/GET /core/approvals` |
 | `run_start` · `run_status` · `run_cancel` | `runs.start` · `runs.read` · `runs.control` | `/core/runs…` |
 | `company_list` (`query`로 이름·별칭 찾기) · `company_get` (확인된 항목만, `include_candidates`로 후보 포함, 원문 글은 넣지 않음) — 읽기 전용, c0033 | `companies.read` | `GET /core/companies`, `/core/companies/{id}` |
+| `profile_summary` — 이름·한 줄 소개·링크만, 읽기 전용, c0036 | `profile.read` | `GET /core/profile` (그중 세 칸) |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
+
+`profile_summary`(c0036)는 프로필에서 **이름·한 줄 소개·링크만** 준다. 생년월일·이메일·전화·주소·증명사진은 개인 식별 정보(restricted)라 어떤 MCP 도구로도 나가지 않는다 — 에이전트가 이력서 초안에 연락처가 필요하면 사용자가 직접 채운다. 결과에 `record: "profile"`과 그 안내(`note`)가 붙고, 사용자가 쓴 글이라 `untrusted_content: true`다 (`test_profiles.py`).
 
 `search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`).
 

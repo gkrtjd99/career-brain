@@ -126,6 +126,14 @@ export const companyRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Company"), "CompanyPage"),
 });
 
+/** 나 › 프로필 (O21). 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+const profileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/profile",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Profile"), "ProfilePage"),
+});
+
 const KINDS: SearchKind[] = ["claim", "block", "answer"];
 export const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -300,6 +308,7 @@ const routeTree = rootRoute.addChildren([
   experienceRoute,
   companiesRoute,
   companyRoute,
+  profileRoute,
   searchRoute,
   postingsRoute,
   postingRoute,
