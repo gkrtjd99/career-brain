@@ -15,6 +15,7 @@ import { getRouteApi, Link } from "@tanstack/react-router";
 import { Archive, ExternalLink, FileText, RefreshCw, Trash2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
+import { CompanyLine } from "../components/companies/CompanyLine";
 import { DdayBadge } from "../components/DdayBadge";
 import { ChoiceQuestions, CostConfirmation } from "../components/postings/PostingExtras";
 import { useCreateApplication } from "./Applications";
@@ -149,6 +150,7 @@ function PostingView({ p }: { p: Posting }) {
         }
       />
       <ErrorText error={refetch.error ?? archive.error} className="mb-4" />
+      <CompanyLine p={p} />
 
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-14">
         <div className="min-w-0 space-y-10">

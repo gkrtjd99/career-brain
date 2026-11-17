@@ -315,6 +315,28 @@ export const ERROR_TEXT: Record<string, string> = {
   unreachable: "주소에 닿지 않습니다. 서버가 켜져 있는지, 주소가 맞는지 확인하세요.",
   unauthorized: "키가 거절되었습니다. 키를 확인하세요.",
   bad_response: "응답이 모델 목록 형식이 아닙니다. 주소 끝이 /v1 인지 확인하세요.",
+  // c0033 회사 조사 (참고 지식)
+  company_exists: "같은 이름의 회사가 이미 있습니다.",
+  name_required: "회사 이름을 적어 주세요.",
+  name_too_long: "회사 이름은 200자까지입니다.",
+  company_alias_too_long: "다른 이름은 하나에 200자까지입니다.",
+  too_many_company_aliases: "다른 이름은 20개까지입니다.",
+  invalid_homepage: "홈페이지 주소 형식이 아닙니다.",
+  invalid_corp_code: "고유번호는 숫자 8자리입니다.",
+  invalid_business_no: "사업자등록번호는 숫자 10자리입니다.",
+  invalid_kind: "알 수 없는 종류입니다.",
+  body_required: "내용을 적어 주세요.",
+  body_too_long: "내용은 2,000자까지입니다.",
+  quote_required: "원문에서 인용할 글을 붙여넣어 주세요.",
+  quote_too_long: "인용은 2,000자까지입니다.",
+  quote_not_found: "인용한 글을 원문에서 찾지 못했습니다. 원문에서 그대로 복사해 붙여넣으세요.",
+  page_not_ready: "아직 원문을 가져오는 중이거나 가져오지 못한 원문입니다.",
+  finance_needs_as_of: "재무 항목은 기준일(연도 또는 날짜)이 있어야 합니다.",
+  invalid_as_of: "기준일은 2024, 2024-06, 2024-06-30 꼴이어야 합니다.",
+  text_required: "붙여넣을 글이 비어 있습니다.",
+  posting_ids_required: "연결할 공고를 골라 주세요.",
+  unknown_posting: "찾을 수 없는 공고가 있습니다.",
+  too_many_postings: "한 번에 200개까지 연결할 수 있습니다.",
 };
 
 // ---------------------------------------------------------------- O07 지원·문서

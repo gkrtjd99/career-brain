@@ -487,6 +487,8 @@ export interface PostingSummary {
   last_fetch_error: FetchError | string | null;
   created_at: IsoDateTime | null;
   saved_at: IsoDateTime | null;
+  /** c0033: 이은 회사 (회사 조사, 없으면 null) */
+  company_id?: Uuid | null;
 }
 
 /** 비전 호출 비용 확인 요청 (c0025). 금액은 USD 문자열, 토큰은 추정값 */
@@ -565,6 +567,8 @@ export interface Posting {
   saved_at: IsoDateTime | null;
   latest: PostingVersion | null;
   runs: FetchRun[];
+  /** c0033: 이은 회사 (회사 조사, 없으면 null) */
+  company_id?: Uuid | null;
 }
 
 export interface ConfirmPostingIn {

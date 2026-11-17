@@ -129,7 +129,7 @@ PC·모바일 → Caddy → personal-web 정적 파일
 | 학습 | assessment_requirements, study_items, attempts, reviews | 전형별 요구, 문제·풀이, 정오·복습 |
 | 실행 | runs, run_events, approvals, outbox | 상태, 비용, 재개 위치, 승인 범위 |
 | 검색 | chunks, embeddings, embedding_spaces | 원본 버전, 모델·차원·청킹 버전 |
-| 회사 (계획, §19.1) | companies, company_facts | 회사 식별·별칭, 항목 종류·본문·출처·기준일·확인 상태, 공고 연결 |
+| 회사 (c0033, §19.1) | companies, company_pages, company_facts | 회사 식별·별칭, 항목 종류·본문·출처·기준일·확인 상태, 공고 연결 |
 | 참고 (계획, §19.2) | references, reference_notes | 남의 글 종류·태그·출처, 구조 메모. 내 경험과 분리 |
 | 지원 준비 (계획, §19.3) | application_preps, prep_items | 공고 버전·문항별 후보 경험·근거·회사 연결·사람의 선택 |
 | 면접 준비 (계획, §19.4) | interview_preps, answer_assets | 예상 질문·출처, 쓸 경험, 사람이 쓴 답변 |
@@ -417,6 +417,8 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 
 진행 (O19): 경험 종류·상위(한 단계, DB trigger)·월 단위 기간(원문이 분명할 때만, 기존 행 채우기)·태그(c0031), 추출 후보의 종류·기간·태그(기간은 원문에 있는 글에서만), `GET /core/experiences` 거름·정렬·쪽과 `PATCH`, `GET /core/brain/overview`, 브레인 색인 화면(찾기·확인할 것·연표/표·거름, 주소에 거름), 경험 화면 구조 고치기. 자주 쓰는 거름 저장(`saved_views`)은 아직 없다 — 지금은 주소(링크)로 같은 보기를 연다.
 
+진행 (O13): 회사·원문(`company_pages`)·항목(`company_facts`)과 `job_postings.company_id`(c0033). 원문 인용 없는 항목은 저장되지 않음(DB도 원문 필수), 기준일 없는 재무 항목 거부(`finance_needs_as_of`), 기준일은 원문에 적힌 것만(연·월·일 단위), 1년 넘은 항목은 오래됨 표시. URL(공고와 같은 fetch 경로, worker `company_fetch`)·붙여넣기, 모델 후보(용도 `company_facts`)는 사람이 확인. 같은 이름 공고 연결 제안 → 사람이 연결. MCP는 읽기 전용 `company_list`·`company_get`(참고 지식 안내). 문서 근거로 쓸 수 없음(시험). 웹: 브레인 › 참고 › 회사, 회사 화면, 공고 화면의 회사 한 줄. 아직 없음: OpenDART 어댑터(19.1 (c)), 파일(PDF·이미지) 원문 — 지금은 글을 붙여넣는다, 지원 화면의 회사 요약.
+
 개발 순서: career-brain(이 레포)을 먼저 완성한다. career-service는 완성된 career-brain을 참고해 이후에 개발하며, 두 레포를 동시에 개발하지 않는다.
 
 ## 17. 고정 회귀 시험
@@ -606,7 +608,8 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 
 - 엔터티: `companies`(이름·별칭·홈페이지·선택 식별자), `company_facts`(종류: 인재상·핵심 가치·주요 사업·제품·재무·조직 문화·최근 소식·채용 절차·기타 / 본문 / 출처는 `source_spans` 또는 URL과 가져온 시각 / 기준일 / 확인 상태). 공고는 `company_id`로 잇는다. 지금 공고의 회사 이름 문자열은 같은 이름끼리 묶자고 제안하고 사람이 확인한다.
 - 입력: (a) 회사 소개·채용·IR 페이지 URL. 공고 가져오기와 같은 fetch 경로와 인용 규칙으로 항목 후보를 뽑는다. (b) 붙여넣기·파일(IR 자료, 기사). (c) 선택 어댑터: 금융감독원 OpenDART(기업 개황·주요 재무, 사용자 키 필요, 자료 등급 `public`). 약관과 호출 한도는 구현 때 확인한다.
-- 화면: 회사 페이지(항목별 카드, 기준일·출처, 이 회사 공고, 이 회사 지원 이력). 공고·지원 화면에 회사 요약 카드.
+- 화면: 회사 페이지(종류별 항목 목록, 기준일·가져온 날·출처, 이 회사 공고, 이 회사 지원 이력). 공고 화면에 회사 한 줄.
+- 상태 (c0033): (a)·(b) 붙여넣기 구현. (b)의 파일과 (c) OpenDART는 나중 — 식별자 칸(`corp_code`)만 먼저 둔다.
 - 완료 기준: §16 O13.
 
 ### 19.2 참고 자료 보관함 (O14)
