@@ -7,8 +7,9 @@ import { queryClient, setUnauthorizedHandler } from "./lib/api";
 import { router } from "./router";
 
 setUnauthorizedHandler(() => {
-  if (router.state.location.pathname !== "/settings") {
-    void router.navigate({ to: "/settings", search: { reason: "invalid" } });
+  const { pathname, href } = router.state.location;
+  if (pathname !== "/connect" && pathname !== "/settings") {
+    void router.navigate({ to: "/connect", search: { reason: "invalid", next: href } });
   }
 });
 
