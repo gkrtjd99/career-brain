@@ -12,6 +12,7 @@
     내 글/기본 문서/, 내 글/공통 답변/, 내 글/지난 제출본/
     지원/<지원>.md                공고 요약·상태·전형·문서의 마지막 저장 글
     참고/회사/, 참고/참고 글/      머리말 ``purpose: reference`` + "근거로 쓰지 않습니다"
+    포트폴리오/<항목>.md           O18: '공개 가능' 항목만. 문제·내 역할·한 일·결과, 링크, 공개 가능 이미지의 설명만
     자료/목록.md                  올린 자료 목록 (증빙 원본·증빙에서 읽은 글은 넣지 않는다)
     자료/원본/                    ``files``일 때만: 증빙이 아닌 원본 파일
 
@@ -30,6 +31,8 @@
   ``export_runs``에 ``kind = 'markdown'`` 한 줄 (c0046) — "마지막 백업"에는 세지 않는다.
 - 임시 파일에 쓰고, 풀어 쓴 크기 합이 ``max_bytes``(기본 ``CAREER_MARKDOWN_EXPORT_MAX_BYTES``, 512 MiB)를 넘으면
   ``too_large``로 멈춘다. 원본 파일은 하나씩 읽는다.
+- 포트폴리오는 공개 규칙이다 (``domain.portfolio.visible_in(…, "public")``): '나만'·'지원서에만' 항목은 없고,
+  보이는 항목에서도 '공개 가능' 이미지의 설명만 적는다. 이미지 파일은 넣지 않는다.
 - 모델을 부르지 않는다.
 """
 
@@ -108,6 +111,7 @@ APPLICATIONS = "지원"
 COMPANIES = "참고/회사"
 REFERENCES = "참고/참고 글"
 SOURCES = "자료"
+PORTFOLIO = "포트폴리오"
 ORIGINALS = f"{SOURCES}/원본"
 
 NO_IMPORT = "이 폴더는 다시 가져올 수 없습니다. 백업은 연결·관리의 백업을 쓰세요."
@@ -549,6 +553,8 @@ class _Data:
     notes: dict[UUID, list[ReferenceNote]] = field(default_factory=dict)
     sources: list[Source] = field(default_factory=list)
     versions: dict[UUID, SourceVersion] = field(default_factory=dict)
+    # O18: 공개 가능 항목만 (``portfolios.markdown_items``)
+    portfolio: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def _all(s, stmt) -> list:
@@ -711,6 +717,9 @@ async def _load(s, opts: MarkdownOptions) -> _Data:
         s, select(SourceVersion).order_by(SourceVersion.created_at, SourceVersion.id)
     ):
         d.versions[v.source_id] = v  # 마지막 판
+    from career_core.usecases.portfolios import markdown_items
+
+    d.portfolio = await markdown_items(s)
     return d
 
 
@@ -810,6 +819,7 @@ async def _write_all(
     )
     await _write_references(w, d, opts, company_names, company_link, app_names, app_title)
     n_files = await _write_sources(w, d, opts, blobs, ws)
+    await _write_portfolio(w, d, claims, exp_link)
 
     counts = {
         "experiences": len(d.experiences),
@@ -819,6 +829,7 @@ async def _write_all(
         "references": len(d.companies) + len(d.references),
         "sources": len(d.sources),
         "files": n_files,
+        "portfolio": len(d.portfolio),
     }
     await w.note("README", _readme(d, counts, opts, now))
     return counts
@@ -857,6 +868,16 @@ def _readme(d: _Data, counts: dict[str, int], opts: MarkdownOptions, now: dateti
         f"- {APPLICATIONS}/ — 지원마다 한 파일. 공고 요약·전형·문서",
         "- 참고/ — 회사 조사와 참고 글. 근거로 쓰지 않습니다.",
         f"- {SOURCES}/ — 올린 자료 목록. 증빙 서류의 원본과 읽은 글은 넣지 않습니다.",
+        *(
+            [
+                (
+                    f"- {PORTFOLIO}/ — '공개 가능' 포트폴리오 항목 {counts['portfolio']}개. "
+                    "'나만'·'지원서에만' 항목과 이미지 파일은 넣지 않습니다."
+                )
+            ]
+            if counts["portfolio"]
+            else []
+        ),
         "",
         "확인한 사실만 근거로 적었습니다. 주민등록번호로 보이는 값은 가렸습니다.",
     ]
@@ -1063,6 +1084,59 @@ async def _write_experiences(w, d: _Data, names, claims_by_exp, exp_link) -> Non
                 lines.append(_claim_line(c))
                 lines += [_evidence_line(ev) for ev in d.evidence.get(c.id, [])]
         await w.note(f"{EXPERIENCES}/{names[e.id]}", "\n".join(lines))
+
+
+_LINK_KIND = {"repo": "저장소", "demo": "데모", "article": "글", "video": "영상"}
+
+
+async def _write_portfolio(w, d: _Data, claims: dict[UUID, Claim], exp_link) -> None:
+    """포트폴리오/<항목>.md (공개 가능 항목만). 근거가 이어진 줄은 그대로, 직접 쓴 줄은 "(근거 없음)"."""
+    rows = d.portfolio
+    if not rows:
+        return
+    names = assign_names((r["row"].id, r["row"].title, _order_key(r["row"])) for r in rows)
+
+    def line(ln: dict) -> str:
+        cid = ln.get("claim_id")
+        mark = ""
+        if not cid:
+            mark = " (근거 없음)"
+        else:
+            try:
+                c = claims.get(UUID(cid))
+            except ValueError:
+                c = None
+            if c is None or c.status not in CONFIRMED_STATUSES:
+                mark = " (근거 사라짐)"
+        return f"- {_inline(ln.get('text'))}{mark}"
+
+    for r in rows:
+        it, c = r["row"], r["content"]
+        head = frontmatter(
+            [
+                ("experience", exp_link(it.experience_id)),
+                ("tags", list(it.tags or [])),
+                ("visibility", "공개 가능"),
+            ]
+        )
+        lines = [head, f"# {_inline(it.title)}", ""]
+        if exp_link(it.experience_id):
+            lines += [f"경험: {exp_link(it.experience_id)}", ""]
+        for lk in it.links or []:
+            label = lk.get("label") or _LINK_KIND.get(lk.get("kind"), "링크")
+            lines.append(f"- {_inline(label)}: <{_inline(lk.get('url'))}>")
+        if it.links:
+            lines.append("")
+        for title, key in (("문제", "problem"), ("내 역할", "role")):
+            if c.get(key):
+                lines += [f"## {title}", "", _block(c[key]) + " (직접 쓴 글)", ""]
+        for title, key in (("한 일", "actions"), ("결과", "results")):
+            if c.get(key):
+                lines += [f"## {title}", "", *(line(ln) for ln in c[key]), ""]
+        caps = [img.caption for img in r["images"] if img.caption]
+        if caps:
+            lines += ["## 이미지", "", *(f"- {_inline(x)}" for x in caps), ""]
+        await w.note(f"{PORTFOLIO}/{names[it.id]}", "\n".join(lines))
 
 
 def _submission_docs(sub: ApplicationSubmission) -> list[dict]:

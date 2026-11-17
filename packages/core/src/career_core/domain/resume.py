@@ -9,7 +9,7 @@
   본문은 그대로이고, 읽을 때 지금 값의 해시와 ``basis``를 비교해 "오래됨"을 보인다("다시 채우기"는 사람이 누른다).
   기록에서 온 칸은 판본에서 고치지 않는다 — 브레인 기록을 고치고 다시 채운다. ``ref``가 없는 항목은 사람이 쓴 항목.
 - 줄 ``{"id", "text", "claim_id": ID|null, "basis": 해시|null, "origin": "claim"|"user"|"ai"}``. 확인한 사실에서
-  고른 줄은 그 사실을 근거로 계속 가리킨다. 사실의 문장이 바뀌면 "오래됨", 확인이 풀리면 "근거 끊김"으로 보이고
+  고른 줄은 그 사실을 근거로 계속 가리킨다. 사실의 문장이 바뀌면 "오래됨", 확인이 풀리면 "근거 사라짐"으로 보이고
   줄 글은 저절로 바뀌지 않는다. ``claim_id``가 없는 줄은 "근거 없음"이다 (직접 쓴 줄도 허용한다).
 - 모델은 글을 쓰지 않는다. 줄 다듬기는 문서 수정안 경로(§11)로 사람이 요청할 때만이고, 적용한 줄은 ``origin = ai``.
 """
@@ -851,6 +851,10 @@ class RenderItem:
     tertiary: str | None = None
     lines: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
+    # 경험 항목의 경험 ID (포트폴리오 항목과 맞추기). 출력에는 쓰지 않는다.
+    ref_id: str | None = None
+    # 함께 내보낸 포트폴리오 항목으로 가는 상대 링크 (정적 HTML 묶음에서만, 그 밖에는 None)
+    href: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -930,6 +934,7 @@ def render_item(
             or None,
             lines=lines,
             tags=tuple(f.get("tags") or ()),
+            ref_id=item["ref"]["id"],
         )
     if rtype == "education":
         school = None if blind else " ".join(v for v in (f.get("school"), f.get("campus")) if v)
@@ -1036,6 +1041,7 @@ def build_render(
                     tertiary=clean(r.tertiary) if r.tertiary else None,
                     lines=tuple(clean(x) for x in r.lines),
                     tags=r.tags,
+                    ref_id=r.ref_id,
                 )
             out.append(r)
         if out:

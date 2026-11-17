@@ -5,6 +5,8 @@
   (``PAGINATE_JS``)가 블록(구역 제목·항목 머리·줄·표 행)을 A4 쪽(210×297mm, 여백 포함)에 차례로 넣어 쪽을 나눈다.
   인쇄는 ``@page { size: A4; margin: 0 }``로 그 쪽을 한 장씩 찍으므로 화면의 쪽 나눔과 종이가 같다.
   제목·항목 머리는 다음 블록과 같은 쪽에 두고, 표가 쪽을 넘으면 새 쪽에 머리 행을 다시 놓는다.
+  ``data-break`` 블록은 새 쪽에서 시작하고, ``data-toc="id"`` 칸에는 그 id가 놓인 쪽 번호를 적는다 (포트폴리오
+  표지·목차·항목마다 새 쪽, ``domain.portfolio_export`` — 같은 스크립트·같은 해시).
   스크립트가 돌지 않으면(스크립트 차단) 한 장으로 이어 보이고 브라우저가 쪽을 나눈다.
 - 파일은 서버 없이 열린다: 글꼴·그림·스크립트를 밖에서 가져오지 않는다(사진은 ``data:`` URI). CSP meta가
   이 스크립트(해시)만 허용한다. 모든 글은 escape하고, 숨김 서식(``display:none``·흰 글씨·인라인 style)을 쓰지
@@ -86,6 +88,7 @@ PAGINATE_JS = """(function () {
     newPage();
     for (var i = 0; i < blocks.length; i++) {
       var b = blocks[i];
+      if (b.hasAttribute("data-break") && pc.children.length) newPage();
       pc.appendChild(b);
       if (!over()) continue;
       var carry = [b];
@@ -109,6 +112,11 @@ PAGINATE_JS = """(function () {
       f.className = "pn";
       f.textContent = (n + 1) + " / " + pages.length;
       p.appendChild(f);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-toc]"), function (t) {
+      var el = document.getElementById(t.getAttribute("data-toc"));
+      var at = el ? pages.indexOf(el.closest(".page")) : -1;
+      if (at >= 0) t.textContent = String(at + 1);
     });
     document.documentElement.setAttribute("data-pages", String(pages.length));
     post();
@@ -174,6 +182,7 @@ a { color: inherit; text-decoration: none; }
 .ln { padding-left: 4mm; text-indent: -3mm; }
 .ln::before { content: "•"; display: inline-block; width: 3mm; text-indent: 0; }
 .tags { color: #555; font-size: 9pt; }
+.pf { font-weight: 400; font-size: 9pt; color: #333; text-decoration: underline; }
 .sk { line-height: 1.7; }
 /* 두 단: 왼쪽 구역 이름, 오른쪽 내용 */
 .t-two_column .row { display: grid; grid-template-columns: 30mm 1fr; gap: 5mm; padding: 1.5mm 0 2mm; }
@@ -257,7 +266,8 @@ def _item_head(sec: RenderSection, it: RenderItem) -> str:
         if it.tags and sec.kind == "project"
         else ""
     )
-    return f'<div class="ih1"><strong>{_e(it.primary)}</strong>{per}</div>{sub_html}{tags}'
+    link = f' <a class="pf" href="{_e(it.href)}">포트폴리오</a>' if it.href else ""
+    return f'<div class="ih1"><strong>{_e(it.primary)}{link}</strong>{per}</div>{sub_html}{tags}'
 
 
 def _skills_text(sec: RenderSection) -> str:

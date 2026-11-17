@@ -98,7 +98,7 @@ function AnswerRow({ a }: { a: AnswerAssetSummary }) {
           ]
             .filter(Boolean)
             .join(" · ")}
-          <span className="max-sm:hidden"> · 고친 날 {formatDate(a.updated_at)}</span>
+          <span className="max-sm:hidden"> · 수정한 날 {formatDate(a.updated_at)}</span>
         </p>
       </Link>
     </li>

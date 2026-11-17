@@ -304,10 +304,19 @@ class HttpFetcher:
         return b"".join(out)
 
     async def fetch_raw(
-        self, url: str, *, accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"
+        self,
+        url: str,
+        *,
+        accept: str = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+        headers: Mapping[str, str] | None = None,
+        allowed_hosts: frozenset[str] | None = None,
     ) -> RawResponse | FetchFailure:
-        """검사한 공개 IP로만 GET. 리다이렉트도 매번 다시 검사하며 직접 따라간다."""
+        """검사한 공개 IP로만 GET. 리다이렉트도 매번 다시 검사하며 직접 따라간다.
+
+        ``headers``: 처음 호스트에만 보내는 머리 (예: GitHub 토큰). 다른 호스트로 넘어가면 보내지 않는다.
+        ``allowed_hosts``: 있으면 리다이렉트를 포함해 이 호스트로만 요청한다 (밖이면 ``blocked_address``)."""
         current = url
+        first_host = (urlsplit(url).hostname or "").lower()
         async with httpx.AsyncClient(
             transport=self._transport,
             timeout=self._timeout,
@@ -320,6 +329,8 @@ class HttpFetcher:
                     return FetchFailure(FetchError.INVALID_URL)
                 if parts.username or parts.password:
                     return FetchFailure(FetchError.INVALID_URL)
+                if allowed_hosts is not None and parts.hostname.lower() not in allowed_hosts:
+                    return FetchFailure(FetchError.BLOCKED_ADDRESS, detail=parts.hostname)
                 port = parts.port or (443 if parts.scheme == "https" else 80)
                 try:
                     ip = await self._resolve(parts.hostname, port)
@@ -332,18 +343,21 @@ class HttpFetcher:
                     (parts.scheme, f"{shown}:{port}", parts.path or "/", parts.query, "")
                 )
                 host_header = parts.hostname + (f":{parts.port}" if parts.port else "")
+                sent = {
+                    "Host": host_header,
+                    "User-Agent": USER_AGENT,
+                    "Accept": accept,
+                    "Accept-Language": "ko,en;q=0.8",
+                    # 직접 풀 수 있는 것만 받는다 (압축 해제 크기를 조각마다 제한하려고).
+                    "Accept-Encoding": "gzip, deflate",
+                }
+                if headers and parts.hostname.lower() == first_host:
+                    sent.update(headers)
                 try:
                     async with client.stream(
                         "GET",
                         pinned,
-                        headers={
-                            "Host": host_header,
-                            "User-Agent": USER_AGENT,
-                            "Accept": accept,
-                            "Accept-Language": "ko,en;q=0.8",
-                            # 직접 풀 수 있는 것만 받는다 (압축 해제 크기를 조각마다 제한하려고).
-                            "Accept-Encoding": "gzip, deflate",
-                        },
+                        headers=sent,
                         extensions={"sni_hostname": parts.hostname},
                     ) as resp:
                         if resp.status_code in (301, 302, 303, 307, 308):
@@ -416,7 +430,16 @@ def sniff_binary(data: bytes) -> str | None:
 
 
 # 봇 차단 판별에 쓰는 응답 머리만 남긴다 (쿠키 등은 버린다)
-_KEPT_HEADERS = ("cf-mitigated", "x-amzn-waf-action", "x-datadome", "retry-after", "server")
+_KEPT_HEADERS = (
+    "cf-mitigated",
+    "x-amzn-waf-action",
+    "x-datadome",
+    "retry-after",
+    "server",
+    # GitHub REST API 요청 한도 (c0049 저장소 가져오기)
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+)
 
 
 def _kept_headers(headers: Mapping[str, str]) -> dict[str, str]:

@@ -49,7 +49,7 @@ export function JudgeCacheSection() {
         작업 공간에만 두고, 내보내기에는 넣지 않습니다. 사실이나 지원 문서를 삭제하면 그 응답도 같이 삭제됩니다. 보관
         일수는 <code>CAREER_JUDGE_CACHE_DAYS</code>로 정합니다.
       </p>
-      {cleared !== null ? <p className="text-[13px] text-muted">{int(cleared)}개를 지웠습니다.</p> : null}
+      {cleared !== null ? <p className="text-[13px] text-muted">{int(cleared)}개를 삭제했습니다.</p> : null}
       <ErrorText error={clear.error} />
       <Button variant="danger" size="sm" disabled={!d?.entries || clear.isPending} onClick={() => setAsking(true)}>
         캐시 비우기

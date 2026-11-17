@@ -264,7 +264,7 @@ export function MaintenanceTab() {
                 지금 정리
               </Button>
             </div>
-            {purge.data ? <p className="text-[13px]">{purge.data.deleted}개를 지웠습니다.</p> : null}
+            {purge.data ? <p className="text-[13px]">{purge.data.deleted}개를 삭제했습니다.</p> : null}
             <Problem error={purge.error} />
             {m.auto ? <AutoMaintenanceLine auto={m.auto} /> : null}
           </Section>

@@ -6,11 +6,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from career_core.adapters.blobstore import LocalBlobStore
+from career_core.adapters.github import GitHubClient
+from career_core.adapters.secret_box import SecretBox
 from career_core.db import Database
 from career_core.interfaces.http import CoreDeps, build_router
 from career_core.interfaces.http.limits import MULTIPART_OVERHEAD, BodySizeLimit
 from career_core.interfaces.http.restore import RESTORE_UPLOAD_PATH
 from career_core.llm.gateway import ModelGateway
+from career_core.usecases.portfolios import GitHubDeps
 from fastapi import FastAPI
 
 from personal_api.identity import (
@@ -66,6 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model_connections=connections,
         mcp_oauth=mcp_oauth_from_settings(settings, db),
         tokens=PersonalTokenAdmin(db),
+        # O18 GitHub 가져오기: api.github.com·raw.githubusercontent.com만. 토큰은 모델 키와 같은 열쇠로 암호화
+        github=GitHubDeps(GitHubClient(), SecretBox(key_file=settings.secret_key_file)),
     )
     if deps.mcp_oauth is not None:
         from career_core.interfaces.mcp.oauth import add_metadata_routes

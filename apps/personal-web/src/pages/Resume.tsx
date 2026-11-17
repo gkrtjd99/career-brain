@@ -525,12 +525,22 @@ function ItemRow({
   const [open, setOpen] = useState(false);
   const { title, sub } = itemTitle(sec.kind, it);
   const withLines = sec.kind !== "profile" && sec.kind !== "skills";
+  const portfolio = usePortfolioItem(it.ref?.type === "experience" ? it.ref.id : null);
   return (
     <li className={cn("py-3", it.hidden && "opacity-60")}>
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium break-words">{title}</p>
           {sub ? <p className="text-[13px] break-words text-muted tabular-nums">{sub}</p> : null}
+          {portfolio ? (
+            <Link
+              to="/brain/portfolio/items/$itemId"
+              params={{ itemId: portfolio }}
+              className="inline-flex min-h-9 items-center text-[13px] underline underline-offset-2 sm:min-h-6"
+            >
+              포트폴리오 항목
+            </Link>
+          ) : null}
           <p className="text-[13px] text-muted">
             {[
               it.state === "manual" ? "직접 쓴 항목" : null,
@@ -599,6 +609,21 @@ function ItemRow({
       ) : null}
     </li>
   );
+}
+
+/** 이 경험의 포트폴리오 항목 (나만 항목은 빼고 최근에 고친 것). 함께 내보낸 zip에서는 이력서가 이 항목으로 이어진다. */
+function usePortfolioItem(experienceId: string | null): string | null {
+  const q = useQuery({
+    queryKey: ["portfolio", "items"],
+    queryFn: () => api.portfolioItems(),
+    enabled: !!experienceId,
+    staleTime: 30_000,
+  });
+  if (!experienceId) return null;
+  const hit = (q.data ?? [])
+    .filter((x) => x.experience_id === experienceId && x.visibility !== "private")
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+  return hit?.id ?? null;
 }
 
 function ProfileShow({ it, busy, onRun }: { it: ResumeItem; busy: boolean; onRun: (ops: ResumeOperation[]) => void }) {

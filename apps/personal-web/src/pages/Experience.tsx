@@ -120,6 +120,7 @@ function ExperienceInfo({ exp }: { exp: Experience }) {
         <InfoRow label="태그">
           {exp.tags.length ? exp.tags.join(" · ") : <span className="text-muted">없음</span>}
         </InfoRow>
+        <PortfolioRow experienceId={exp.id} />
       </dl>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" className="max-sm:h-9" onClick={() => setEditing(true)}>
@@ -130,6 +131,7 @@ function ExperienceInfo({ exp }: { exp: Experience }) {
             <Plus size={14} /> 안에 프로젝트 추가
           </Button>
         ) : null}
+        <NewPortfolioItem experienceId={exp.id} />
       </div>
 
       {exp.children.length ? (
@@ -173,6 +175,56 @@ function ExperienceInfo({ exp }: { exp: Experience }) {
         ) : null}
       </Sheet>
     </section>
+  );
+}
+
+/** 이 경험의 포트폴리오 항목 (있으면 링크) */
+function PortfolioRow({ experienceId }: { experienceId: string }) {
+  const q = useQuery({
+    queryKey: ["portfolio", "items", { experience: experienceId }],
+    queryFn: () => api.portfolioItems(experienceId),
+  });
+  const items = q.data ?? [];
+  return (
+    <InfoRow label="포트폴리오">
+      {items.length ? (
+        <span className="flex flex-wrap gap-x-3">
+          {items.map((it) => (
+            <Link
+              key={it.id}
+              to="/brain/portfolio/items/$itemId"
+              params={{ itemId: it.id }}
+              className="inline-flex min-h-9 items-center underline underline-offset-2 sm:min-h-6"
+            >
+              {it.title}
+            </Link>
+          ))}
+        </span>
+      ) : (
+        <span className="text-muted">없음</span>
+      )}
+    </InfoRow>
+  );
+}
+
+/** 확인한 사실로 결과·한 일 줄을 채운 항목을 만들고 편집기로 간다 (모델이 글을 쓰지 않는다). */
+function NewPortfolioItem({ experienceId }: { experienceId: string }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const make = useMutation({
+    mutationFn: () => api.createPortfolioItem({ experience_id: experienceId, fill: true }),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ["portfolio"] });
+      void navigate({ to: "/brain/portfolio/items/$itemId", params: { itemId: r.id } });
+    },
+  });
+  return (
+    <>
+      <Button size="sm" className="max-sm:h-9" disabled={make.isPending} onClick={() => make.mutate()}>
+        <Plus size={14} /> 포트폴리오 항목 만들기
+      </Button>
+      {make.error ? <ErrorText error={make.error} /> : null}
+    </>
   );
 }
 

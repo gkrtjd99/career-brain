@@ -400,6 +400,8 @@ async def test_every_workspace_table_is_exported_or_excluded(db):
         # c0047: 이력서 판본 → 위 판본(같은 표), 판본 → 복사한 revision(revision → 판본 순환)
         "fk_resume_versions_parent",
         "fk_resume_versions_source_revision",
+        # c0049: 포트폴리오 묶음 → 위 묶음(같은 표)
+        "fk_portfolio_bundles_parent",
     }
     assert plan.groups == ()
 
@@ -574,6 +576,7 @@ async def test_export_restore_roundtrip(db, env, tmp_path):
                 "core.restore_jobs": 0,
                 "core.judge_cache": 0,
                 "core.model_connection_secrets": 0,
+                "core.github_tokens": 0,
             }
         finally:
             await target.dispose()

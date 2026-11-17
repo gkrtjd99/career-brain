@@ -99,7 +99,7 @@ function AnswerEditor({ initial }: { initial: AnswerAsset }) {
       <PageHeader
         back={{ to: "/brain/answers", label: "공통 답변" }}
         title={initial.title}
-        subtitle={`${ANSWER_KIND_LABEL[initial.kind]} · 고친 날 ${formatDate(initial.updated_at)}`}
+        subtitle={`${ANSWER_KIND_LABEL[initial.kind]} · 수정한 날 ${formatDate(initial.updated_at)}`}
         actions={
           <Button onClick={() => setPlacing(true)} disabled={dirty || !initial.body.trim()}>
             지원서에 넣기

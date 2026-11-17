@@ -237,6 +237,32 @@ export const resumeRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Resume"), "ResumePage"),
 });
 
+/** 나 › 포트폴리오 (O18). 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+export const portfoliosRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/portfolio",
+  beforeLoad: requireToken,
+  validateSearch: (s: Record<string, unknown>): { application?: string; experience?: string } => ({
+    ...(typeof s.application === "string" ? { application: s.application } : {}),
+    ...(typeof s.experience === "string" ? { experience: s.experience } : {}),
+  }),
+  component: lazyRouteComponent(() => import("./pages/Portfolios"), "PortfoliosPage"),
+});
+
+export const portfolioItemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/portfolio/items/$itemId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/PortfolioItem"), "PortfolioItemPage"),
+});
+
+export const portfolioBundleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/portfolio/$bundleId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Portfolio"), "PortfolioPage"),
+});
+
 const submissionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/brain/submissions",
@@ -469,6 +495,9 @@ const routeTree = rootRoute.addChildren([
   answerRoute,
   resumesRoute,
   resumeRoute,
+  portfoliosRoute,
+  portfolioItemRoute,
+  portfolioBundleRoute,
   submissionsRoute,
   submissionRoute,
   postingsRoute,

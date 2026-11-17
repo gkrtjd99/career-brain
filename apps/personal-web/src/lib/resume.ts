@@ -36,7 +36,7 @@ export const LINE_STATE_LABEL: Record<ResumeLineState, string | null> = {
   none: "근거 없음",
   ok: null,
   stale: "사실이 바뀜",
-  broken: "근거 끊김",
+  broken: "근거 사라짐",
 };
 
 export const PROFILE_SHOW_LABEL: Record<string, string> = {

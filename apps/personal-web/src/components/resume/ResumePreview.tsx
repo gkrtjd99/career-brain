@@ -8,14 +8,16 @@ const A4_PAGE_PX = 1123;
 /**
  * 미리보기 = 내보낸 HTML 파일. 서버가 만든 HTML을 sandbox iframe(srcdoc)에 그대로 띄운다. 파일 안의 스크립트가 A4 쪽을
  * 나누고 쪽 수·높이를 알려 준다 (postMessage). 인쇄도 이 iframe 안에서 하므로 화면과 종이가 같다.
- * 좁은 화면에서는 A4 너비를 칸에 맞게 줄여 보인다 (가로 넘침 없음).
+ * 좁은 화면에서는 A4 너비를 칸에 맞게 줄여 보인다 (가로 넘침 없음). 포트폴리오도 같은 쪽 나눔 스크립트라 같이 쓴다.
  */
 export function ResumePreview({
   html,
   printNonce,
   onPages,
+  title = "이력서 미리보기",
 }: {
   html: string | undefined;
+  title?: string;
   /** 바뀔 때마다 인쇄 (iframe이 준비되면) */
   printNonce: number;
   onPages?: (pages: number) => void;
@@ -71,7 +73,7 @@ export function ResumePreview({
       {html ? (
         <iframe
           ref={frame}
-          title="이력서 미리보기"
+          title={title}
           srcDoc={html}
           sandbox="allow-scripts allow-modals"
           className="absolute top-0 left-0 origin-top-left border-0 bg-transparent"

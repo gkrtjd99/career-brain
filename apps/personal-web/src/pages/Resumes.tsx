@@ -159,7 +159,7 @@ function VersionRow({ r, depth }: { r: ResumeSummary; depth: number }) {
           </div>
           <p className="mt-0.5 truncate text-[13px] text-muted tabular-nums">
             {meta.join(" · ")}
-            <span className="max-sm:hidden"> · 고친 날 {formatDate(r.updated_at)}</span>
+            <span className="max-sm:hidden"> · 수정한 날 {formatDate(r.updated_at)}</span>
           </p>
         </div>
         {parentChanged ? (

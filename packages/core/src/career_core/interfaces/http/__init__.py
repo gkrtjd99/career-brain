@@ -44,6 +44,7 @@ from career_core.interfaces.http.interview_prep import add_interview_prep_routes
 from career_core.interfaces.http.judges import add_judge_routes
 from career_core.interfaces.http.maintenance import add_maintenance_routes
 from career_core.interfaces.http.models import add_model_routes
+from career_core.interfaces.http.portfolios import add_portfolio_routes
 from career_core.interfaces.http.postings import add_posting_routes
 from career_core.interfaces.http.profiles import add_profile_routes
 from career_core.interfaces.http.references import add_reference_routes
@@ -95,6 +96,9 @@ class CoreDeps:
     # /core/models/* 가 404 ``not_enabled`` (서비스는 운영자 설정을 쓴다). 게이트웨이(models)에도 같은 것을
     # overlay로 주어야 화면 설정이 호출에 쓰인다.
     model_connections: Any = None
+    # O18 GitHub 가져오기 (usecases.portfolios.GitHubDeps: 클라이언트 + 토큰 암호화). 없으면 가져오기·토큰
+    # 저장이 503 ``github_not_configured``.
+    github: Any = None
 
 
 class WorkspaceOut(BaseModel):
@@ -306,6 +310,7 @@ def build_router(deps: CoreDeps | None = None) -> APIRouter:
     add_education_routes(router, deps, authorize)  # c0040 학력
     add_answer_routes(router, deps, authorize)  # c0042 공통 답변·지난 제출본·기술 보기
     add_resume_routes(router, deps, authorize)  # c0047 (O17) 이력서 판본
+    add_portfolio_routes(router, deps, authorize)  # c0049 (O18) 포트폴리오
     add_interview_prep_routes(router, deps, authorize)  # c0048 (O16) 면접 준비
     add_application_routes(router, deps, authorize)
     add_study_routes(router, deps, authorize)
