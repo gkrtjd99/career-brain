@@ -228,7 +228,7 @@ export const ERROR_TEXT: Record<string, string> = {
   authentication_required: "토큰이 필요합니다.",
   // O07 지원·문서
   posting_not_saved: "저장(확정)한 공고에서만 만들 수 있습니다.",
-  application_locked: "제출한 지원의 문서는 고칠 수 없습니다. 다음 지원은 새로 만듭니다.",
+  application_locked: "제출한 지원의 문서는 수정할 수 없습니다. 다음 지원은 새로 만듭니다.",
   already_submitted: "이미 제출본을 고정했습니다.",
   suggestion_stale: "그사이 문단이 바뀌어 이 수정안은 적용할 수 없습니다.",
   suggestion_not_open: "이미 처리한 수정안입니다.",
@@ -292,7 +292,7 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_preset: "알 수 없는 연결 종류입니다.",
   unknown_preset: "알 수 없는 연결 종류입니다.",
   connection_not_found: "연결을 찾을 수 없습니다.",
-  connection_read_only: "models.toml에서 온 연결은 화면에서 고칠 수 없습니다. 파일을 고치세요.",
+  connection_read_only: "models.toml에 적은 연결은 화면에서 수정할 수 없습니다. 파일에서 수정하세요.",
   invalid_name: "이름은 영문 소문자로 시작하고 소문자·숫자·-·_ 만 씁니다 (40자까지).",
   base_url_required: "주소를 넣어 주세요.",
   invalid_base_url: "주소 형식이 맞지 않습니다 (http:// 또는 https://).",

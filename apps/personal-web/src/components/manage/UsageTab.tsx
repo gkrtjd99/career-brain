@@ -246,7 +246,7 @@ function BudgetRow({ canEdit }: { canEdit: boolean }) {
               onClick={() => setDraft(b.monthly_usd ?? "")}
               className="ml-2 inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-0"
             >
-              고치기
+              수정
             </button>
           ) : null}
         </dd>
@@ -275,7 +275,7 @@ function BudgetRow({ canEdit }: { canEdit: boolean }) {
           </Button>
           {b?.source === "ui" ? (
             <Button size="sm" disabled={save.isPending} onClick={() => save.mutate(null)}>
-              파일 값으로
+              초기화
             </Button>
           ) : null}
           <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>

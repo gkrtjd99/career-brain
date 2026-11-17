@@ -169,7 +169,7 @@ function ItemView({ item }: { item: StudyItem }) {
               <CandidateForm item={item} />
             </Section>
 
-            <Section title="합치기·지우기">
+            <Section title="합치기·삭제">
               <MergeDelete item={item} />
             </Section>
           </div>
@@ -242,7 +242,7 @@ function MergeDelete({ item }: { item: StudyItem }) {
               disabled={remove.isPending}
               onClick={() => remove.mutate()}
             >
-              지우기
+              삭제
             </Button>
             <Button size="sm" variant="ghost" className={TAP} onClick={() => setConfirmDelete(false)}>
               취소
@@ -250,7 +250,7 @@ function MergeDelete({ item }: { item: StudyItem }) {
           </>
         ) : (
           <Button size="sm" variant="ghost" className={TAP} onClick={() => setConfirmDelete(true)}>
-            항목 지우기
+            항목 삭제
           </Button>
         )}
       </div>

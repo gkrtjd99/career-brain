@@ -117,6 +117,9 @@ export function RunsTab({
         <Section title="실행">
           <RunsList onOpen={(id) => open({ run: id })} />
         </Section>
+        <Section title="MCP 호출 기록">
+          <AuditSection />
+        </Section>
       </div>
       <RunSheet runId={run ?? null} onClose={() => open({})} onApproval={(id) => open({ approval: id })} />
       <ApprovalSheet approvalId={approval ?? null} onClose={() => open({})} onRun={(id) => open({ run: id })} />

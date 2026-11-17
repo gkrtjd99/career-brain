@@ -356,7 +356,7 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
         <div className="space-y-3">
           <p className="text-xs text-muted">
             공용 문서의 최신 revision 을 이 지원의 새 문서로 복사합니다. 근거 연결도 같이 옮기고, 출처(문서·revision)를
-            남깁니다. 복사한 뒤 원본을 고쳐도 이 문서는 바뀌지 않습니다.
+            남깁니다. 복사한 뒤 원본을 수정해도 이 문서는 바뀌지 않습니다.
           </p>
           <Loaded query={shared}>
             {(docs) =>
@@ -523,7 +523,7 @@ function SubmitDialog({
         }
       }}
       title="제출본 고정"
-      description="지금 저장된 글을 그대로 고정합니다. 고정한 뒤에는 이 지원의 문서를 고칠 수 없고, 이후 경력·공고를 고쳐도 제출본은 바뀌지 않습니다."
+      description="지금 저장된 글을 그대로 고정합니다. 고정한 뒤에는 이 지원의 문서를 수정할 수 없고, 이후 경력·공고를 수정해도 제출본은 바뀌지 않습니다."
       confirmLabel={submit.isPending ? "고정하는 중" : "확인한 내용으로 고정"}
       busy={submit.isPending}
       confirmDisabled={!filled.length || sensitive.isPending || sensitive.isError || (needsAck && !ack)}
@@ -573,7 +573,7 @@ function SubmitDialog({
             ))}
           </ul>
           <p className="mt-1.5 text-xs text-muted">
-            아무것도 자동으로 지우지 않습니다. 고치려면 창을 닫고 문서를 고친 뒤 저장하세요. 본인 연락처는 설정에 적어
+            아무것도 자동으로 지우지 않습니다. 수정하려면 창을 닫고 문서를 수정한 뒤 저장하세요. 본인 연락처는 설정에 적어
             두면 경고하지 않습니다.
           </p>
           <label className="mt-2 flex min-h-9 items-start gap-2 py-1">
@@ -880,7 +880,7 @@ function StageSheet({
           </Button>
           {existing ? (
             <Button variant="danger" onClick={() => remove.mutate()} disabled={remove.isPending}>
-              <Trash2 size={14} /> 지우기
+              <Trash2 size={14} /> 삭제
             </Button>
           ) : null}
         </div>
@@ -903,7 +903,7 @@ function SubmissionBody({ sub }: { sub: Submission }) {
             고정 당시 확인하지 않은 공고 변경: {sub.posting.pending_changes.join(", ")}
           </p>
         ) : null}
-        <p>이후 경력·공고를 고쳐도 이 내용은 바뀌지 않습니다.</p>
+        <p>이후 경력·공고를 수정해도 이 내용은 바뀌지 않습니다.</p>
       </div>
       {sub.documents.map((d) => (
         <section key={d.document_id} className="space-y-3 border-t border-line pt-4">

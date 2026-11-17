@@ -87,7 +87,7 @@ function DocumentSettingsSection() {
         <div className="space-y-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <Label htmlFor="cliches">상투어 목록 (한 줄에 하나)</Label>
-            {d ? <span className="text-[13px] text-muted">{d.customized ? "직접 고친 목록" : "기본 목록"}</span> : null}
+            {d ? <span className="text-[13px] text-muted">{d.customized ? "직접 수정한 목록" : "기본 목록"}</span> : null}
           </div>
           <Textarea
             id="cliches"

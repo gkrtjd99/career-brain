@@ -111,7 +111,7 @@ function BrowserTokenSection({ me }: { me: Me | undefined }) {
                 void navigate({ to: "/connect" });
               }}
             >
-              이 브라우저에서 지우기
+              이 브라우저에서 삭제
             </Button>
           ) : null}
         </div>

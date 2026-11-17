@@ -337,7 +337,7 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
 
       {!editable ? (
         <p className="mb-4 flex items-center gap-1.5 text-[13px] text-muted">
-          <Lock size={14} /> 제출본을 고정한 지원이라 고칠 수 없습니다. 다음 지원은 새로 만듭니다.
+          <Lock size={14} /> 제출본을 고정한 지원이라 수정할 수 없습니다. 다음 지원은 새로 만듭니다.
         </p>
       ) : null}
 

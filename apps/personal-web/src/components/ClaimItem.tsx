@@ -146,7 +146,7 @@ export function ClaimItem({
             </Button>
           ) : null}
           <Button size="sm" className="max-sm:h-9" onClick={() => setEditing(true)} disabled={busy}>
-            <Pencil size={14} /> 고치기
+            <Pencil size={14} /> 수정
           </Button>
           {status !== "disputed" ? (
             <Button size="sm" className="max-sm:h-9" variant="ghost" onClick={() => dispute.mutate()} disabled={busy}>

@@ -350,7 +350,7 @@ function RequirementRow({
               <button
                 type="button"
                 className="-my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted hover:bg-subtle hover:text-danger disabled:opacity-50 max-sm:h-9 max-sm:w-9"
-                aria-label="연결 끊기"
+                aria-label="연결 해제"
                 onClick={() => onUnlink(cl.id)}
                 disabled={busy}
               >

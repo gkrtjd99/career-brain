@@ -321,7 +321,7 @@ export function BlockEditor({
                     <span className="max-w-[14rem] truncate">{c?.statement ?? "불러오는 중"}</span>
                     {!readOnly ? (
                       <button
-                        aria-label="근거 연결 끊기"
+                        aria-label="근거 연결 해제"
                         className="rounded p-0.5 text-muted hover:text-danger"
                         onClick={() => update(i, { claim_ids: b.claim_ids.filter((x) => x !== cid) })}
                       >
@@ -342,7 +342,7 @@ export function BlockEditor({
                   <span className="text-muted">근거 {sp.claim_ids.length}</span>
                   {!readOnly ? (
                     <button
-                      aria-label="문장 근거 끊기"
+                      aria-label="문장 근거 해제"
                       className="rounded p-0.5 text-muted hover:text-danger"
                       onClick={() => unlinkSpan(i, b, si)}
                     >
@@ -354,14 +354,14 @@ export function BlockEditor({
               {unlinking?.key === b.key && !readOnly ? (
                 <span
                   role="group"
-                  aria-label="문장 근거 끊기 확인"
+                  aria-label="문장 근거 해제 확인"
                   className="flex w-full flex-wrap items-center gap-1.5 py-1.5 text-xs"
                 >
                   <span className="min-w-0 flex-1">
                     이 문장의 근거 {unlinking.shared.length}개는 문단 근거에도 연결돼 있습니다. 문단 근거에서도 뺄까요?
                   </span>
                   <Button size="sm" onClick={() => finishUnlink(i, b, false)}>
-                    문장만 끊기
+                    이 문장에서만 해제
                   </Button>
                   <Button size="sm" variant="danger" onClick={() => finishUnlink(i, b, true)}>
                     문단 근거에서도 빼기
@@ -417,7 +417,7 @@ export function BlockEditor({
                     <Button
                       size="sm"
                       variant="ghost"
-                      aria-label={`문단 ${i + 1} 지우기`}
+                      aria-label={`문단 ${i + 1} 삭제`}
                       onClick={() => onChange(blocks.filter((_, j) => j !== i))}
                     >
                       <Trash2 size={14} />

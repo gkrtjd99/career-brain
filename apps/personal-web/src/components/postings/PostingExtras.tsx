@@ -145,7 +145,7 @@ export function ChoiceQuestions({ p }: { p: Posting }) {
       </ul>
       <p className="border-t border-line pt-3 text-xs text-muted">
         보기를 고르는 문항이라 자기소개서 문항에는 넣지 않았습니다.
-        {ref ? ` 근거: 채용 시스템 데이터 ${ref}` : evidence?.kind === "user" ? " 직접 고친 값입니다." : ""}
+        {ref ? ` 근거: 채용 시스템 데이터 ${ref}` : evidence?.kind === "user" ? " 직접 수정한 값입니다." : ""}
       </p>
     </Section>
   );

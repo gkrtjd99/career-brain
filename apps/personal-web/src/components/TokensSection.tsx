@@ -32,7 +32,7 @@ function updateError(error: unknown) {
   if (error instanceof ApiError) {
     if (error.code === "not_an_extension") return "지금 만료일보다 뒤로만 연장할 수 있습니다.";
     if (error.code === "token_expired") return "이미 만료된 토큰은 되살리지 않습니다. 새 토큰을 만드세요.";
-    if (error.code === "token_revoked") return "폐기한 토큰은 고칠 수 없습니다.";
+    if (error.code === "token_revoked") return "폐기한 토큰은 수정할 수 없습니다.";
   }
   return error;
 }
@@ -142,7 +142,7 @@ export function TokensSection() {
                 </li>
               ))}
             </ul>
-            <p className="text-muted">"고치기"로 만료를 연장하거나, 새 토큰을 만들어 바꾼 뒤 옛 토큰을 폐기하세요.</p>
+            <p className="text-muted">"수정"에서 만료를 연장하거나, 새 토큰을 만들어 바꾼 뒤 옛 토큰을 폐기하세요.</p>
           </div>
         ) : null}
         <Loaded query={tokens}>
@@ -169,7 +169,7 @@ export function TokensSection() {
                     {t.status === "active" ? (
                       <div className="flex shrink-0 gap-1.5">
                         <Button size="sm" variant="ghost" onClick={() => setEditing(editing === t.id ? null : t.id)}>
-                          고치기
+                          수정
                         </Button>
                         {!t.current ? (
                           <Button size="sm" variant="danger" onClick={() => setTarget(t)}>
