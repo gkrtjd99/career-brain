@@ -1,5 +1,5 @@
 import type { SearchHit, SearchKind } from "@career-brain/client";
-import { Badge, Button, EmptyState, Input, StatusBadge } from "@career-brain/ui";
+import { Button, cn, Input, STATUS_LABEL, type VerificationStatus } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { BookOpen, FileText, MessageSquareQuote, NotebookPen, Quote, Search as SearchIcon } from "lucide-react";
@@ -84,17 +84,20 @@ export function SearchPage() {
           <span className="hidden sm:inline">검색</span>
         </Button>
       </form>
-      <div className="mb-5 flex flex-wrap gap-1.5">
+      <div className="mb-6 flex flex-wrap gap-1.5">
         {ALL.map((k) => (
           <button
             key={k}
+            type="button"
             aria-pressed={kinds.includes(k)}
             onClick={() => toggle(k)}
-            className={
+            className={cn(
+              "h-9 rounded-full border px-3.5 text-[13px] transition-colors duration-150",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
               kinds.includes(k)
-                ? "rounded-full bg-accent-soft px-3 py-1 text-[13px] font-medium text-accent"
-                : "rounded-full border border-line bg-surface px-3 py-1 text-[13px] text-muted"
-            }
+                ? "border-fg bg-fg font-medium text-bg"
+                : "border-line text-muted hover:border-fg/40 hover:text-fg",
+            )}
           >
             {KIND_INFO[k].label}
           </button>
@@ -102,17 +105,17 @@ export function SearchPage() {
       </div>
 
       {!q ? (
-        <EmptyState>검색어를 넣어 주세요. 키워드와 의미 검색을 함께 씁니다.</EmptyState>
+        <p className="text-sm text-muted">검색어를 넣어 주세요. 키워드와 의미 검색을 함께 씁니다.</p>
       ) : (
         <Loaded query={result}>
           {(r) => (
             <div className={result.isFetching ? "opacity-60" : undefined}>
-              <p className="mb-2 text-xs text-muted">
+              <p className="mb-2 text-[13px] text-muted tabular-nums">
                 {r.hits.length}건 · {r.mode === "hybrid" ? "키워드 + 의미" : r.mode === "keyword" ? "키워드" : r.mode}
                 {r.semantic_note ? ` · 의미 검색 안 함: ${semanticNote(r.semantic_note)}` : ""}
               </p>
               {r.expanded_terms?.length ? (
-                <p className="mb-2 text-xs text-muted">
+                <p className="mb-2 text-[13px] text-muted">
                   별칭으로 넓혀 찾음:{" "}
                   {r.expanded_terms.map((e, i) => (
                     <span key={e.term}>
@@ -122,7 +125,13 @@ export function SearchPage() {
                   (설정 → 작업 공간의 기술명 별칭)
                 </p>
               ) : null}
-              {r.hits.length ? <Hits hits={r.hits} /> : <EmptyState>찾은 결과가 없습니다.</EmptyState>}
+              {r.hits.length ? (
+                <Hits hits={r.hits} />
+              ) : (
+                <p className="border-t border-line pt-3 text-sm text-muted">
+                  찾은 결과가 없습니다. 다른 낱말로 찾거나 위의 종류를 넓혀 보세요.
+                </p>
+              )}
             </div>
           )}
         </Loaded>
@@ -131,38 +140,43 @@ export function SearchPage() {
   );
 }
 
+const LINK = "inline-flex min-h-9 items-center font-medium underline-offset-2 hover:underline";
+
 function Hits({ hits }: { hits: SearchHit[] }) {
   const [source, setSource] = useState<SourceTarget | null>(null);
   return (
     <>
-    <ul className="space-y-2">
+      <ul className="divide-y divide-line border-t border-line">
         {hits.map((h) => {
           const info = KIND_INFO[h.kind] ?? KIND_INFO.claim;
           const Icon = info.icon;
           return (
-            <li key={`${h.kind}-${h.id}`} className="rounded-lg border border-line bg-surface p-3">
-              <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-                <Icon size={14} />
+            <li key={`${h.kind}-${h.id}`} className="py-3">
+              <div className="mb-1 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
+                <Icon size={14} aria-hidden />
                 <span>{info.label}</span>
-                {h.claim_status ? <StatusBadge status={h.claim_status} /> : null}
-                {h.kind === "block" ? <Badge tone="none">원문 그대로</Badge> : null}
-                {h.record === "study" ? <Badge tone="warn">학습 기록 · 경험 아님</Badge> : null}
+                {h.claim_status ? (
+                  <span>· {STATUS_LABEL[h.claim_status as VerificationStatus] ?? h.claim_status}</span>
+                ) : null}
+                {h.kind === "block" ? <span>· 원문 그대로</span> : null}
+                {h.record === "study" ? (
+                  <span>
+                    · <span className="font-medium text-fg">학습 기록 · 경험 아님</span>
+                  </span>
+                ) : null}
               </div>
-              {h.question && h.kind === "answer" ? <p className="text-xs text-muted">질문: {h.question}</p> : null}
+              {h.question && h.kind === "answer" ? <p className="text-[13px] text-muted">질문: {h.question}</p> : null}
               <p className="text-sm leading-6 whitespace-pre-wrap">{h.snippet}</p>
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <div className="-mb-2 flex flex-wrap items-center gap-x-4 text-[13px] empty:hidden">
                 {h.experience_id ? (
-                  <Link
-                    to="/brain/$experienceId"
-                    params={{ experienceId: h.experience_id }}
-                    className="text-accent underline-offset-2 hover:underline"
-                  >
+                  <Link to="/brain/$experienceId" params={{ experienceId: h.experience_id }} className={LINK}>
                     {h.experience_title ?? "경험"} 열기
                   </Link>
                 ) : null}
                 {h.kind === "block" && h.parse_run_id && h.block_id ? (
                   <button
-                    className="text-accent underline-offset-2 hover:underline"
+                    type="button"
+                    className={LINK}
                     onClick={() =>
                       setSource({
                         parseRunId: h.parse_run_id!,
@@ -178,18 +192,14 @@ function Hits({ hits }: { hits: SearchHit[] }) {
                   </button>
                 ) : null}
                 {h.record === "study" && h.study_item_id ? (
-                  <Link
-                    to="/study/items/$itemId"
-                    params={{ itemId: h.study_item_id }}
-                    className="text-accent underline-offset-2 hover:underline"
-                  >
+                  <Link to="/study/items/$itemId" params={{ itemId: h.study_item_id }} className={LINK}>
                     {h.study_title ?? "학습 항목"} 열기
                   </Link>
                 ) : h.record === "study" && h.study_title ? (
-                  <span className="text-muted">{h.study_title}</span>
+                  <span className="inline-flex min-h-9 items-center text-muted">{h.study_title}</span>
                 ) : null}
                 {h.source_title ? (
-                  <span className="text-muted">
+                  <span className="inline-flex min-h-9 items-center text-muted">
                     {h.source_title}
                     {h.page ? ` · ${h.page}쪽` : ""}
                   </span>
@@ -198,8 +208,8 @@ function Hits({ hits }: { hits: SearchHit[] }) {
             </li>
           );
         })}
-    </ul>
-    <SourceSheet target={source} onClose={() => setSource(null)} />
+      </ul>
+      <SourceSheet target={source} onClose={() => setSource(null)} />
     </>
   );
 }

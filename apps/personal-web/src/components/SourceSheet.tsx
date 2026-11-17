@@ -34,27 +34,32 @@ export function SourceSheet({ target, onClose }: { target: SourceTarget | null; 
   }, [q.data, target]);
 
   return (
-    <Sheet open={!!target} onOpenChange={(o) => !o && onClose()} title="원본 보기" description={where || undefined} width="lg">
+    <Sheet
+      open={!!target}
+      onOpenChange={(o) => !o && onClose()}
+      title="원본 보기"
+      description={where || undefined}
+      width="lg"
+    >
       <Loaded query={q}>
         {(blocks) =>
           shown.length ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {shown.map((b) =>
                 b.id === target!.blockId ? (
-                  <div key={b.id} className="rounded-md border border-accent/40 bg-accent-soft/40 p-2.5">
-                    <p className="mb-1 text-xs text-muted">
-                      블록 {b.ordinal + 1}
-                      {b.page ? ` · ${b.page}쪽` : ""} · 검색 결과
+                  <div key={b.id} aria-current="true" className="-mx-2.5 rounded-md bg-subtle/70 px-2.5 py-2">
+                    <p className="mb-1 text-xs tabular-nums">
+                      <span className="text-muted">
+                        블록 {b.ordinal + 1}
+                        {b.page ? ` · ${b.page}쪽` : ""} ·{" "}
+                      </span>
+                      <span className="font-medium">검색 결과</span>
                     </p>
-                    <Highlight
-                      text={b.text}
-                      start={target!.matchStart ?? -1}
-                      end={target!.matchEnd ?? -1}
-                    />
+                    <Highlight text={b.text} start={target!.matchStart ?? -1} end={target!.matchEnd ?? -1} />
                   </div>
                 ) : (
-                  <div key={b.id} className="px-2.5 text-muted">
-                    <p className="mb-1 text-xs">
+                  <div key={b.id} className="text-muted">
+                    <p className="mb-1 text-xs tabular-nums">
                       블록 {b.ordinal + 1}
                       {b.page ? ` · ${b.page}쪽` : ""}
                     </p>
