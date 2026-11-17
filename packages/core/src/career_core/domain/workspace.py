@@ -80,6 +80,9 @@ ACTION_SCOPES: dict[str, str] = {
     # 번호 원래 값 보기(reveal)도 쓰기 권한과 같은 범위 (보는 사람·편집하는 사람이 같다)
     "credentials.read": "read",
     "credentials.write": "draft-write",
+    # c0035 (O14) 참고 자료 보관함: 다른 사람의 글. 구조 메모 후보 확인은 사람만 (usecase가 agent를 막는다)
+    "references.read": "read",
+    "references.write": "draft-write",
 }
 
 

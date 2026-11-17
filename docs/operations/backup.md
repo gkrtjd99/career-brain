@@ -89,6 +89,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0032 | `schema_step` | `sources`에 `purpose = 'experience'` (옛 묶음의 원본은 모두 경험 추출 대상이었다). 원본 파일·버전 해시는 그대로 — 증빙 원본도 바이트 그대로 복원된다 |
 | c0033 | `schema_step` | 새 표 `companies`·`company_pages`·`company_facts` (옛 묶음엔 빈 표), `job_postings.company_id = null` (옛 공고는 회사에 잇지 않은 상태) |
 | c0034 | `schema_step` | 새 표 `credentials` (옛 묶음엔 빈 표) |
+| c0035 | `schema_step` | 새 표 `reference_items`·`reference_notes` (옛 묶음엔 빈 표). manifest `reference_tables`가 참고 지식 표(회사·참고 글)를 표시한다 — 내 경험이 아니다 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -232,6 +233,8 @@ personal-api restore career-old.tar.gz --merge [--on-duplicate skip|fail] [--del
   | `company_pages` | same_except | 상태·오류·HTTP 상태·방식·최종 주소·제목·글·해시·가져온 시각·모델 호출·후보 수·메모·`updated_at` (c0033) | 가져오기 작업이 채우는 칸. 회사·입력 종류·주소·요청자·만든 시각이 정체 |
   | `company_facts` | same_except | 상태·확인한 사람·확인 시각·기준일·기준일 단위·`updated_at` (c0033) | 종류·본문·인용·인용 위치가 정체 (본문이나 인용을 고치면 다른 행) |
   | `credentials` | same_except | 상태·확인한 사람·확인 시각·원본·경험·파싱 실행·원문 위치·상세·`updated_at` (c0034) | 확인·연결만 바뀐다고 본다. 종류·이름·기관·번호·날짜·점수·시간이 정체 |
+  | `reference_items` | same_except | 종류·제목·회사·직무·연도·출처 메모·자료 등급·본문·가린 곳 수·`updated_at` (c0035) | 원본·만든 사람·만든 시각이 정체 (가리기·태그 수정은 같은 행) |
+  | `reference_notes` | same_except | 상태·확인한 사람·확인 시각·`updated_at` (c0035) | 참고 글·문항·문단 구성·소재·역량이 정체 (메모를 고치면 다른 행) |
   | `interview_sessions` | same_except | 상태 | 멱등 키 UNIQUE는 NULL이면 안 걸린다 |
   | `runs` | same_except | 상태·진행·결과·대기·비용·시작/끝 시각·`updated_at` 등 | workflow·입력·실행자·만든 시각이 정체 |
   | `approvals` | same_except | 결정·사용·무효 칸·`updated_at` | 행위·대상·대상 버전·내용 해시·요청 시각이 정체 |

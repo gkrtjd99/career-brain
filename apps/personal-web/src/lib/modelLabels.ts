@@ -95,6 +95,7 @@ export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
   job_extract: "공고 항목 추출",
   job_extract_image: "공고 이미지 읽기",
   company_facts: "회사 항목 추출 (참고)",
+  reference_notes: "참고 글 구조 메모 (참고)",
   doc_suggest: "문서 수정안",
   judge_claim: "학습 연결 판정 (참고)",
   judge_visibility: "요건 가시성 판정 (참고)",

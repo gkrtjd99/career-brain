@@ -493,3 +493,25 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 원본 내려받기 `GET /core/sources/{id}/original` (`sources.read`): 저장한 sha256과 같을 때만 보낸다 (다르면 409 `original_changed`). 파일 이름·형식 그대로, `nosniff`·`no-store`. 제한 등급 원본은 감사 기록(`source_original_download`).
 - 내보내기: 카탈로그로 자동 포함, `@schema_step("c0034")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 same_except (종류·이름·기관·번호·날짜·점수·시간이 정체). manifest `proofs`가 증빙 원본 행·파일을 표시한다.
 - 시험: `packages/core/tests/test_credentials.py` (뽑기 규칙과 위치, 만료일 추측 0, 주민등록번호, 증빙 파싱 → 후보·모델/OCR 호출 0, HTTP·권한·다른 공간 0건, 오늘 일정, 내려받기 해시·감사, 내보내기 왕복, MCP, migration).
+
+## 참고 자료 보관함 (c0035, O14)
+
+`c0035` (`down_revision = c0034`). 다른 사람의 자기소개서·이력서·면접 후기·직무 글을 내 경험과 따로 둔다 (plan §19.2). **참고 지식**이다: 주장(`claims`)이 되지 않고, 문서 근거로 쓸 수 없고, 근거 판정에 세지 않는다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `reference_items` | 참고 글 하나. 종류(`accepted_essay`·`essay`·`resume`·`interview_review`·`job_article`·`other`)·제목(1–300자)·회사(`company_id`, FK `ON DELETE SET NULL (company_id)`)·직무(100자 이하)·연도(1950–2100)·출처 메모(1,000자 이하)·원본(`source_id`, 용도 `reference`인 원본, FK `ON DELETE SET NULL (source_id)`)·자료 등급·본문(`text`, 1–200,000자)·가린 곳 수(`pii_masked`)·만든 사람·시각. 표 이름은 SQL 예약어 `references`를 피했다 | 전체 |
+| `reference_notes` | 구조 메모: 문항(1,000자 이하)·문단 구성·소재 종류·강조 역량(`text[]`, 각 20개 이하, 항목 200자 이하)·상태(`candidate`/`confirmed`, 확인이면 `confirmed_at` 필수)·출처(`model`/`user`)·모델 호출·확인한 사람. 모든 칸이 비면 CHECK 거부. 참고 글을 지우면 함께 지워진다 | 전체 |
+
+- 두 표 모두 `workspace_id`와 FORCE RLS, 앱 role 권한.
+- 만들기 (usecase `career_core.usecases.references`):
+  - 붙여넣기: 본문을 저장하고 같은 글로 용도 `reference` 원본(`text/plain`)도 만들어 잇는다 — 올린 자료 목록과 `include_reference` 검색에 나온다.
+  - 올린 참고 자료에서: 읽기가 끝난 최신 파싱의 블록 글을 본문으로 쓴다. 용도가 참고가 아니면 409 `source_not_reference`, 아직 읽는 중이면 `source_not_ready`, 글이 없으면 `source_empty`. 자료 등급은 원본을 따른다.
+  - 참고 글이 쓰는 원본을 다른 용도로 바꾸면 409 `source_has_reference_items`.
+- 개인정보: `POST /core/references/pii-check`가 주민번호·휴대전화·일반 전화·이메일·이름 칸(`이름:`·`성명:`·`지원자:` 등)·학교 이름(`○○대학교` 등)을 찾는다. 사람이 고르면(`mask_pii: true`) 저장 전에 `○○○`로 가린다(학교는 뒤 말을 남김). 가리는 것은 참고 글 본문뿐이고 올린 원본 파일은 그대로다.
+- 구조 메모: 사람이 쓰면 바로 `confirmed`, 에이전트가 쓰면 `candidate`. `POST /core/references/{id}/suggest-notes`는 모델 gateway(용도 `reference_notes`, 없으면 `default`, 참고 글의 자료 등급)로 후보를 만든다. 200자 넘는 줄과 원문 문장을 옮긴 줄(아래 비슷함 기준)은 버린다(`llm_dropped:n`). 모델이 없으면 `no_model`로 아무것도 보내지 않는다. 확인은 사람(`actor.is_human`)만.
+- 비슷함 점검: 문서 점검(`check_document`)이 문장마다 참고 글 본문과 용도 참고 원본(참고 글에 이어지지 않은 것)의 문장과 비교한다. 공백·기호를 뺀 문자 3-gram 겹침(내 문장 기준 포함률)이 0.6 이상이고 15자 이상이면 `similar_to_reference`(참고 글·원본 ID, 제목, 점수). 모델을 쓰지 않는다.
+- 검색·MCP: 기본 검색에 0건. MCP는 내 경험 도구와 이름을 나눈 읽기 전용 `reference_search`·`reference_get` — 구조 메모와 짧은 발췌(160자)만, 본문 전체는 주지 않는다.
+- 내보내기: 두 표는 카탈로그로 자동 포함. 묶음 manifest의 `reference_tables`가 참고 지식 표를 표시한다. `@schema_step("c0035")`가 옛 묶음에 빈 표를 넣는다. 삭제 기록(tombstone) 대상은 아니다.
+- downgrade: 두 표를 지운다.
+- 시험: `packages/core/tests/test_references.py` (개인정보 찾기·가리기, 비슷함·문서 점검, 주장·근거 거부, 기본 검색 0건, 원본에서 만들기·용도 규칙, 구조 메모 후보·확인·모델 거부, HTTP 오류·다른 공간 0건, MCP 도구, 내보내기 왕복).

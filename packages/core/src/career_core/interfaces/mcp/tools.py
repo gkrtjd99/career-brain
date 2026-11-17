@@ -29,6 +29,7 @@ from career_core.usecases import companies as company_uc
 from career_core.usecases import credentials as credential_uc
 from career_core.usecases import interviews as interview_uc
 from career_core.usecases import postings as posting_uc
+from career_core.usecases import references as reference_uc
 from career_core.usecases import runs as run_uc
 from career_core.usecases import search as search_uc
 from career_core.usecases import study as study_uc
@@ -524,6 +525,71 @@ async def _credential_list(env: ToolEnv, a: CredentialListArgs) -> Any:
     return {"note": CREDENTIAL_NOTE, "credentials": out}
 
 
+# ---------------------------------------------------------------- 참고 자료 보관함 (O14)
+
+# 참고 글 도구 결과마다 붙이는 표시. 남의 글을 사용자의 경험으로 쓰거나 문장을 옮기지 않게 한다.
+REFERENCE_WRITING_NOTE = (
+    "Writing by OTHER people (cover letters, resumes, interview reviews, job articles) that the "
+    "user keeps only as reference. It is NOT the user's experience: never cite it as evidence, "
+    "never copy or paraphrase its sentences into the user's documents. Use only the structure "
+    "notes (question, paragraph structure, material kinds, emphasized competencies)."
+)
+
+
+class ReferenceSearchArgs(Args):
+    query: str | None = Field(default=None, max_length=200)
+    kind: (
+        Literal["accepted_essay", "essay", "resume", "interview_review", "job_article", "other"]
+        | None
+    ) = None
+    company_id: UUID | None = None
+    limit: int = Field(default=10, ge=1, le=30)
+    # 기본은 사람이 확인한 구조 메모만
+    include_candidates: bool = False
+
+
+async def _reference_search(env: ToolEnv, a: ReferenceSearchArgs) -> Any:
+    hits = await reference_uc.search_references(
+        env.db,
+        env.actor,
+        a.query,
+        kind=a.kind,
+        company_id=a.company_id,
+        limit=a.limit,
+        include_candidates=a.include_candidates,
+    )
+    return {
+        "record": "reference",
+        "note": REFERENCE_WRITING_NOTE,
+        "references": [jsonable(h) for h in hits],
+    }
+
+
+class ReferenceGetArgs(Args):
+    reference_id: UUID
+    include_candidates: bool = False
+
+
+async def _reference_get(env: ToolEnv, a: ReferenceGetArgs) -> Any:
+    view = await reference_uc.get_reference(env.db, env.actor, a.reference_id)
+    notes = [jsonable(n) for n in view.notes if a.include_candidates or n.status == "confirmed"]
+    # 원문 전체는 주지 않는다. 짧은 발췌만 (어떤 글인지 알아보는 정도)
+    return {
+        "record": "reference",
+        "note": REFERENCE_WRITING_NOTE,
+        "id": str(view.id),
+        "kind": view.kind,
+        "title": view.title,
+        "company_name": view.company_name,
+        "role": view.role,
+        "year": view.year,
+        "source_note": view.source_note,
+        "excerpt": reference_uc.excerpt(view.text),
+        "text_chars": len(view.text),
+        "notes": notes,
+    }
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -647,6 +713,28 @@ TOOLS: tuple[Tool, ...] = (
         untrusted=True,
     ),
     Tool(
+        "reference_search",
+        "Search the user's reference shelf (참고 글): OTHER people's cover letters, resumes, "
+        "interview reviews and job articles. Returns metadata, human-confirmed structure notes "
+        "(question, paragraph structure, material kinds, emphasized competencies) and a short "
+        "excerpt only. This is NOT the user's experience: never use it as evidence and never "
+        "copy its sentences into the user's documents.",
+        "references.read",
+        ReferenceSearchArgs,
+        _reference_search,
+        untrusted=True,
+    ),
+    Tool(
+        "reference_get",
+        "Get one reference item (someone else's writing) with its structure notes (confirmed only "
+        "unless include_candidates=true) and a short excerpt. The full original text is not "
+        "returned. NOT the user's experience: never cite it as evidence, never copy its sentences.",
+        "references.read",
+        ReferenceGetArgs,
+        _reference_get,
+        untrusted=True,
+    ),
+    Tool(
         "save_job_urls",
         "Save job posting URLs the user gave you (max 10). The same posting is never duplicated. "
         "Fetching happens in the background.",
@@ -755,6 +843,7 @@ TOOLS_BY_NAME: dict[str, Tool] = {t.name: t for t in TOOLS}
 
 __all__ = [
     "REFERENCE_NOTE",
+    "REFERENCE_WRITING_NOTE",
     "TOOLS",
     "TOOLS_BY_NAME",
     "UNTRUSTED_NOTICE",

@@ -1,5 +1,6 @@
 import type { Finding, ValidateResult } from "@career-brain/client";
 import { cn, EmptyState } from "@career-brain/ui";
+import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { FINDING, FINDING_GROUP, type FindingGroup } from "../../lib/labels";
 import { toneText, VisibilityTable } from "../../pages/Application";
@@ -18,6 +19,28 @@ function detailText(f: Finding): string | null {
     return (d.kinds as string[]).map((k) => (k === "number" ? "수치" : k === "experience" ? "경험" : k)).join("·");
   }
   return null;
+}
+
+/** "참고 글과 비슷함": 어느 참고 글인지만 보여 준다 (그 글의 문장은 싣지 않는다). */
+function SimilarReference({ f }: { f: Finding }) {
+  const d = f.detail ?? {};
+  const title = typeof d.reference_title === "string" ? d.reference_title : "참고 자료";
+  const score = typeof d.score === "number" ? Math.round(d.score * 100) : null;
+  const label = `${title}${score !== null ? ` · 겹침 ${score}%` : ""}`;
+  const cls = "mt-1 inline-flex min-h-9 items-center text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-0";
+  if (typeof d.reference_id === "string")
+    return (
+      <Link to="/brain/references/$referenceId" params={{ referenceId: d.reference_id }} className={cls}>
+        {label}
+      </Link>
+    );
+  if (typeof d.source_id === "string")
+    return (
+      <Link to="/brain/sources/$sourceId" params={{ sourceId: d.source_id }} className={cls}>
+        {label}
+      </Link>
+    );
+  return <p className="mt-1 text-xs text-muted tabular-nums">{label}</p>;
 }
 
 /** 저장한 revision 검사 결과: 위험 경고는 크게, 참고는 작게. 경고 목록일 뿐 판정이 아니다. */
@@ -51,8 +74,8 @@ export function ChecksPanel({
         >
           <ShieldAlert size={16} className="mt-0.5 shrink-0" />
           <span>
-            제출 전에 꼭 볼 경고 {danger}개: 다른 회사 이름, 회사만 바꿔도 되는 문장, 숨김 문자·심사 지시문 같은 조작
-            의심.
+            제출 전에 꼭 볼 경고 {danger}개: 다른 회사 이름, 회사만 바꿔도 되는 문장, 참고 글과 비슷한 문장, 숨김
+            문자·심사 지시문 같은 조작 의심.
           </span>
         </div>
       ) : null}
@@ -96,6 +119,7 @@ export function ChecksPanel({
                     <p className="mt-0.5 leading-5">{f.message}</p>
                     {f.sentence ? <p className="mt-1 text-xs text-muted">“{f.sentence}”</p> : null}
                     {extra ? <p className="mt-1 text-xs text-muted">{extra}</p> : null}
+                    {f.code === "similar_to_reference" ? <SimilarReference f={f} /> : null}
                   </li>
                 );
               })}

@@ -1,4 +1,11 @@
-import type { CredentialKind, ExperienceKind, SearchKind, SourcePurpose } from "@career-brain/client";
+import {
+  REFERENCE_KINDS,
+  type CredentialKind,
+  type ExperienceKind,
+  type ReferenceKind,
+  type SearchKind,
+  type SourcePurpose,
+} from "@career-brain/client";
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router";
 import { AppShell } from "./components/AppShell";
 import { getToken } from "./lib/api";
@@ -145,6 +152,32 @@ export const companyRoute = createRoute({
   path: "/brain/companies/$companyId",
   beforeLoad: requireToken,
   component: lazyRouteComponent(() => import("./pages/Company"), "CompanyPage"),
+});
+
+/** 참고 › 참고 글 (O14). ``type``: 종류 필터, ``from``: 참고 자료로 올린 원본에서 만들기 시트를 연다 */
+const referencesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/references",
+  beforeLoad: requireToken,
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { type?: ReferenceKind; company?: string; year?: number; from?: string } => {
+    const year = Number(s.year);
+    return {
+      type: REFERENCE_KINDS.includes(s.type as ReferenceKind) ? (s.type as ReferenceKind) : undefined,
+      company: typeof s.company === "string" && s.company ? s.company : undefined,
+      year: Number.isInteger(year) && year >= 1950 && year <= 2100 ? year : undefined,
+      from: typeof s.from === "string" && s.from ? s.from : undefined,
+    };
+  },
+  component: lazyRouteComponent(() => import("./pages/References"), "ReferencesPage"),
+});
+
+export const referenceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/references/$referenceId",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Reference"), "ReferencePage"),
 });
 
 const KINDS: SearchKind[] = ["claim", "block", "answer"];
@@ -323,6 +356,8 @@ const routeTree = rootRoute.addChildren([
   experienceRoute,
   companiesRoute,
   companyRoute,
+  referencesRoute,
+  referenceRoute,
   searchRoute,
   postingsRoute,
   postingRoute,

@@ -130,7 +130,7 @@ PC·모바일 → Caddy → personal-web 정적 파일
 | 실행 | runs, run_events, approvals, outbox | 상태, 비용, 재개 위치, 승인 범위 |
 | 검색 | chunks, embeddings, embedding_spaces | 원본 버전, 모델·차원·청킹 버전 |
 | 회사 (c0033, §19.1) | companies, company_pages, company_facts | 회사 식별·별칭, 항목 종류·본문·출처·기준일·확인 상태, 공고 연결 |
-| 참고 (계획, §19.2) | references, reference_notes | 남의 글 종류·태그·출처, 구조 메모. 내 경험과 분리 |
+| 참고 (c0035, §19.2) | reference_items, reference_notes | 남의 글 종류·회사·직무·연도·출처 메모·원본 연결, 구조 메모(후보·확인). 내 경험과 분리 |
 | 지원 준비 (계획, §19.3) | application_preps, prep_items | 공고 버전·문항별 후보 경험·근거·회사 연결·사람의 선택 |
 | 면접 준비 (계획, §19.4) | interview_preps, answer_assets | 예상 질문·출처, 쓸 경험, 사람이 쓴 답변 |
 | 이력서 (계획, §19.5) | resumes, resume_sections, resume_entries | 프로필·사진·자격은 브레인(§20)에서, 판본(마스터·직무·공고) 계보, 항목별 경험·주장 연결, 표시 설정 |
@@ -423,6 +423,8 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 
 진행 (O13): 회사·원문(`company_pages`)·항목(`company_facts`)과 `job_postings.company_id`(c0033). 원문 인용 없는 항목은 저장되지 않음(DB도 원문 필수), 기준일 없는 재무 항목 거부(`finance_needs_as_of`), 기준일은 원문에 적힌 것만(연·월·일 단위), 1년 넘은 항목은 오래됨 표시. URL(공고와 같은 fetch 경로, worker `company_fetch`)·붙여넣기, 모델 후보(용도 `company_facts`)는 사람이 확인. 같은 이름 공고 연결 제안 → 사람이 연결. MCP는 읽기 전용 `company_list`·`company_get`(참고 지식 안내). 문서 근거로 쓸 수 없음(시험). 웹: 브레인 › 참고 › 회사, 회사 화면, 공고 화면의 회사 한 줄. 아직 없음: OpenDART 어댑터(19.1 (c)), 파일(PDF·이미지) 원문 — 지금은 글을 붙여넣는다, 지원 화면의 회사 요약.
 
+진행 (O14, c0035): 참고 글(`reference_items`: 합격 자기소개서·다른 사람 자기소개서·다른 사람 이력서·면접 후기·직무 글·기타, 회사·직무·연도·출처 메모, 원본 연결)과 구조 메모(`reference_notes`: 문항·문단 구성·소재 종류·강조 역량, 후보 → 사람 확인). 붙여넣기는 용도 참고 원본도 함께 만들고, 올린 참고 자료(`sources.purpose = reference`)에서도 만든다. 저장 전에 이름·연락처·주민번호·이메일·학교를 찾아 사람이 고르면 ○○○로 가림(`POST /core/references/pii-check`, `mask_pii`). 구조 메모 후보는 모델 gateway(용도 `reference_notes`, 없으면 기본 경로, 자료 등급 따름)로 만들고 원문 문장을 옮긴 줄은 버림. 모델이 없으면 직접 씀. 참고 글은 주장이 되지 않고 문서 근거로 연결하면 거부, 근거 판정에 세지 않음. 문서 점검에 "참고 글과 비슷함"(문자 3-gram 겹침 0.6 이상, 모델 없음). 기본 검색에 0건, MCP는 따로 `reference_search`·`reference_get`(구조 메모와 짧은 발췌만). 내보내기 묶음에 `reference_tables` 표시, 옛 묶음은 빈 표(`c0035` 단계). 웹: 브레인 › 참고 › 참고 글, 참고 글 목록·화면, 자료 올리기의 "참고 글로 만들기", 문서 점검의 비슷한 참고 글 링크. 아직 없음: 올린 원본 파일·원본 블록의 가림(참고 글 본문만 가림), 가릴 곳 하나씩 고르기, 지원 준비(O15)에서 구조 메모 쓰기.
+
 개발 순서: career-brain(이 레포)을 먼저 완성한다. career-service는 완성된 career-brain을 참고해 이후에 개발하며, 두 레포를 동시에 개발하지 않는다.
 
 ## 17. 고정 회귀 시험
@@ -622,6 +624,7 @@ Python wheel·UI·TS client는 호환 조합을 manifest로 배포한다. 개발
 - 원본은 `sources`를 다시 쓰되 용도(`purpose`: `experience` | `reference`)를 둔다. 참고 원본은 경험 추출 대상에서 빠진다 (지금은 모든 원본이 경험 추출 대상이다).
 - 검색: 기본 검색은 내 경험만 본다. 참고 지식은 필터를 켜야 보이고, 결과에 "참고" 표시가 붙는다. MCP도 내 경험 도구와 이름을 나눈다 (`reference_search` 등).
 - 개인정보: 남의 글 속 이름·연락처·학교 같은 식별 정보는 저장 전에 가리자고 제안한다. 내보내기 묶음에는 포함하되 참고 자료임을 표시한다.
+- 상태 (c0035): 표 이름은 `reference_items`(SQL 예약어 `references`를 피함). 붙여넣기·올린 참고 자료에서 만들기, 개인정보 가리기(참고 글 본문), 구조 메모 후보·확인, 비슷함 점검, `reference_search`·`reference_get` 구현. 원본 파일 가리기는 나중.
 - 완료 기준: §16 O14.
 
 ### 19.3 공고별 지원 준비 문서 (O15)

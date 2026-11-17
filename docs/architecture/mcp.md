@@ -111,8 +111,11 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `run_start` · `run_status` · `run_cancel` | `runs.start` · `runs.read` · `runs.control` | `/core/runs…` |
 | `company_list` (`query`로 이름·별칭 찾기) · `company_get` (확인된 항목만, `include_candidates`로 후보 포함, 원문 글은 넣지 않음) — 읽기 전용, c0033 | `companies.read` | `GET /core/companies`, `/core/companies/{id}` |
 | `credential_list` (`kind`, `expiring_within` 일, `include_candidates`로 확인 전 후보 포함) — 읽기 전용, 번호는 끝 4자리만, 증빙 글·원문 위치 없음, c0034 | `credentials.read` | `GET /core/credentials` |
+| `reference_search` (`query`·`kind`·`company_id`, 확인된 구조 메모만, `include_candidates`로 후보 포함) · `reference_get` (구조 메모와 160자 발췌, 본문 전체는 넣지 않음) — 읽기 전용, c0035 | `references.read` | `GET /core/references`, `/core/references/{id}` |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
+
+`reference_search`·`reference_get`은 **다른 사람의 글**(합격 자기소개서·이력서·면접 후기·직무 글)이다. 설명과 결과의 `note`에 "사용자의 경험이 아니며 근거로 인용하거나 문장을 옮기지 않는다, 구조만 참고한다"는 안내가 붙고 `record: "reference"`, `untrusted_content: true`다. 결과는 구조 메모(문항·문단 구성·소재 종류·강조 역량)와 짧은 발췌뿐이라 원문을 통째로 받을 수 없다. 참고 글·메모 ID를 문서 근거로 넣으면 `unknown_claim`, 쓰거나 확인하는 MCP 도구는 없다 (`test_references.py`).
 
 `search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`).
 

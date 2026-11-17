@@ -429,9 +429,30 @@ export function UploadSheet({
                   ? "증빙 서류로 보관합니다. 경험을 뽑지 않고, 외부 모델에 보내지 않으며 검색에 나오지 않습니다."
                   : "참고 자료로 보관합니다. 경험을 뽑지 않고, 검색에서 “참고 자료 포함”을 켤 때만 나옵니다."}
               </p>
-              <SourceLink id={uploaded.source_id} onGo={leave}>
-                자료 보기
-              </SourceLink>
+              {kept === "reference" ? (
+                <>
+                  <p className="text-[13px] text-muted">
+                    참고 글로 만들면 문단 구성·강조 역량 같은 구조 메모를 남기고, 문서 검사에서 비슷한 문장을 짚습니다.
+                  </p>
+                  <div className="flex flex-wrap gap-x-4">
+                    <Link
+                      to="/brain/references"
+                      search={{ from: uploaded.source_id }}
+                      onClick={leave}
+                      className="inline-flex min-h-9 items-center text-[13px] font-medium underline underline-offset-2"
+                    >
+                      참고 글로 만들기
+                    </Link>
+                    <SourceLink id={uploaded.source_id} onGo={leave}>
+                      자료 보기
+                    </SourceLink>
+                  </div>
+                </>
+              ) : (
+                <SourceLink id={uploaded.source_id} onGo={leave}>
+                  자료 보기
+                </SourceLink>
+              )}
             </li>
           )}
           <li className="border-t border-line pt-3">

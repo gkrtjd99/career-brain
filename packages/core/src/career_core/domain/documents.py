@@ -1038,6 +1038,9 @@ class CheckContext:
     brain: tuple[EvidenceClaim, ...] = ()
     # 기술명 별칭 표 (기본 표 + 공간 설정, c0021). None이면 기본 표
     aliases: TechAliases | None = None
+    # c0035 (O14) 공간의 참고 글 문장 (``domain.references.ReferenceCorpus``). 근거가 아니라 "옮겨 쓴 문장"
+    # 경고에만 쓴다. None이면 보지 않는다
+    references: Any = None
 
 
 def _posting_terms(ctx: CheckContext) -> set[str]:
@@ -1214,6 +1217,23 @@ def _check_document(ctx: CheckContext, blocks: Sequence[BlockInput]) -> dict[str
                         s,
                         {"phrases": hits},
                         severity="info",
+                    )
+                )
+            similar = ctx.references.best(s) if ctx.references is not None else None
+            if similar is not None:
+                # 참고 문장 자체는 싣지 않는다 (다른 사람의 글). 어느 참고 글인지와 점수만
+                findings.append(
+                    Finding(
+                        "similar_to_reference",
+                        "참고 글과 비슷합니다. 다른 사람의 문장을 옮기지 않고 내 경험으로 다시 씁니다.",
+                        b.id,
+                        s,
+                        {
+                            "reference_id": similar.reference_id,
+                            "source_id": similar.source_id,
+                            "reference_title": similar.title,
+                            "score": similar.score,
+                        },
                     )
                 )
             named = [o for o in others if o in s]

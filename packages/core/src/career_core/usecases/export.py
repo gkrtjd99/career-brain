@@ -85,6 +85,16 @@ REQUEUE_KINDS: dict[str, str] = {
     "job_fetch": "core.job_fetch_runs",
     "company_fetch": "core.company_pages",  # c0033 회사 페이지 가져오기
 }
+# 참고 칸의 표 (manifest ``reference_tables``, 선택 키). 참고 원본은 ``core.sources``의 ``purpose = 'reference'``
+REFERENCE_TABLES = frozenset(
+    {
+        "core.companies",
+        "core.company_pages",
+        "core.company_facts",
+        "core.reference_items",
+        "core.reference_notes",
+    }
+)
 # 삭제 기록(core.deletions, record_deletion trigger)을 남기는 표. c0014: 앞의 4개, c0018: 나머지.
 # migration의 trigger·CHECK와 같아야 한다 (test_export.py가 DB와 비교한다).
 _V1_TOMBSTONE_TABLES = frozenset(
@@ -572,6 +582,8 @@ async def export_workspace(
             "tombstone_tables": sorted(TOMBSTONE_TABLES),
             # c0034: 증빙 원본(자료 등급 restricted). 원본 파일은 blobs에 그대로, 여기서 따로 표시한다
             "proofs": proofs,
+            # 참고 칸(다른 사람의 글·회사 공개 정보)의 표. 내 경험이 아니다 (c0035). 원본은 sources.purpose
+            "reference_tables": sorted(REFERENCE_TABLES),
         }
         partial = out.with_name(f".{out.name}.{uuid4().hex}.part")
         sealed = out.with_name(f".{out.name}.{uuid4().hex}.age")
@@ -1456,6 +1468,14 @@ def _c0033_companies(arc) -> None:
 )
 def _c0034_credentials(arc) -> None:
     arc.ensure_tables("core.credentials")
+
+
+@schema_step(
+    "c0035",
+    "참고 자료 보관함 표 reference_items·reference_notes (옛 묶음에는 빈 표)",
+)
+def _c0035_references(arc) -> None:
+    arc.ensure_tables("core.reference_items", "core.reference_notes")
 
 
 def _parents() -> dict[str, str | None]:
@@ -2482,6 +2502,30 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "score",
                 "hours",
             ),
+        ),
+    ),
+    # c0035 참고 글: 분류 칸(종류·제목·회사·직무·연도·메모·등급)과 가리기는 바뀐다. 원본·만든 사람·만든 시각이 정체
+    "core.reference_items": (
+        SameExcept(
+            (
+                "kind",
+                "title",
+                "company_id",
+                "role",
+                "year",
+                "source_note",
+                "data_class",
+                "text",
+                "pii_masked",
+                "updated_at",
+            )
+        ),
+    ),
+    # c0035 구조 메모: 확인은 바뀐다. 메모 칸이 정체 (고친 메모는 비슷한 행)
+    "core.reference_notes": (
+        SameExcept(
+            ("status", "confirmed_by", "confirmed_at", "updated_at"),
+            ("question", "structure", "materials", "competencies"),
         ),
     ),
     # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)

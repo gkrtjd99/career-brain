@@ -75,6 +75,7 @@ from career_core.ports import ActorContext
 from career_core.usecases.brain import NotFound
 from career_core.usecases.data_classes import claim_data_classes, restricted_claims
 from career_core.usecases.extraction import parse_model_json
+from career_core.usecases.references import reference_corpus
 from career_core.usecases.workspace_settings import workspace_aliases
 
 SUGGEST_PURPOSE = "doc_suggest"
@@ -504,6 +505,8 @@ async def _check_context(
         cliches=cliches,
         brain=tuple(_evidence(_claim_info(c, e)) for c, e in brain_rows),
         aliases=await workspace_aliases(s),  # 기본 표 + 공간 별칭 (c0021)
+        # c0035 (O14) 참고 글 문장: "참고 글과 비슷함" 경고에만 쓴다 (근거가 아니다)
+        references=await reference_corpus(s),
     )
     return ctx, posting
 
