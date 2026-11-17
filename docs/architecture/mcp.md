@@ -66,6 +66,29 @@ Claude Desktop (stdio, `claude_desktop_config.json`):
 }
 ```
 
+Codex (`~/.codex/config.toml`, 토큰은 환경변수에서):
+
+```toml
+[mcp_servers.career-brain]
+url = "http://127.0.0.1:8000/api/core/mcp"
+bearer_token_env_var = "CAREER_API_TOKEN"
+```
+
+Cursor (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "career-brain": {
+      "url": "http://127.0.0.1:8000/api/core/mcp",
+      "headers": { "Authorization": "Bearer ${env:CAREER_API_TOKEN}" }
+    }
+  }
+}
+```
+
+웹 연결·관리 › MCP·에이전트 탭은 이 조각들을 지금 화면이 붙은 주소로 채워 보이고, 에이전트용 토큰을 바로 만들게 한다.
+
 stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그라운드 작업(공고 가져오기·실행)은 `personal-api serve` 또는 `personal-api worker`가 돌아야 진행된다.
 
 ## 도구
@@ -114,7 +137,7 @@ MCP를 거친 호출의 actor는 사람 토큰이어도 `kind = "agent"`다. age
 - 원문 인자·결과·토큰은 저장하지 않는다. 같은 인자로 다시 불렀는지만 비교할 수 있다. 싱크는 정해진 칸 말고는 버린다.
 - 표는 추가·조회만 된다 (앱 계정에 UPDATE·DELETE 권한 없음, FORCE RLS). 공간이 정해지지 않은 호출(인증 실패)은 공간 기록에 남지 않는다.
 - 기록이 실패해도 도구 결과는 바뀌지 않는다 (경고 로그만).
-- 보기: `GET /core/audit?limit=&before=&tool=&status=` (`audit.read`, 소유자) → 최근 기록 + 지난 24시간 도구별 호출·오류 수 + `retention_days`. 웹 `/system?tab=audit`.
+- 보기: `GET /core/audit?limit=&before=&tool=&status=` (`audit.read`, 소유자) → 최근 기록 + 지난 24시간 도구별 호출·오류 수 + `retention_days`. 웹 `/manage?tab=mcp`.
 - **보존 (c0019)**: `CAREER_AUDIT_RETENTION_DAYS`(기본 180일, `0`이면 계속 보관)보다 오래된 행을 주기 유지보수(`jobs/maintenance.py`의 `prune_audit_and_tokens` 단계)가 공간마다 지운다.
   - 앱 계정에는 여전히 DELETE 권한이 없다. 지우기는 소유자 권한 함수 `core.purge_audit_events(keep_days)`(SECURITY DEFINER, `search_path = pg_catalog`, PUBLIC 실행 권한 없음)로만 한다.
   - 함수는 **호출한 트랜잭션의 공간 문맥** 안의 행만, `keep_days`보다 오래된 것만 지운다 (FORCE RLS와 WHERE 두 겹). 공간 문맥이 없으면 0행. `keep_days < 7`이면 오류다 — 앱 계정이 뚫려도 최근 7일 기록은 지울 수 없다. 설정값 1–6은 7로 올린다.
@@ -159,7 +182,7 @@ CAREER_API_TOKEN=cbp_… personal-api oauth-link --revoke <연결 ID>           
 
 인가 서버 쪽: 클라이언트(예: MCP 클라이언트)를 등록하고, 위 범위를 만들고, 액세스 토큰의 `aud`에 MCP 주소가 들어가게 한다 (Keycloak은 audience mapper, Auth0은 API identifier). introspection을 쓰면 이 서버용 기밀 클라이언트(introspection 권한)를 하나 더 만든다. API 토큰(`cbp_…`)은 계속 같이 쓸 수 있다.
 
-웹 화면 (c0019): `/system?tab=oauth` "원격 연결" — 설정 요약, 연결 추가(sub·이름), 연결 목록·끊기, 최근 토큰(`jti`·사용 횟수·마지막 사용·만료)·폐기. 소유자(사람)만. API:
+웹 화면 (c0019): 연결·관리 › MCP·에이전트(`/manage?tab=mcp`) 아래 "원격 연결 (OAuth)" — 설정 요약, 연결 추가(sub·이름), 연결 목록·끊기, 최근 토큰(`jti`·사용 횟수·마지막 사용·만료)·폐기. 소유자(사람)만. API:
 
 | 경로 | 내용 |
 |---|---|

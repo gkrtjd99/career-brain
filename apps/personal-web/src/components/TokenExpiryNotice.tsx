@@ -8,7 +8,7 @@ import { tokenDaysLeft, tokenExpiresSoon, tokenExpiryText } from "../lib/tokens"
 
 /**
  * 지금 이 브라우저가 쓰는 API 토큰이 곧 만료되면 알린다 (아니면 아무것도 그리지 않는다).
- * 오늘 화면은 설정으로 가는 링크를, 설정 화면(소유자가 아닐 때)은 소유자에게 부탁하라는 안내를 단다.
+ * 오늘 화면은 연결·관리 › 토큰으로 가는 링크를, 토큰 탭(소유자가 아닐 때)은 소유자에게 부탁하라는 안내를 단다.
  */
 export function TokenExpiryNotice({ className, inSettings = false }: { className?: string; inSettings?: boolean }) {
   // 역할과 무관하게 자기 토큰 한 줄만 읽는다. API 토큰이 아니면 404 → 표시 없음
@@ -28,7 +28,7 @@ export function TokenExpiryNotice({ className, inSettings = false }: { className
         ) : null}
       </p>
       {inSettings ? null : (
-        <Link to="/settings" className="shrink-0 font-medium underline underline-offset-2 hover:no-underline">
+        <Link to="/manage" search={{ tab: "tokens" }} className="shrink-0 font-medium underline underline-offset-2 hover:no-underline">
           연장
         </Link>
       )}

@@ -10,11 +10,9 @@ import { NotFoundPage } from "./pages/NotFound";
 import { PostingPage } from "./pages/Posting";
 import { PostingsPage } from "./pages/Postings";
 import { SearchPage } from "./pages/Search";
-import { SettingsPage } from "./pages/Settings";
-import type { SystemTab } from "./pages/System";
+import type { ManageSearch, ManageTab } from "./pages/Manage";
 import type { StudyTab } from "./pages/Study";
 import { TodayPage } from "./pages/Today";
-import { UsagePage } from "./pages/Usage";
 
 const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotFoundPage });
 
@@ -100,19 +98,50 @@ export const postingRoute = createRoute({
   component: PostingPage,
 });
 
+// ---------------------------------------------------------------- 연결·관리 (plan §21)
+
+const MANAGE_TABS: ManageTab[] = ["models", "routes", "usage", "mcp", "runs", "tokens", "maintenance", "settings"];
+
+/** 승인·실행 상세(?approval=, ?run=)는 작업·승인 탭에서 열린다 */
+function manageSearch(s: Record<string, unknown>): ManageSearch {
+  const approval = typeof s.approval === "string" && s.approval ? s.approval : undefined;
+  const run = typeof s.run === "string" && s.run ? s.run : undefined;
+  const tab = approval || run ? "runs" : MANAGE_TABS.includes(s.tab as ManageTab) ? (s.tab as ManageTab) : undefined;
+  return {
+    ...(tab && tab !== "models" ? { tab } : {}),
+    ...(approval ? { approval } : {}),
+    ...(run ? { run } : {}),
+  };
+}
+
+export const manageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/manage",
+  beforeLoad: requireToken,
+  validateSearch: manageSearch,
+  component: lazyRouteComponent(() => import("./pages/Manage"), "ManagePage"),
+});
+
+// 옛 주소는 해당 탭으로 보낸다 (북마크·다른 화면의 링크)
 const usageRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/usage",
-  beforeLoad: requireToken,
-  component: UsagePage,
+  beforeLoad: () => {
+    throw redirect({ to: "/manage", search: { tab: "usage" }, replace: true });
+  },
 });
 
-export const settingsRoute = createRoute({
+const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   validateSearch: (s: Record<string, unknown>): { reason?: "missing" | "invalid" } =>
     s.reason === "missing" || s.reason === "invalid" ? { reason: s.reason } : {},
-  component: SettingsPage,
+  beforeLoad: ({ search }) => {
+    // 토큰이 없거나 거절된 경우는 첫 연결 화면이 맡는다
+    if (search.reason || !getToken())
+      throw redirect({ to: "/connect", search: search.reason === "invalid" ? { reason: "invalid" } : {}, replace: true });
+    throw redirect({ to: "/manage", search: { tab: "settings" }, replace: true });
+  },
 });
 
 const applicationsRoute = createRoute({
@@ -169,17 +198,29 @@ export const studyItemRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/StudyItem"), "StudyItemPage"),
 });
 
-const SYSTEM_TABS: SystemTab[] = ["runs", "approvals", "maintenance", "audit", "oauth"];
+type SystemTab = "runs" | "approvals" | "maintenance" | "audit" | "oauth";
+const SYSTEM_TO_MANAGE: Record<SystemTab, ManageTab> = {
+  runs: "runs",
+  approvals: "runs",
+  maintenance: "maintenance",
+  audit: "mcp",
+  oauth: "mcp",
+};
 export const systemRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/system",
-  beforeLoad: requireToken,
   validateSearch: (s: Record<string, unknown>): { tab?: SystemTab; approval?: string; run?: string } => ({
-    ...(SYSTEM_TABS.includes(s.tab as SystemTab) && s.tab !== "runs" ? { tab: s.tab as SystemTab } : {}),
+    ...(typeof s.tab === "string" && s.tab in SYSTEM_TO_MANAGE ? { tab: s.tab as SystemTab } : {}),
     ...(typeof s.approval === "string" && s.approval ? { approval: s.approval } : {}),
     ...(typeof s.run === "string" && s.run ? { run: s.run } : {}),
   }),
-  component: lazyRouteComponent(() => import("./pages/System"), "SystemPage"),
+  beforeLoad: ({ search }) => {
+    throw redirect({
+      to: "/manage",
+      search: manageSearch({ ...search, tab: SYSTEM_TO_MANAGE[search.tab ?? "runs"] }),
+      replace: true,
+    });
+  },
 });
 
 // 사진 변환: 브라우저 안에서만 처리하고 API를 부르지 않아 토큰 없이도 연다
@@ -196,6 +237,7 @@ const routeTree = rootRoute.addChildren([
   searchRoute,
   postingsRoute,
   postingRoute,
+  manageRoute,
   usageRoute,
   settingsRoute,
   connectRoute,

@@ -8,7 +8,7 @@ import { router } from "./router";
 
 setUnauthorizedHandler(() => {
   const { pathname, href } = router.state.location;
-  if (pathname !== "/connect" && pathname !== "/settings") {
+  if (pathname !== "/connect") {
     void router.navigate({ to: "/connect", search: { reason: "invalid", next: href } });
   }
 });

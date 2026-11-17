@@ -1,6 +1,6 @@
 # 개인 대시보드 웹 (O10, O07·O09 화면)
 
-`apps/personal-web` — React 19 + Vite + TypeScript. 데스크톱은 왼쪽 메뉴, 375px 폭 모바일은 아래 탭(오늘·브레인·공고·검색·더보기). 밝게/어둡게/기기 설정. 흑백 테마(검정·흰색, 오류만 빨강). 모든 화면은 상자 대신 제목 + 얇은 선 목록 + 여백으로 나누고, 숫자 타일·행마다 붙는 뱃지를 쓰지 않는다(행동이 필요한 상태만 뱃지). 토큰이 없거나 거절되면 메뉴 없는 첫 연결 화면(`/connect`)을 열고, 연결 뒤 원래 가려던 곳으로 돌아간다. 메뉴의 시스템·사용량·설정은 '연결·관리' 묶음.
+`apps/personal-web` — React 19 + Vite + TypeScript. 데스크톱은 왼쪽 메뉴, 375px 폭 모바일은 아래 탭(오늘·브레인·공고·검색·더보기). 밝게/어둡게/기기 설정. 흑백 테마(검정·흰색, 오류만 빨강). 모든 화면은 상자 대신 제목 + 얇은 선 목록 + 여백으로 나누고, 숫자 타일·행마다 붙는 뱃지를 쓰지 않는다(행동이 필요한 상태만 뱃지). 토큰이 없거나 거절되면 메뉴 없는 첫 연결 화면(`/connect`)을 열고, 연결 뒤 원래 가려던 곳으로 돌아간다. 관리 일은 메뉴 아래쪽 '연결·관리' 하나(`/manage`)의 탭으로 모았다 (plan §21, 아래 "연결·관리").
 
 ## 실행
 
@@ -12,7 +12,7 @@ CAREER_API_PROXY=http://127.0.0.1:8765 npm run dev     # API 주소가 다르면
 npm run typecheck && npm run build                     # 결과: apps/personal-web/dist
 ```
 
-처음 열면 설정 화면에서 `uv run personal-api bootstrap` 이 출력한 API 토큰을 넣는다. 저장 전에 `/api/core/me` 로 확인하고, 이 브라우저의 `localStorage` 에만 둔다. 401이 오면 설정 화면으로 돌아간다.
+처음 열면 첫 연결 화면(`/connect`)에서 `uv run personal-api bootstrap` 이 출력한 API 토큰을 넣는다. 저장 전에 `/api/core/me` 로 확인하고, 이 브라우저의 `localStorage` 에만 둔다. 401이 오면 첫 연결 화면으로 돌아간다. 토큰 바꾸기·지우기는 연결·관리 › 토큰.
 
 배포 빌드는 정적 파일(`dist/`)이다. 같은 출처에서 `/api` 를 personal-api 로 넘기면 된다. API 주소가 다르면 빌드 때 `VITE_API_BASE` 로 바꾼다. 테마 초기화는 외부 파일(`/theme-init.js`)이라 `script-src 'self'` CSP와 맞는다.
 
@@ -22,6 +22,7 @@ npm run typecheck && npm run build                     # 결과: apps/personal-w
 packages/client/src/
   types.ts        코어 HTTP 응답 타입 (interfaces/http 의 Pydantic 모델과 맞춤, 손으로 작성)
   index.ts        createClient({ baseUrl, getToken }) — 모든 코어 경로, ApiError(status, code)
+  models.ts       연결·관리의 모델 연결 API (/core/models/…, O22). 키 값 칸이 없다 (상태·끝 4자리만)
 packages/ui/src/  Button, Badge, Card/Section/EmptyState/Spinner, Input/Textarea/Select/Label,
                   Sheet(옆 패널, Radix Dialog), ConfirmDialog(가운데 확인 창), Highlight(원문 위치 강조), EvidenceCard/StatusBadge,
                   MarkdownView(위키용 최소 Markdown, HTML 해석 안 함)
@@ -38,8 +39,12 @@ apps/personal-web/src/
   components/runs/ RunParts(예상 비용·실행 진행·멱등 키), InterviewBatchSheet(경험별 일괄 인터뷰 질문, c0023)
   components/study/ parts(응시·오답 기록, 복습 카드)
   components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전), JudgeCacheSection(판정 응답 캐시 크기·비우기, egress 권한)
+  components/manage/ 연결·관리 탭: ModelsTab(모델 연결·추가 시트), RoutesTab(용도별 모델), UsageTab(사용량·월 예산),
+                  McpTab(붙는 방법·에이전트용 토큰), RunsTab(작업·승인 + MCP 호출 기록), TokensTab, SettingsTab, parts
+  components/system/ MaintenanceTab(백업·유지보수), OAuthTab(원격 연결), live(SSE)
+  lib/modelLabels.ts 모델 연결 종류·과금·키 상태·자료 등급·용도 이름
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
-                  Study, StudyItem, Usage, Settings, PhotoTool(사진 변환)
+                  Study, StudyItem, Manage(연결·관리), Connect(첫 연결), PhotoTool(사진 변환)
 ```
 
 `packages/ui` 의 클래스는 앱의 색 토큰(`bg-surface`, `text-muted`, `border-line`, `text-accent`, `bg-ok-soft` …)을 쓴다. 토큰은 `apps/personal-web/src/index.css` 의 CSS 변수로 정의하고, 다른 앱(서비스)은 같은 이름으로 자기 값을 주면 된다.
@@ -54,9 +59,8 @@ apps/personal-web/src/
 | `/search` | 검색어, 종류(주장·원문·인터뷰 답변) 필터, 키워드/의미 모드와 이유, 원문 결과 → 원본 보기(앞뒤 2블록, 일치 범위 강조) |
 | `/postings` | URL 여러 개 붙여넣기(최대 20), 요청 결과, 상태별 목록, 가져오는 중이면 자동 새로고침 |
 | `/postings/:id` | 항목별 추출값과 근거(구조화 데이터 경로 / 원문 인용 → 원문 패널에서 강조 / 직접 입력), 고쳐서 저장(바뀐 값은 `overrides`, 비운 값은 `clear`), 다시 가져오기, 보관, 실패 사유, 목록 후보 고르기, 본문 직접 붙여넣기, 전체 버전 목록·가져오기 기록, 저장한 공고면 지원 만들기/열기·요건별 준비 상태 |
-| `/usage` | 기간·묶음별 호출·토큰·청구·환산 비용, 월 예산 |
-| `/system` | 탭: 실행(상태 필터, 상세 시트: 진행·비용·대기 이유·이벤트, 멈춤·다시 시작·취소) · 승인(상태 필터, 상세 시트: 요청한 문서·버전, **요청 이후 바뀐 것** 비교, 메모, 승인·거절 — 본 내용의 `payload_hash`를 같이 보냄) · 백업·유지보수(행 수, 원본 크기, 마지막 내보내기, 내려받기·age 암호화, 삭제 기록 내려받기, 초안 정리) · MCP 기록(지난 24시간 도구별 호출·오류, 결과·도구 필터, 보존 기간) · 원격 연결(OAuth 설정 요약, 연결 추가·끊기, 최근 토큰 `jti`·폐기, 소유자만). 실행·승인은 SSE(`/core/live`)로 바로 갱신하고 끊기면 몇 초 간격 다시 읽기로 돌아간다. `?tab=&approval=&run=`로 바로 열린다. 오늘 화면 맨 위 "승인 요청" 카드(대기 중일 때만)가 승인 시트로 연결 (같은 SSE로 바로 갱신, 끊기면 30초 간격 다시 읽기) |
-| `/settings` | 토큰, 문서 검사(상투어 목록 편집·기본 목록으로 되돌리기, 본인 연락처), 작업 공간(표시 시간대, 기술명 별칭 사전), 테마 |
+| `/manage` 연결·관리 | 탭(`?tab=`): 모델 연결(기본) · 용도별 모델(`routes`) · 사용량·예산(`usage`) · MCP·에이전트(`mcp`) · 작업·승인(`runs`) · 토큰(`tokens`) · 백업·유지보수(`maintenance`) · 설정(`settings`). `?approval=`·`?run=`은 작업·승인 탭의 시트로 바로 열린다. 아래 "연결·관리" |
+| `/system` · `/usage` · `/settings` | 옛 주소. 해당 탭으로 보낸다: `/system?tab=runs·approvals` → `runs`, `maintenance` → `maintenance`, `audit·oauth` → `mcp` (`approval`·`run` 유지), `/usage` → `usage`, `/settings` → `settings` (토큰이 없거나 `?reason=`이 있으면 `/connect`) |
 | `/applications` | 칸반: 관심(지원 없는 저장 공고, 지원 만들기) → 준비 중 → 제출 → 결과. 카드에 D-day, 안 쓴 문항, 다음 할 일 |
 | `/applications/:id` | 문항·문서 목록(글자 수/제한, 안 씀·초과, 검사 요약), 문서 추가(새로 쓰기 / 공용 문서에서 복사, 복사 출처 표시), 요건 가시성 표(충족/누락/과장), 철회·결과 기록, 제출: 확인 창(문서별 r#·글자 수·경고, 빈 문서 제외, 민감 정보 경고가 있으면 확인 체크) → 제출본 고정 → 전형 단계 타임라인(추가·결과·일정) + 읽기 전용 제출본(해시·본문·근거·요건) |
 | `/applications/:id/documents/:docId` | 문단 편집기, 서버 계산 글자/바이트 수(입력 중 350ms 뒤 `/count`), 저장(`base_revision`, 멱등 키, Ctrl/Cmd+S), 409 충돌 창(비교 / 버리고 최신 받기 / 확인 후 내 글로 새 revision), 저장 안 한 채 떠나면 막음, 문단별 근거 연결(검색으로 확인된 주장 고르기), 검사 탭(제한·위험·조작·근거·참고 묶음, 문단으로 이동), AI 수정안 탭(요청 → 단어 비교 → 적용/거절, 사실 변경 거부 사유 표시), 기록 탭(이전 revision 읽기), 고른 문장에만 근거 붙이기(문장 근거 칩), 내보내기(형식 고르기 → 만든 파일 검사 경고 → 확인 후 받기, PDF는 인쇄 창), 공용 문서에서 복사한 문서면 출처·원본 변경 안내, 제출 뒤 읽기 전용 |
@@ -157,6 +161,39 @@ c0029: `POST /core/sources` 폼 `hidden_text`(`keep` 기본 · `exclude` = DOCX 
 
 한계: HEIC는 브라우저가 디코딩할 때만 열린다(Chrome·Firefox는 보통 못 연다, 변환 라이브러리는 넣지 않음). 결과 미리보기의 1:1은 CSS px라
 고해상도 화면에서는 기기 픽셀 2개 이상으로 보인다. 큰 축소는 브라우저의 `imageSmoothingQuality: "high"`에 맡긴다. 얼굴 위치 자동 맞춤은 없다.
+
+## 연결·관리 (`/manage`, O22 화면, plan §21)
+
+일상 화면(오늘·브레인·공고·지원·학습)과 관리 화면을 나눈다. 왼쪽 메뉴 아래쪽(모바일은 더보기)에 "연결·관리" 하나만 두고, 안은 탭이다.
+탭 줄은 공용 `Tabs`(좁으면 가로로 밀림). 상자 대신 얇은 선 목록, 행동이 필요한 상태(키 없음·다시 넣어야 함·보낼 자료 없음·시험 실패)만 진한 글자.
+바꾸기 버튼은 `workspace-admin` 범위가 있을 때만 보인다 (API도 같은 권한으로 막는다).
+
+- **모델 연결** (`GET /core/models/status`): 연결마다 이름 · 종류 · 과금(종량제·구독·무료, 구독은 환산 기준) · 보낼 수 있는 자료(공개·개인 / "없음 — 호출 거부") ·
+  키 상태("저장됨 ····abcd" / "키 없음" / "다시 넣어야 함" / "필요 없음") · 마지막 시험. `models.toml`의 연결은 "파일에서 옴 · 읽기 전용"이고 시험만 된다.
+  화면에서 만든 연결은 시험·고치기·끊기(`connection_in_use`면 이유를 보임).
+  - **연결 추가** 시트: 1단계 종류(공식 API / 구독 계정(CLIProxyAPI) / LiteLLM 프록시 / 로컬 모델(Ollama) / 직접(OpenAI 호환)), 2단계 종류별 칸(plan §21 표).
+    기본 주소 CLIProxyAPI `http://127.0.0.1:8317/v1`, LiteLLM `http://127.0.0.1:4000/v1`, Ollama `http://127.0.0.1:11434/v1`.
+    구독 계정은 "로그인은 CLIProxyAPI에서(이 앱은 구독 OAuth를 직접 하지 않음)", 약관 경고, `host: "127.0.0.1"` 안내를 그대로 적는다.
+    자료 등급은 공개·개인만 고르고 민감(restricted)은 꺼진 칸과 이유로 보인다. 아무것도 안 고르면 거부라고 적는다.
+  - 키는 password 칸이고, 저장한 뒤 화면 상태에서 지운다. 응답·목록에 키 값이 없다(끝 4자리만). 고치기에서 비우면 그대로, "저장한 키 지우기"는 `api_key: null`.
+  - 저장하면 바로 시험(`POST …/{name}/test`)하고 찾은 모델을 보인다. 시험은 과금 없는 `GET /models`뿐이라고, 실제 생성 호출 확인은 `personal-api ping`(과금)이라고 적는다.
+  - 시험 결과는 쿼리 캐시(`["model-test", 이름]`)에 두고 용도별 모델의 모델 고르기가 같이 쓴다.
+- **용도별 모델**: 기본(`default`) → `purposes` → 임베딩(`embed`) 순으로 한 줄씩 "연결/모델"과 출처(파일 / 화면에서 덮음). 비어 있으면 "기본을 씀" 또는
+  기본으로 넘어가지 않는 용도(임베딩·이미지 읽기·판정)는 "이 일은 하지 않음". 고치기: 연결 고르기 + 모델(시험 결과 목록 `datalist`, 직접 입력 가능,
+  목록이 없으면 "모델 목록 불러오기(과금 없음)"). 화면 값이면 "파일 값으로"(`null`). `PUT /core/models/routes`에는 지금 화면 값 전체에 바꾼 것을 더해 보낸다
+  (덮기든 합치기든 다른 화면 값이 사라지지 않게). 연결이 없거나 그 연결의 자료 등급이 비었으면 그 줄에 알린다.
+- **사용량·예산**: 예전 사용량 화면 그대로 + 월 예산 줄에서 고치기(`PUT /core/models/budget`, 출처 표시, 화면 값이면 "파일 값으로" = `null`).
+- **MCP·에이전트**: MCP 주소(`location.origin` + API base + `/core/mcp`, `VITE_API_BASE`가 절대 주소면 그것)와 클라이언트별 설정 조각 —
+  Claude Code(`claude mcp add --transport http …`), Codex(`~/.codex/config.toml`, `bearer_token_env_var`), Claude Desktop(stdio `personal-api mcp`, `CAREER_API_TOKEN`), Cursor(`mcp.json`).
+  토큰 자리는 언제나 `<토큰>`. 개발 서버로 열었으면 API 서버 주소를 쓰라고 알린다. "에이전트용 토큰 만들기"는 토큰 탭과 같은 `NewTokenForm`(이름 "MCP", 만료 90일 미리 채움,
+  원문은 만든 직후 한 번만). 도구별 권한 표는 클라이언트에 정보가 없어 `mcp.md` 링크와 "에이전트는 승인하지 못함" 규칙만 적는다. 그 아래 MCP 호출 기록과 원격 연결(OAuth)은 예전 시스템 탭 그대로.
+- **작업·승인**: 승인 요청(상태 필터)을 먼저, 그 아래 실행 목록. 상세 시트·SSE 갱신은 예전 시스템 화면과 같다.
+- **토큰**: 이 브라우저의 토큰(서버·토큰·권한, 바꾸기·지우기) + 공간의 API 토큰 목록(소유자).
+- **백업·유지보수**, **설정**(테마·작업 공간·문서 검사·판정 캐시): 예전 화면 그대로.
+
+다른 화면의 링크: 오늘 화면 비용 줄 → `usage`, 토큰 만료 알림 "연장" → `tokens`, 승인 요청 카드·일괄 실행 진행 카드 → `runs`. 브레인 인터뷰 탭의 "실행 보기"는 옛 주소(`/system?run=`)라 넘겨 받는다.
+
+확인: 합성 데이터 mock API(로컬, 커밋 안 함)로 390px에서 탭 8개·연결 추가(구독 계정)·시험·용도 바꾸기·예산 고치기·옛 주소 이동을 보았다 (가로 넘침 없음). 실제 백엔드와는 아직 맞춰 보지 않았다.
 
 ## 알려진 한계
 

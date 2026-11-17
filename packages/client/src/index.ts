@@ -1,10 +1,12 @@
 import { liveEndpoints } from "./live";
+import { modelEndpoints } from "./models";
 import { settingsEndpoints } from "./settings";
 import { systemEndpoints } from "./system";
 import { tokenEndpoints } from "./tokens";
 import type * as T from "./types";
 
 export * from "./live";
+export * from "./models";
 export * from "./settings";
 export * from "./system";
 export * from "./tokens";
@@ -527,6 +529,7 @@ export function createClient({
     ...liveEndpoints({ request, get, post }),
     ...tokenEndpoints({ get, post, patch }),
     ...settingsEndpoints({ get, json }),
+    ...modelEndpoints({ request, get }),
   };
 }
 

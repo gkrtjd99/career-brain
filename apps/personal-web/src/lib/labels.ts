@@ -274,6 +274,15 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_alias_term: "대표 표기가 비었거나 40자를 넘습니다.",
   invalid_alias: "다른 표기가 비었거나 40자를 넘습니다.",
   alias_conflict: "같은 표기가 두 기술에 들어 있습니다.",
+  // 연결·관리 (O22)
+  connection_name_taken: "같은 이름의 연결이 이미 있습니다 (models.toml의 연결 이름과도 겹치면 안 됩니다).",
+  connection_in_use: "이 연결을 쓰는 용도별 모델이 있어 끊을 수 없습니다. 용도별 모델에서 먼저 바꾸세요.",
+  invalid_preset: "알 수 없는 연결 종류입니다.",
+  restricted_not_allowed: "민감 자료(restricted)는 모델 연결로 보낼 수 없습니다.",
+  not_enabled: "이 설치에서는 화면에서 모델 연결을 바꿀 수 없습니다.",
+  unreachable: "주소에 닿지 않습니다. 서버가 켜져 있는지, 주소가 맞는지 확인하세요.",
+  unauthorized: "키가 거절되었습니다. 키를 확인하세요.",
+  bad_response: "응답이 모델 목록 형식이 아닙니다. 주소 끝이 /v1 인지 확인하세요.",
 };
 
 // ---------------------------------------------------------------- O07 지원·문서

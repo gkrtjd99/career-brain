@@ -5,15 +5,13 @@ import {
   Brain,
   Briefcase,
   Files,
-  Gauge,
   GraduationCap,
   House,
   ImageUp,
   KanbanSquare,
   Menu,
   Search,
-  Settings,
-  ShieldCheck,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -37,11 +35,8 @@ const MAIN: NavItem[] = [
   { to: "/study", label: "학습", icon: GraduationCap },
   { to: "/tools/photo", label: "사진 변환", icon: ImageUp },
 ];
-const SYSTEM: NavItem[] = [
-  { to: "/system", label: "시스템", icon: ShieldCheck },
-  { to: "/usage", label: "사용량", icon: Gauge },
-  { to: "/settings", label: "설정", icon: Settings },
-];
+// 관리 일(모델 연결·사용량·에이전트·작업·토큰·백업·설정)은 한 화면의 탭으로 (plan §21)
+const MANAGE: NavItem = { to: "/manage", label: "연결·관리", icon: SlidersHorizontal };
 const MOBILE_TABS = MAIN.slice(0, 4);
 
 function isActive(path: string, to: string) {
@@ -108,10 +103,7 @@ export function AppShell() {
           ))}
         </nav>
         <nav className="mt-auto space-y-0.5 border-t border-line pt-3" aria-label="연결·관리">
-          <p className="px-2.5 pb-1 text-xs text-muted">연결·관리</p>
-          {SYSTEM.map((it) => (
-            <SideLink key={it.to} item={it} path={path} />
-          ))}
+          <SideLink item={MANAGE} path={path} />
           {me.data ? <p className="truncate px-2.5 pt-2 text-xs text-muted">공간: {me.data.workspace.name}</p> : null}
         </nav>
       </aside>
@@ -149,7 +141,7 @@ export function AppShell() {
           onClick={() => setMore(true)}
           className={cn(
             "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px]",
-            [...MAIN.slice(4), ...SYSTEM].some((it) => isActive(path, it.to)) ? "font-medium text-fg" : "text-muted",
+            [...MAIN.slice(4), MANAGE].some((it) => isActive(path, it.to)) ? "font-medium text-fg" : "text-muted",
           )}
         >
           <Menu size={20} />
@@ -162,11 +154,8 @@ export function AppShell() {
             <SideLink key={it.to} item={it} path={path} onClick={() => setMore(false)} />
           ))}
         </div>
-        <p className="mt-4 border-t border-line px-2.5 pt-3 pb-1 text-xs text-muted">연결·관리</p>
-        <div className="space-y-0.5">
-          {SYSTEM.map((it) => (
-            <SideLink key={it.to} item={it} path={path} onClick={() => setMore(false)} />
-          ))}
+        <div className="mt-4 border-t border-line pt-3">
+          <SideLink item={MANAGE} path={path} onClick={() => setMore(false)} />
         </div>
         {me.data ? <p className="mt-4 px-2.5 text-xs text-muted">공간: {me.data.workspace.name}</p> : null}
       </Sheet>
