@@ -8,6 +8,7 @@ import {
   Gauge,
   GraduationCap,
   House,
+  ImageUp,
   KanbanSquare,
   Menu,
   Search,
@@ -34,6 +35,7 @@ const MAIN: NavItem[] = [
   { to: "/applications", label: "지원 현황", icon: KanbanSquare },
   { to: "/documents", label: "공용 문서", icon: Files },
   { to: "/study", label: "학습", icon: GraduationCap },
+  { to: "/tools/photo", label: "사진 변환", icon: ImageUp },
 ];
 const SYSTEM: NavItem[] = [
   { to: "/system", label: "시스템", icon: ShieldCheck },

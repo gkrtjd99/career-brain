@@ -30,6 +30,7 @@ apps/personal-web/src/
   lib/api.ts      토큰 저장, client, QueryClient (401 → 설정)
   lib/labels.ts   상태·오류·검사 코드 → 한국어 문구
   lib/diff.ts     단어 단위 비교 (AI 수정안 보기)
+  lib/photo.ts    사진 변환 순수 로직: cm↔px, 자르기 기하(틀 채우기·위치 제한), 용량 맞추기(품질 이분 탐색), JPEG JFIF·PNG pHYs dpi 쓰기
   lib/dates.ts    날짜 표시 도우미: 공간 표시 시간대(설정 "작업 공간")로 날짜·시각·D-day·datetime-local 변환 (AppShell이 설정을 읽어 정한다)
   components/     AppShell(메뉴), ClaimItem, ClaimPicker(검색으로 주장 고르기), InterviewPanel, SpanSheet,
                   SourceSheet(검색 결과 → 원본 블록), UploadSheet, DdayBadge
@@ -38,7 +39,7 @@ apps/personal-web/src/
   components/study/ parts(응시·오답 기록, 복습 카드)
   components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전), JudgeCacheSection(판정 응답 캐시 크기·비우기, egress 권한)
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
-                  Study, StudyItem, Usage, Settings
+                  Study, StudyItem, Usage, Settings, PhotoTool(사진 변환)
 ```
 
 `packages/ui` 의 클래스는 앱의 색 토큰(`bg-surface`, `text-muted`, `border-line`, `text-accent`, `bg-ok-soft` …)을 쓴다. 토큰은 `apps/personal-web/src/index.css` 의 CSS 변수로 정의하고, 다른 앱(서비스)은 같은 이름으로 자기 값을 주면 된다.
@@ -61,6 +62,7 @@ apps/personal-web/src/
 | `/applications/:id/documents/:docId` | 문단 편집기, 서버 계산 글자/바이트 수(입력 중 350ms 뒤 `/count`), 저장(`base_revision`, 멱등 키, Ctrl/Cmd+S), 409 충돌 창(비교 / 버리고 최신 받기 / 확인 후 내 글로 새 revision), 저장 안 한 채 떠나면 막음, 문단별 근거 연결(검색으로 확인된 주장 고르기), 검사 탭(제한·위험·조작·근거·참고 묶음, 문단으로 이동), AI 수정안 탭(요청 → 단어 비교 → 적용/거절, 사실 변경 거부 사유 표시), 기록 탭(이전 revision 읽기), 고른 문장에만 근거 붙이기(문장 근거 칩), 내보내기(형식 고르기 → 만든 파일 검사 경고 → 확인 후 받기, PDF는 인쇄 창), 공용 문서에서 복사한 문서면 출처·원본 변경 안내, 제출 뒤 읽기 전용 |
 | `/documents` · `/documents/:docId` | 공용 문서 목록(복사해 간 지원 수)·만들기, 편집기는 지원 문서와 같음(공고 문맥 없음) |
 | `/study` | 탭: 오늘 복습(답 보기 → 다시·어려움·보통·쉬움 → 다음 날짜) · 요건별 준비(공고 고르기, 근거 있음/확인 대기/학습함/학습 중/빈칸, 주장 연결·해제, 줄별·전체 학습 계획) · 학습 항목 · 시험·과제(상태, 응시, 응시별 오답) · 오답(상태 필터) |
+| `/tools/photo` 사진 변환 | 지원서 사진을 정한 px·형식·용량으로 자르고 저장. 브라우저 안에서만 처리하고 API를 부르지 않아 토큰 없이 열린다. 아래 "사진 변환" |
 | `/study/items/:id` | 상태, 연결 요건, 학습 기록(분·메모·자료), 연습 응시, 오답, 경험 후보로 올리기(완료나 응시가 있어야, 문장은 직접 쓰고 확인 대기로 들어감) |
 
 ## 의존성
@@ -121,6 +123,40 @@ c0029: `POST /core/sources` 폼 `hidden_text`(`keep` 기본 · `exclude` = DOCX 
 - 인터뷰 탭: 일괄 실행이 만든 세션 칩에 "일괄", 그 질문 카드에 "일괄 <실행 앞 8자>" 배지(시스템 화면 링크). 실행이 만든 질문이 있으면 "실행별로 묶기" — 정해진 질문 / 직접 요청한 AI 질문 / 실행별로 나눠 보인다.
 - 자료 올리기는 DOCX도 받는다 (`UploadSheet` 의 accept·안내).
 - 375px에서 두 시트·진행·인터뷰 묶기를 합성 데이터로 확인했다 (가로 넘침 없음).
+
+## 사진 변환 (`/tools/photo`)
+
+지원서 양식이 사진을 "가로 150 × 세로 200 px, jpg, 100KB 이하"나 "3×4cm"처럼 정할 때 쓴다. 메뉴는 "사진 변환"(모바일은 더보기).
+화면은 `pages/PhotoTool.tsx`, 계산은 `lib/photo.ts` (DOM 객체를 만들지 않는 순수 함수, Node에서 타입만 지우고 돌릴 수 있는 문법).
+
+- **서버로 보내지 않는다.** 파일 읽기·자르기·인코딩을 모두 canvas로 한다. API 호출이 없고 route에 토큰 검사도 없다. 화면 위에 그 안내와
+  "다시 인코딩하므로 원본 EXIF(촬영 기기·시각·GPS)는 결과에 없다"를 적는다.
+- 열기: 파일 고르기·끌어 놓기. `createImageBitmap(file, { imageOrientation: "from-image" })`로 EXIF 방향을 따른다. 실패하면 `<img>`로 한 번 더
+  (Safari는 HEIC를 이쪽으로 연다). 둘 다 못 열면 HEIC면 아이폰 설정('높은 호환성')·JPG 내보내기 안내, 아니면 형식 안내. 40MB까지.
+- 크기: 미리 정한 크기 3×4 cm(354×472), 3.5×4.5 cm(413×531), 2.5×3 cm(295×354) — 모두 300 dpi 계산값이고 기관 규격이라고 하지 않는다 —
+  와 150×200 px, 직접 입력(px + dpi), cm + dpi(px는 `round(cm / 2.54 × dpi)`). 16–4000 px, 72–1200 dpi. 잘못 넣은 동안은 마지막으로 맞았던 크기를 쓴다.
+- 자르기: 틀 = 출력 비율. 끌어서 옮기기, 휠·트랙패드 확대, 두 손가락 확대·이동(pointer events, `touch-action: none`), 확대 막대(1–8배, 로그 눈금),
+  90° 회전, 기울기 보정 ±10°, 화살표·+/- 키. 배율 1 = 틀을 빈틈없이 덮는 가장 작은 크기이고, 위치는 회전한 틀의 네 귀퉁이가 사진 안에 남도록 자른다
+  (`clampTransform`: 사진 축으로 본 틀의 외접 사각형이 사진 안 ⇔ 네 귀퉁이가 안). 그래서 결과에 빈 곳이 생기지 않는다. 위치는 틀 너비 단위라 같은 비율로
+  px만 바꾸면 구도가 그대로다. 참고 안내선(머리 위 10%·턱 80%·세로 가운데)은 켜고 끌 수 있고 규격이 아니라고 적는다.
+- 결과: 편집 화면과 같은 `drawPhoto`로 정확히 W×H 캔버스에 그려 `toBlob`. 바뀐 뒤 0.15초에 다시 만들고, 늦게 끝난 옛 결과는 버린다.
+  실제 인코딩 결과를 1:1(CSS px)로 보이고(넓으면 상자 안에서 밀어 보기, "화면에 맞추기" 전환), px·형식·품질·KB(1024)·바이트·인쇄 크기를 적는다.
+  파일 이름 `photo_354x472.jpg`.
+- 형식: JPG·PNG·WebP. JPG·WebP는 품질 막대. 브라우저가 그 형식을 못 쓰면(`blob.type`이 다름) 안내하고 내려받기를 끈다.
+  JPG는 투명을 배경색(흰색 기본, 연회색·하늘색·직접)으로 채운다. PNG·WebP는 "투명 유지"를 고를 수 있다.
+- 최대 용량: 1KB = 1,000바이트로 맞춘다(양식이 1,000/1,024 어느 쪽으로 세도 통과). 품질 상한 = 막대 값, 하한 5%에서 이분 탐색 7번
+  (`fitToBytes`, 인코딩 최대 9번). 돌려주는 결과는 실제로 잰 크기가 제한 이하인 것뿐이다. 5%로도 넘으면 그 크기와 "px를 줄이라"는 안내.
+  PNG는 품질이 없어 "용량 제한은 JPG·WebP로"라고 안내한다.
+- dpi 기록: JPG는 JFIF APP0 밀도(단위 1 = 인치, SOI 뒤에 없으면 18바이트 APP0를 넣음), PNG는 IHDR 뒤 pHYs(미터당 점, 있던 것은 뺌, CRC 계산).
+  WebP는 dpi 자리가 EXIF뿐이라 적지 않고 화면에 그렇게 쓴다. dpi 머리는 용량 측정 전에 붙여 제한 비교에 포함된다.
+
+확인: 순수 함수는 임시 Node 스크립트로(지운 뒤 커밋), 화면은 브라우저에서 합성 그림(그라데이션·격자·도형 인물, 색 귀퉁이 사각형)으로만 했다.
+실제 사람 사진은 쓰지도 커밋하지도 않았다. 웹 패키지에 단위 시험 도구가 없어 시험 파일은 더하지 않았다.
+
+의존성은 더하지 않았다 (canvas만). 화면은 처음 열 때 따로 받는다 (JS 약 25 KB, gzip 약 10 KB).
+
+한계: HEIC는 브라우저가 디코딩할 때만 열린다(Chrome·Firefox는 보통 못 연다, 변환 라이브러리는 넣지 않음). 결과 미리보기의 1:1은 CSS px라
+고해상도 화면에서는 기기 픽셀 2개 이상으로 보인다. 큰 축소는 브라우저의 `imageSmoothingQuality: "high"`에 맡긴다. 얼굴 위치 자동 맞춤은 없다.
 
 ## 알려진 한계
 
