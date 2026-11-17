@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from career_core.domain.postings import PostingRuleError
+from career_core.llm import ModelCallError
 from career_core.ports import ActorContext
 from career_core.usecases import postings as uc
 from career_core.usecases.brain import NotFound
@@ -150,6 +151,28 @@ class ManualIn(BaseModel):
     text: str = Field(min_length=1, max_length=uc.MAX_MANUAL_CHARS)
 
 
+class CaptureIn(BaseModel):
+    """내 브라우저에서 보낸 공고 페이지 (c0043). 서버는 이 주소를 가져오지 않는다.
+
+    ``html``: 페이지 HTML (렌더링하지 않고 글·구조화 데이터만 고른다). ``text``: 선택한 부분·공유한 글.
+    둘 중 하나는 있어야 한다."""
+
+    url: str = Field(min_length=1, max_length=2000, pattern=r"^https?://")
+    title: str | None = Field(default=None, max_length=1000)
+    html: str | None = Field(default=None, max_length=uc.MAX_CAPTURE_HTML)
+    text: str | None = Field(default=None, max_length=uc.MAX_MANUAL_CHARS)
+
+
+class CaptureOut(BaseModel):
+    posting_id: UUID
+    fetch_run_id: UUID
+    status: str  # done | listing | failed
+    created: bool
+    unchanged: bool
+    version_id: UUID | None
+    error_code: str | None
+
+
 class StatusOut(BaseModel):
     id: UUID
     status: str
@@ -179,6 +202,24 @@ def add_posting_routes(router: APIRouter, deps, authorize) -> None:
         except PostingRuleError as exc:
             raise _rule(exc) from exc
         return [SaveOut.model_validate(r, from_attributes=True) for r in results]
+
+    @router.post("/job-postings/capture", response_model=CaptureOut, status_code=201)
+    async def capture(actor: writer, body: CaptureIn) -> CaptureOut:
+        """보고 있는 페이지 보내기: 받은 HTML·글로 같은 추출·버전 규칙을 탄다 (가져오기 없음)."""
+        try:
+            got = await uc.capture_page(
+                uc.PostingDeps(db=db, fetcher=None, gateway=deps.models),
+                actor,
+                body.url,
+                html=body.html,
+                text=body.text,
+                title=body.title,
+            )
+        except PostingRuleError as exc:
+            raise _rule(exc) from exc
+        except ModelCallError as exc:
+            raise HTTPException(503, "model_unavailable") from exc
+        return CaptureOut.model_validate(got, from_attributes=True)
 
     @router.get("/job-postings", response_model=list[SummaryOut])
     async def index(

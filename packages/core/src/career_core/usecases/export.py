@@ -1550,6 +1550,16 @@ def _c0042_answer_assets(arc) -> None:
     arc.ensure_tables("core.answer_assets", "core.answer_asset_claims", "core.answer_asset_uses")
 
 
+@schema_step(
+    "c0043",
+    "보고 있는 페이지 보내기: sources.origin_url(null: 옛 원본은 파일로 올렸다). "
+    "공고 버전 method에 browser_capture가 더해짐 (옛 버전은 그대로)",
+)
+def _c0043_browser_capture(arc) -> None:
+    if arc.has("core.sources"):
+        arc.add_columns("core.sources", origin_url=None)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

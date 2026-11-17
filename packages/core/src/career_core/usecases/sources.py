@@ -131,6 +131,7 @@ async def upload_source(
     purpose_pending: bool = False,
     purpose_hint: str | None = None,
     text_layer=None,
+    origin_url: str | None = None,
 ) -> UploadResult:
     """``hidden_text``: ``exclude``면 숨김 서식 글을 원본 블록에서 뺀다 (DOCX만, 다른 형식은 ``keep``).
     같은 파일을 다시 올리면 처음 파싱의 값을 그대로 돌려준다 (다시 파싱하지 않는다).
@@ -189,6 +190,7 @@ async def upload_source(
         created_by=actor.subject_id,
         purpose_pending=bool(purpose_pending),
         purpose_hint=hint,
+        origin_url=origin_url,
     )
     version = SourceVersion(
         id=uuid4(),
@@ -239,6 +241,74 @@ async def upload_source(
         data_class=dc.value,
         purpose_pending=bool(purpose_pending),
         text_blocks=text_blocks,
+    )
+
+
+# ---------------------------------------------------------------- 브라우저에서 보낸 글 (c0043)
+
+# 북마크(``/capture``)가 보낸 페이지를 브라우저가 Markdown으로 고른 글. 원본 파일처럼 같은 읽기를 탄다.
+CAPTURE_PURPOSES = frozenset({SourcePurpose.EXPERIENCE, SourcePurpose.REFERENCE})
+MAX_CAPTURE_TEXT = 300_000
+MAX_CAPTURE_TITLE = 300
+
+
+def _capture_filename(title: str) -> str:
+    base = "".join(ch if ch.isalnum() or ch in " -_.()[]" else " " for ch in title)
+    return (" ".join(base.split())[:80] or "보낸 페이지") + ".md"
+
+
+async def capture_text_source(
+    db: Database,
+    blobs: BlobStore,
+    actor: ActorContext,
+    *,
+    url: str,
+    title: str | None,
+    markdown: str,
+    purpose: str = SourcePurpose.REFERENCE,
+    max_bytes: int,
+) -> UploadResult:
+    """브라우저에서 보낸 페이지 글을 Markdown 원본으로 넣는다 (``text/markdown``, 원래 주소는 ``origin_url``).
+
+    용도는 참고 자료(기본) 또는 내 경험 자료만. 증빙은 받지 않는다 (``capture_proof_not_allowed``) — 웹 페이지는
+    증빙 서류가 아니고, 증빙은 원본 파일로 넣는다. 참고 자료는 늘 그렇듯 근거가 되지 않는다.
+    글 앞에 제목과 원래 주소를 적는다. 같은 글을 다시 보내면 처음 원본을 그대로 쓴다 (내용 해시)."""
+    from career_core.domain.postings import PostingRuleError, normalize_url
+
+    try:
+        pp = source_purpose(purpose)
+    except ValueError as exc:
+        raise UploadRejected("invalid_purpose", 422) from exc
+    if pp == SourcePurpose.PROOF:
+        raise UploadRejected("capture_proof_not_allowed", 422)
+    if pp not in CAPTURE_PURPOSES:
+        raise UploadRejected("invalid_purpose", 422)
+    try:
+        origin = normalize_url(url)
+    except PostingRuleError as exc:
+        raise UploadRejected("invalid_url", 422) from exc
+    if len(origin) > 2000:
+        raise UploadRejected("invalid_url", 422)
+    body = (markdown or "").replace("\r\n", "\n").replace("\x00", "").strip()
+    if not body:
+        raise UploadRejected("empty", 400)
+    if len(body) > MAX_CAPTURE_TEXT:
+        raise UploadRejected("text_too_long", 413)
+    name = " ".join((title or "").split())[:MAX_CAPTURE_TITLE]
+    head = f"# {name}\n\n" if name else ""
+    text = f"{head}출처: <{origin}>\n\n{body}\n"
+    return await upload_source(
+        db,
+        blobs,
+        actor,
+        filename=_capture_filename(name or origin),
+        data=text.encode("utf-8"),
+        declared_mime="text/markdown",
+        max_bytes=max_bytes,
+        title=name or origin,
+        data_class=DataClass.PRIVATE,
+        purpose=pp,
+        origin_url=origin,
     )
 
 

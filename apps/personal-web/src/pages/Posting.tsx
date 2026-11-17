@@ -248,6 +248,12 @@ function RunNotice({ run, posting }: { run: FetchRun; posting: Posting }) {
             않습니다. 브라우저에서 공고 본문을 복사해 아래에 붙여넣어 주세요.
           </p>
         ) : null}
+        <p className="mt-1 text-fg">
+          내 브라우저에서는 보이는 공고라면 그 페이지에서 '브레인으로 보내기' 북마크를 누릅니다.{" "}
+          <Link to="/manage" search={{ tab: "settings" }} className="underline underline-offset-2">
+            북마크 받기
+          </Link>
+        </p>
       </div>
     );
   if (run.status === "listing")

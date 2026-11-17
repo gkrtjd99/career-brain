@@ -546,8 +546,12 @@ async def extract_fields(
     text: str,
     *,
     page_title: str | None = None,
+    data_class: str = "public",
 ) -> tuple[dict, UUID | None, list[str], str]:
-    """구조화 항목에 LLM이 빈 항목을 채운다. (항목, model_call_id, 메모, page_type)"""
+    """구조화 항목에 LLM이 빈 항목을 채운다. (항목, model_call_id, 메모, page_type)
+
+    ``data_class``: 서버가 가져온 공개 페이지는 ``public``. 사용자 브라우저에서 보낸 페이지(로그인한 화면일 수
+    있어 이름·이메일이 섞일 수 있다)는 ``private``로 보낸다 — 그 등급을 받는 연결만 부른다."""
     fields: dict = dict(structured.fields) if structured else {}
     notes: list[str] = list(structured.notes) if structured else []
     call_id = None
@@ -558,7 +562,9 @@ async def extract_fields(
             messages=(ChatMessage("user", f"<posting>\n{text[:MAX_TEXT_CHARS]}\n</posting>"),),
             system=SYSTEM_PROMPT,
             max_output_tokens=EXTRACT_MAX_OUTPUT,
-            data_classes=frozenset({"public"}),  # 공개 웹페이지 본문
+            data_classes=frozenset(
+                {data_class}
+            ),  # 공개 웹페이지 본문 (브라우저에서 보낸 것은 private)
         )
         try:
             result = await deps.gateway.run(actor, EXTRACT_PURPOSE, request)
@@ -683,8 +689,11 @@ async def process_fetch(deps: PostingDeps, ws: UUID, run_id: UUID) -> StepOutcom
     )
 
 
-def _main_text(page: PageData | None, result: FetchedPage, st: Structured | None = None) -> str:
+def _main_text(
+    page: PageData | None, result: FetchedPage | None, st: Structured | None = None
+) -> str:
     if page is None:
+        assert result is not None
         return clean_text(result.text)[: MAX_TEXT_CHARS * 2]
     body = st.body if st else None
     if st and body and (len(body) >= MIN_MAIN_TEXT // 2 or len(body) > len(page.main_text)):
@@ -1437,6 +1446,7 @@ async def _store_version(
     digest: str | None = None,
     notes: list[str] | None = None,
     fallback_call_id: UUID | None = None,
+    data_class: str = "public",
 ) -> StepOutcome:
     db, ws = deps.db, actor.workspace_id
     digest = digest or content_hash(text)
@@ -1454,7 +1464,7 @@ async def _store_version(
         )
 
     fields, call_id, llm_notes, page_type = await extract_fields(
-        deps, actor, structured, text, page_title=page_title
+        deps, actor, structured, text, page_title=page_title, data_class=data_class
     )
     notes = [*(notes or []), *llm_notes]
     adapter = adapter or (structured.adapter if structured else "text")
@@ -1554,6 +1564,162 @@ async def add_manual_text(
         method="manual_text",
     )
     return run.id
+
+
+# --- 내 브라우저에서 보낸 페이지 (보고 있는 페이지 보내기) ------------------------------------
+#
+# 로그인해야 보이거나 스크립트로 그리는 공고는 서버가 가져오지 못한다 (로그인 쿠키를 쓰지 않는다, §8).
+# 사용자가 자기 브라우저에서 보고 있는 페이지를 북마크(``/capture``)로 보내면 그 HTML·글로 같은 추출·버전
+# 규칙을 탄다. 여기서는 아무것도 가져오지 않는다: 채용 시스템 공개 API 어댑터도 부르지 않는다 (fetcher 없음).
+# 받은 HTML은 표준 라이브러리 파서로 글만 고르고(스크립트를 돌리지 않는다) 저장하지 않는다 — 버전에는 고른
+# 본문만 남는다. 로그인한 화면일 수 있어 모델에는 ``private`` 등급으로 보낸다.
+
+CAPTURE_METHOD = "browser_capture"
+# 북마크가 보내는 HTML 상한 (글자 수). 브라우저 쪽도 같은 값에서 자른다
+MAX_CAPTURE_HTML = 2_000_000
+CAPTURE_DATA_CLASS = "private"
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureResult:
+    posting_id: UUID
+    fetch_run_id: UUID
+    status: str  # done | listing | failed
+    created: bool  # 이 주소로 처음 만든 공고
+    unchanged: bool  # 같은 본문이 이미 있어 버전을 늘리지 않음
+    version_id: UUID | None
+    error_code: str | None = None
+
+
+def _capture_content(html: str | None, url: str, text: str | None) -> tuple:
+    """(page, 고른 본문). 선택한 글·공유한 글이 있으면 그것이 본문이다 (HTML은 구조화 데이터에만 쓴다)."""
+    page = extract_page(html, url) if html else None
+    if text:
+        return page, clean_text(text)
+    return page, None
+
+
+async def capture_page(
+    deps: PostingDeps,
+    actor: ActorContext,
+    url: str,
+    *,
+    html: str | None = None,
+    text: str | None = None,
+    title: str | None = None,
+) -> CaptureResult:
+    """사용자 브라우저에서 보낸 페이지로 공고 버전을 만든다 (가져오기 없음).
+
+    - ``url``은 정규화해 같은 공고를 찾는다. 없으면 새 공고(확인 전), 있으면 그 공고에 버전을 더한다
+      (본문 해시가 같으면 늘리지 않는다). 확정한 공고면 바뀐 항목을 ``pending_changes``로 알린다.
+    - ``html``(``MAX_CAPTURE_HTML``자 이하)과 ``text``(선택·공유한 글, ``MAX_MANUAL_CHARS``자 이하) 중 하나는
+      있어야 한다. 둘 다 있으면 본문은 ``text``, 구조화 데이터(JSON-LD·채용 시스템 페이지)는 HTML에서.
+    - 본문이 너무 짧고 구조화 항목도 없으면 아무것도 만들지 않는다 (``capture_too_short``).
+    """
+    canonical = normalize_url(url)
+    if html is not None and len(html) > MAX_CAPTURE_HTML:
+        raise PostingRuleError("html_too_large")
+    if text is not None and len(text) > MAX_MANUAL_CHARS:
+        raise PostingRuleError("text_too_long")
+    html = html if html and html.strip() else None
+    text = (text or "").strip() or None
+    if html is None and text is None:
+        raise PostingRuleError("content_required")
+    # 공개 API 어댑터·브라우저 렌더링을 부르지 않는다: 여기서는 아무 주소에도 요청하지 않는다
+    local = PostingDeps(
+        db=deps.db,
+        fetcher=None,
+        gateway=deps.gateway,
+        browser=None,
+        blobs=None,
+        vision_confirm_usd=deps.vision_confirm_usd,
+    )
+    page, body = await asyncio.to_thread(_capture_content, html, canonical, text)
+    st = await structured_fields(local, page, canonical) if page is not None else None
+    if body is None:
+        body = await asyncio.to_thread(_main_text, page, None, st)
+    has_fields = bool(st and st.fields)
+    candidates: list[tuple[str, str]] = []
+    if page is not None and text is None and not has_fields:
+        candidates = await asyncio.to_thread(listing_candidates, page, canonical)
+    if not candidates and len(body) < MIN_MAIN_TEXT // 4 and not has_fields:
+        raise PostingRuleError("capture_too_short")
+    page_title = " ".join((title or "").split())[:300] or (page.title if page is not None else None)
+
+    created = False
+    async with deps.db.workspace_session(actor.workspace_id) as s:
+        posting = await s.scalar(select(JobPosting).where(JobPosting.canonical_url == canonical))
+        if posting is None:
+            created = True
+            posting = JobPosting(
+                id=uuid4(),
+                workspace_id=actor.workspace_id,
+                canonical_url=canonical,
+                source_url=url.strip()[:2000],
+                status=PostingStatus.DRAFT.value,
+                created_by=actor.subject_id,
+            )
+            s.add(posting)
+            await s.flush()
+        posting_id = posting.id
+        run = JobFetchRun(
+            id=uuid4(),
+            workspace_id=actor.workspace_id,
+            posting_id=posting_id,
+            requested_by=actor.subject_id,
+            notes=[CAPTURE_METHOD],
+        )
+        s.add(run)
+        run_id = run.id
+
+    if candidates:
+        await _finish_run(
+            deps.db,
+            actor.workspace_id,
+            run_id,
+            status=FetchStatus.LISTING.value,
+            candidates=[{"url": u, "title": t} for u, t in candidates],
+            notes=[CAPTURE_METHOD, *(st.notes if st else [])],
+        )
+    else:
+        try:
+            await _store_version(
+                local,
+                actor,
+                run_id,
+                posting_id,
+                body,
+                final_url=canonical,
+                http_status=None,
+                method=CAPTURE_METHOD,
+                structured=st,
+                page_title=page_title,
+                notes=[CAPTURE_METHOD],
+                data_class=CAPTURE_DATA_CLASS,
+            )
+        except ModelCallError as exc:
+            # 모델이 잠시 응답하지 않음: 실행을 닫고 알린다 (보낸 페이지는 저장하지 않았다 — 다시 보낸다)
+            await _failed(
+                deps.db,
+                actor.workspace_id,
+                run_id,
+                FetchError.NEEDS_MANUAL_CHECK.value,
+                None,
+                CAPTURE_METHOD,
+                f"llm_error:{exc.code}",
+            )
+            raise
+    async with deps.db.workspace_session(actor.workspace_id) as s:
+        done = await s.get(JobFetchRun, run_id)
+        return CaptureResult(
+            posting_id=posting_id,
+            fetch_run_id=run_id,
+            status=done.status,
+            created=created,
+            unchanged=bool(done.unchanged),
+            version_id=done.version_id,
+            error_code=done.error_code,
+        )
 
 
 # --- 확인·확정 ----------------------------------------------------------------------

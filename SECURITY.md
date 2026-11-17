@@ -20,6 +20,8 @@ Out of scope: your own deployment choices (exposing the app without TLS, weak da
 
 How isolation and tokens work: [docs/architecture/database.md](docs/architecture/database.md), [docs/architecture/mcp.md](docs/architecture/mcp.md), deployment hardening: [docs/operations/install.md](docs/operations/install.md).
 
+The "send this page" bookmarklet (c0043) keeps no token on third-party pages, uses `postMessage` with a fixed target origin, and never renders received HTML: [docs/architecture/web.md](docs/architecture/web.md#보고-있는-페이지-보내기-capture-c0043).
+
 ---
 
 보안 문제는 공개 이슈 대신 이 저장소의 **Security → Report a vulnerability**(비공개 신고)로 알려 주세요. 재현 자료는 합성 데이터로만 보내 주세요.

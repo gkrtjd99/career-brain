@@ -102,6 +102,7 @@ export const METHOD_LABEL: Record<string, string> = {
   http: "HTTP",
   browser: "브라우저 렌더링",
   manual_text: "직접 붙여넣기",
+  browser_capture: "내 브라우저에서 가져옴",
 };
 
 export const ADAPTER_LABEL: Record<string, string> = {
@@ -126,6 +127,7 @@ const VISION_NOTE: Record<string, string> = {
   ocr_pdf_by_model: "스캔 PDF의 쪽 이미지를 AI가 읽어 본문으로 썼습니다. 원본 PDF와 대조해 확인하세요.",
   vision_confirmed: "예상 비용을 확인한 뒤 읽음",
   vision_declined: "예상 비용 확인에서 읽지 않기로 함",
+  browser_capture: "내 브라우저에서 보낸 페이지 · 서버는 이 주소를 가져오지 않음",
 };
 
 /** 모르는 봇 확인 화면의 흔적 (bot_block_signs:captcha,js_challenge) */
@@ -197,6 +199,12 @@ export function noteLabel(note: string): string {
 
 /** 서버 오류 코드 → 사람이 읽는 문장 */
 export const ERROR_TEXT: Record<string, string> = {
+  // 보고 있는 페이지 보내기 (c0043)
+  capture_too_short: "본문을 찾지 못했습니다. 공고 본문을 선택한 뒤 다시 보내 주세요.",
+  html_too_large: "페이지가 너무 큽니다. 공고 본문을 선택한 뒤 다시 보내 주세요.",
+  content_required: "보낼 본문이 없습니다.",
+  model_unavailable: "모델 연결이 잠시 응답하지 않습니다. 잠시 뒤 다시 저장해 주세요.",
+  capture_proof_not_allowed: "웹 페이지는 증빙 서류로 넣지 않습니다. 증빙은 원본 파일로 넣습니다.",
   // 자격·이수 (c0034)
   credential_name_required: "이름은 비울 수 없습니다.",
   credential_kind_required: "종류를 골라 주세요.",

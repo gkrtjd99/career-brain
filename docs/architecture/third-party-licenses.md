@@ -42,5 +42,7 @@ career-brain은 Apache-2.0이다. 직접 의존하는 패키지와 라이선스�
 | pretendard (글꼴) | SIL OFL 1.1 — 글꼴 CSS 머리말에 고지 |
 | tesseract.js, tesseract.js-core (이 기기 글자 읽기, 따로 불러오는 조각·`dist/ocr/`) | Apache-2.0 |
 | @tesseract.js-data/kor, @tesseract.js-data/eng (학습 데이터 `4.0.0_best_int`, `dist/ocr/lang/`) | MIT (데이터 원본 tesseract-ocr/tessdata_best: Apache-2.0) |
+| defuddle 0.19.6 (보고 있는 페이지 보내기: 본문 고르기, `/capture`에서만 따로 불러오는 조각) | MIT — 핵심 묶음(`defuddle`)만 쓴다. 수식·`full` 묶음과 그 선택 의존성(temml·linkedom 등)은 번들에 넣지 않는다 |
+| turndown 7.2.5 (본문 HTML → Markdown, `/capture`에서만) | MIT |
 
 빌드 도구(Vite, TypeScript, Tailwind CSS 등)는 번들에 들어가지 않는다.

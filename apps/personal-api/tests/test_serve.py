@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from personal_api.cli import build_handlers
 from personal_api.main import create_app
 from personal_api.runner import BackgroundWorker, job_steps, work_loop
-from personal_api.serve import attach_worker, env_flag
+from personal_api.serve import attach_worker, env_flag, quiet_capture_queries
 from personal_api.settings import Settings
 
 
@@ -132,6 +132,37 @@ def test_env_flag(monkeypatch, raw, expected):
     else:
         monkeypatch.setenv("CAREER_X", raw)
     assert env_flag("CAREER_X", True) is expected
+
+
+def test_access_log_drops_shared_text_from_capture():
+    """휴대폰 공유로 연 ``/capture?text=…``의 글이 접속 기록에 남지 않는다 (다른 경로는 그대로)."""
+    import logging
+
+    import uvicorn
+
+    quiet_capture_queries()
+    # uvicorn.run이 로깅을 다시 설정해도 거름이 남는다
+    uvicorn.Config(FastAPI()).configure_logging()
+    access = logging.getLogger("uvicorn.access")
+
+    def line(path: str) -> str:
+        record = logging.LogRecord(
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("127.0.0.1:5000", "GET", path, "1.1", 200),
+            None,
+        )
+        assert access.filter(record)
+        return record.getMessage()
+
+    assert "합성 비밀" not in line("/capture?text=합성 비밀&url=https%3A%2F%2Fa.test")
+    assert '"GET /capture HTTP/1.1"' in line("/capture?text=x")
+    assert "/api/core/job-postings?status=draft" in line("/api/core/job-postings?status=draft")
+    quiet_capture_queries()
+    assert sum(type(f).__name__ == "DropCaptureQuery" for f in access.filters) == 1
 
 
 def test_background_worker_parses_an_upload(pg, tmp_path):

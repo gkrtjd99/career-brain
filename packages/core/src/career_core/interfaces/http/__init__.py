@@ -171,6 +171,17 @@ class SourceOut(BaseModel):
     # c0039
     purpose_pending: bool = False
     purpose_hint: str | None = None
+    # c0043: 브라우저에서 보낸 글의 원래 주소 (파일로 올린 원본은 null)
+    origin_url: str | None = None
+
+
+class CaptureSourceIn(BaseModel):
+    """보고 있는 페이지 보내기 (c0043): 브라우저가 페이지에서 고른 글(Markdown). 증빙은 받지 않는다."""
+
+    url: str = Field(min_length=1, max_length=2000, pattern=r"^https?://")
+    title: str | None = Field(default=None, max_length=sources_uc.MAX_CAPTURE_TITLE * 2)
+    markdown: str = Field(min_length=1, max_length=sources_uc.MAX_CAPTURE_TEXT)
+    purpose: Literal["experience", "reference", "proof"] = "reference"
 
 
 class PurposePatch(BaseModel):
@@ -398,6 +409,27 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
             text_blocks=result.text_blocks,
         )
 
+    @router.post("/sources/capture", response_model=UploadOut, status_code=201)
+    async def capture(
+        body: CaptureSourceIn,
+        actor: Annotated[ActorContext, Depends(authorize("sources.write"))],
+    ) -> UploadOut:
+        """내 브라우저에서 보낸 페이지 글 (c0043). 참고 자료(기본)·내 경험 자료로 넣는다. 증빙은 422."""
+        try:
+            result = await sources_uc.capture_text_source(
+                deps.db,
+                blobs,
+                actor,
+                url=body.url,
+                title=body.title,
+                markdown=body.markdown,
+                purpose=body.purpose,
+                max_bytes=deps.max_upload_bytes,
+            )
+        except UploadRejected as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+        return UploadOut.model_validate(result, from_attributes=True)
+
     @router.post("/sources/suggest-purpose", response_model=SuggestPurposeOut)
     async def suggest(
         body: SuggestPurposeIn,
@@ -498,6 +530,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
             confirmed_claims=counts.confirmed,
             purpose_pending=source.purpose_pending,
             purpose_hint=source.purpose_hint,
+            origin_url=source.origin_url,
         )
 
     @router.get("/parse-runs/{run_id}/blocks", response_model=list[BlockOut])
