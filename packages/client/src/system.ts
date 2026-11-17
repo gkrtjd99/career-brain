@@ -277,6 +277,16 @@ export interface AuditPage {
   retention_days?: number;
 }
 
+/** Markdown으로 내보내기 선택 (모두 기본 꺼짐). 증빙 서류의 원본·읽은 글은 어떤 선택에도 들어가지 않는다 */
+export interface MarkdownExportOptions {
+  /** 민감 정보 포함: 생년월일·주소·병역·보훈·장애·희망 조건, 자격 번호 전체 */
+  sensitive?: boolean;
+  /** 확인 전 사실을 "확인 전" 칸에 따로 */
+  candidates?: boolean;
+  /** 증빙이 아닌 원본 파일 */
+  files?: boolean;
+}
+
 export interface DownloadedFile {
   blob: Blob;
   filename: string;
@@ -350,6 +360,13 @@ export function systemEndpoints({ request, get, post }: SystemDeps) {
     downloadExport: (recipient?: string) =>
       download("/core/maintenance/export", "career-export.tar.gz", { recipient }),
     downloadDeletions: () => download("/core/maintenance/deletions", "career-deletions.jsonl"),
+    /** 노트 앱(Obsidian 등)에서 여는 읽기 전용 Markdown 묶음(zip). 다시 가져올 수 없다. */
+    downloadMarkdown: (opts: MarkdownExportOptions = {}) =>
+      download("/core/maintenance/export/markdown", "career-notes.zip", {
+        sensitive: opts.sensitive ? "true" : undefined,
+        candidates: opts.candidates ? "true" : undefined,
+        files: opts.files ? "true" : undefined,
+      }),
 
     // 웹 복원: 묶음을 올려 이 공간에 합치기 (소유자만). 확인(dry-run) → 합치기, 둘 다 배경 작업.
     uploadRestore: async (file: Blob, filename?: string) => {

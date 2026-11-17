@@ -18,6 +18,7 @@ from career_core.jobs.maintenance import maintenance_status
 from career_core.ports import ActorContext
 from career_core.usecases.export import ExportError, export_deletions, export_workspace
 from career_core.usecases.maintenance import RunView, maintenance_info, purge_drafts
+from career_core.usecases.markdown_export import MarkdownOptions, export_markdown
 
 
 class RunOut(BaseModel):
@@ -121,6 +122,47 @@ def add_maintenance_routes(router: APIRouter, deps, authorize) -> None:
             media_type="application/x-ndjson",
             filename=name,
             headers={"Cache-Control": "no-store"},
+            background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
+        )
+
+    @router.get("/maintenance/export/markdown", response_class=FileResponse)
+    async def export_markdown_zip(
+        actor: Annotated[ActorContext, Depends(authorize("workspace.export"))],
+        sensitive: bool = False,
+        candidates: bool = False,
+        files: bool = False,
+    ) -> FileResponse:
+        """노트 앱에서 여는 읽기 전용 Markdown 묶음(zip). 다시 가져올 수 없다 (복원은 위 백업 묶음으로).
+
+        ``sensitive``: 민감 정보 포함, ``candidates``: 확인 전 사실, ``files``: 증빙이 아닌 원본 파일.
+        """
+        tmp = Path(tempfile.mkdtemp(prefix="career-markdown-"))
+        name = f"career-notes-{datetime.now(UTC):%Y%m%d-%H%M%S}.zip"
+        try:
+            report = await export_markdown(
+                deps.db,
+                actor,
+                tmp / name,
+                blobs=deps.blobs,
+                options=MarkdownOptions(sensitive=sensitive, candidates=candidates, files=files),
+                via="http",
+                permissions=deps.permissions,
+            )
+        except ExportError as exc:
+            shutil.rmtree(tmp, ignore_errors=True)
+            if exc.code == "forbidden":
+                raise HTTPException(403, "forbidden") from exc
+            if exc.code == "too_large":
+                raise HTTPException(413, "too_large") from exc
+            raise HTTPException(400, exc.code) from exc
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
+        return FileResponse(
+            report.path,
+            media_type="application/zip",
+            filename=name,
+            headers={"X-Archive-SHA256": report.sha256, "Cache-Control": "no-store"},
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
         )
 

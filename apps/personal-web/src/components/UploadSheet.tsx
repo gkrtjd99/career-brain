@@ -102,7 +102,7 @@ export function UploadSheet({
               파일 고르기
             </button>
           </p>
-          <p className="text-[13px] text-muted">PDF·DOCX·PPT·엑셀·한글·사진·텍스트, 여러 개를 한꺼번에 넣을 수 있습니다.</p>
+          <p className="text-[13px] text-muted">PDF·DOCX·PPTX·엑셀·한글·사진·텍스트, 여러 개를 한꺼번에 넣을 수 있습니다.</p>
           <input
             ref={picker}
             type="file"

@@ -1560,6 +1560,12 @@ def _c0043_browser_capture(arc) -> None:
         arc.add_columns("core.sources", origin_url=None)
 
 
+no_data_change(
+    "c0046",
+    "export_runs.kind에 markdown (Markdown으로 내보내기 기록, CHECK만 넓힘, 옛 행은 그대로)",
+)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

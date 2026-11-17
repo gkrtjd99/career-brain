@@ -623,3 +623,12 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 내보내기: `@schema_step("c0043")`가 옛 묶음의 원본 행에 `origin_url = null`을 넣는다. 합치기 키는 그대로(원본은 버전의 sha256).
 - 시험: `packages/core/tests/test_browser_capture.py`.
 
+## Markdown으로 내보내기 기록 (c0046)
+
+`c0046` (`down_revision = c0043`). 표를 더하지 않는다: `export_runs.kind`의 CHECK에 `markdown`을 더할 뿐이다 (`export`·`restore`·`merge`·`markdown`).
+
+- 노트 앱용 읽기 전용 Markdown 묶음(`usecases.markdown_export`, `GET /core/maintenance/export/markdown`)을 내려받을 때마다 한 줄: `archive_sha256`·`archive_bytes`는 zip, `rows_total`은 노트(.md) 수, `blobs_total`은 넣은 원본 파일 수, `format_version`은 Markdown 묶음 형식(1).
+- "마지막 백업"(`maintenance_info.last_export`)은 `kind = 'export'`만 본다 — Markdown 묶음은 복원할 수 없다.
+- downgrade는 `markdown` 행을 지우고 CHECK를 되돌린다.
+- 내보내기: `no_data_change("c0046")` (표 모양 그대로).
+- 시험: `packages/core/tests/test_markdown_export.py`.

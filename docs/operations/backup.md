@@ -97,6 +97,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0041 | `schema_step` | `profiles`에 병역·보훈·장애·희망 조건 칸 (옛 묶음엔 빈 값: 목록 칸은 빈 배열, 나머지는 NULL). restricted 칸이라 묶음은 지금처럼 사용자만 연다 |
 | c0042 | `schema_step` | 새 표 `answer_assets`·`answer_asset_claims`·`answer_asset_uses` (옛 묶음엔 빈 표). 쓴 곳 기록은 내용만 합친다(겹침을 찾지 않는다) |
 | c0043 | `schema_step` | `sources.origin_url = null` (옛 원본은 파일로 올렸다). 공고 버전 `method`에 `browser_capture`가 더해졌을 뿐 옛 버전은 그대로 |
+| c0046 | `no_data_change` | `export_runs.kind`에 `markdown` (Markdown으로 내보내기 기록, CHECK만 넓힘) |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).
@@ -156,6 +157,44 @@ no_data_change("c0032", "색인·함수만")  # 내보내는 표의 모양이 �
 | 서비스 계정·결제 (`platform`) | **빠짐** | career-service 소유 |
 
 묶음에는 개인 자료가 그대로 들어 있다. `--recipient`로 암호화하거나 서버 밖에 암호화해서 둔다. 해시는 무결성 검사(손상·부분 수정)이고 서명이 아니다.
+
+### Markdown으로 내보내기
+
+노트 앱(Obsidian 같은)에서 폴더째 여는 **읽기 전용** Markdown 묶음(zip)이다. 위 백업 묶음과 목적이 다르다.
+
+| | 백업 묶음 (`export`, tar.gz) | Markdown으로 내보내기 (zip) |
+|---|---|---|
+| 쓰임 | 복원·합치기·서버 이전 | 내 자료를 노트 앱에서 읽고 링크로 따라가기 |
+| 다시 가져오기 | 됨 (`restore`, 웹 복원) | **안 됨** (ID·해시·표가 없다). 묶음 안 README에 적혀 있다 |
+| 들어가는 것 | 공간의 모든 표 + 원본 파일 (증빙 포함, 바이트 그대로) | 확인한 사실과 근거 인용, 경험·내 글·지원·참고·자료 목록. 기본은 민감 정보·확인 전 후보·원본 파일 없음 |
+| 증빙 서류 | 원본 바이트 그대로 (manifest `proofs`로 표시) | 제목·날짜만. 원본 바이트와 읽은 글(블록·OCR)은 어떤 선택에도 넣지 않는다 |
+| "마지막 내보내기" | 셈 | 세지 않음 (`export_runs.kind = 'markdown'`, c0046) |
+
+```bash
+personal-api export-markdown --out career-notes.zip           # 기본 (확인한 사실만, 민감 정보 없음)
+personal-api export-markdown --out career-notes.zip --sensitive --candidates --files
+```
+
+웹: 연결·관리 → 백업·유지보수 → "Markdown으로 내보내기". API: `GET /api/core/maintenance/export/markdown?sensitive=&candidates=&files=` (소유자만, `workspace.export`; 편집자·보기 권한은 403). 응답은 `application/zip`, `X-Archive-SHA256`, `Cache-Control: no-store`.
+
+```text
+README.md                     무엇인지·내보낸 때·수·"이 폴더는 다시 가져올 수 없습니다"
+나/프로필.md                   이름·영문 이름·한 줄 소개·이메일·전화·링크
+나/학력.md · 나/자격·어학·수상.md · 나/기술.md
+경험/<경험>.md                 머리말(kind·org·role·period·tags·parent) + 확인한 사실과 근거(인용 + 원본 제목·쪽, 또는 인터뷰 답)
+내 글/기본 문서/ · 내 글/공통 답변/ · 내 글/지난 제출본/   (제출본은 고정한 글 그대로)
+지원/<지원>.md                 머리말(company·role·deadline·link·status·stage) + 공고 요약·전형·문서의 마지막 저장 글
+참고/회사/ · 참고/참고 글/       머리말 purpose: reference + "근거로 쓰지 않습니다"
+자료/목록.md                   올린 자료(제목·용도·날짜). 원본 파일 포함을 고르면 자료/원본/
+```
+
+- **선택** (모두 기본 꺼짐): 민감 정보 포함(`sensitive`: 생년월일·주소·병역·보훈·장애·희망 조건, 자격 번호 전체 — 아니면 끝 4자리, 등급 restricted인 참고 글·원본 파일), 확인 전 사실 포함(`candidates`: 확인 전 주장·회사 항목·참고 메모·자격 후보를 "확인 전"에 따로), 원본 파일 포함(`files`: 증빙과 용도 확인 전 자료는 늘 뺀다). 원본 저장소가 없는 설치에서 `files`는 400 `files_unavailable`.
+- **근거의 원본이 나중에 증빙으로 바뀌었거나 용도 확인 전**이면 그 인용은 빼고 "증빙 자료라 인용은 넣지 않았습니다"로 원본 제목만 적는다. 보관·이의 제기한 사실은 넣지 않는다.
+- **주민등록번호 모양**(`domain.sensitive`와 같은 규칙)은 노트 글 어디서든 뒤 6자리를 가린다 (`900101-1******`). 원본 파일 포함을 고른 경우의 원본 파일은 올린 바이트 그대로다.
+- **이름**: 폴더 이름은 한국어 고정. 파일 이름은 NFC로 맞추고, Windows·노트 앱 링크에 못 쓰는 글자(`<>:"/\|?*#^[]`)는 `-`, 제어·보이지 않는 글자는 공백, 앞뒤 공백·점 빼기(`..`은 "제목 없음"), UTF-8 120바이트로 자르기, `CON`·`NUL` 같은 Windows 예약 이름 앞에 `_`. 같은 폴더에서 대소문자만 다른 이름도 겹친 것으로 보고 (이름, 만든 때, ID) 순서로 뒤의 것에 ` (2)`·` (3)`을 붙인다 — 같은 자료면 같은 이름이 나온다.
+- **링크**: `[[경험/이름|보이는 제목]]` 꼴의 위키 링크(경로 포함). 머리말 값은 JSON으로 쓴 YAML이다(따옴표·콜론이 안전하다). 글 안의 `[[`는 링크가 되지 않게 `\[\[`로 쓴다.
+- **크기**: 임시 파일에 한 파일씩 쓰고, 풀어 쓴 크기 합이 `CAREER_MARKDOWN_EXPORT_MAX_BYTES`(기본 512 MiB)를 넘으면 413 `too_large`로 멈춘다(반쯤 쓴 파일은 지운다). 원본 파일은 하나씩 읽고 해시를 확인한다.
+- 다른 공간의 자료는 앱 계정(RLS) + 공간 문맥으로 빠진다. 모델을 부르지 않는다. 시험: `packages/core/tests/test_markdown_export.py`.
 
 ## 2. 복원 (빈 설치로)
 
@@ -398,7 +437,7 @@ journalctl -u career-backup.service            # 마지막 결과
 `GET /api/core/maintenance` (소유자만):
 
 - 표별 행 수(내보내기에 들어가는 표, 빠지는 표 따로), 참조된 원본 수, 원본 저장소의 파일 수·바이트
-- 마지막 내보내기·복원 시각·해시·크기 (`core.export_runs`)
+- 마지막 내보내기·복원 시각·해시·크기 (`core.export_runs`). Markdown으로 내보내기(`kind = markdown`)는 백업이 아니라서 "마지막 내보내기"에 세지 않는다
 - 정리 대기 초안: 가져왔지만 확정하지 않고 7일이 지난 공고 수. `POST /api/core/maintenance/purge-drafts`로 지운다 (버전·가져오기 기록은 FK CASCADE, 지운 공고는 삭제 기록에 남는다)
 - 마지막 복원에는 합치기(`kind=merge`)도 들어간다. `restore_available`·`max_restore_bytes`는 웹 복원 가능 여부와 상한
 - 웹: `/system` → 백업·유지보수 (행 수, 원본 크기, 마지막 내보내기·합치기, 내려받기·암호화, 삭제 기록 내려받기, 복원(합치기), 초안 정리)
