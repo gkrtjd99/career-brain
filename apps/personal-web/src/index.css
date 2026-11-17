@@ -82,3 +82,13 @@
     cursor: pointer;
   }
 }
+
+/* 브라우저 기본 표면도 흑백 테마로 */
+::selection {
+  background: var(--app-fg);
+  color: var(--app-bg);
+}
+:focus-visible {
+  outline: 2px solid var(--app-fg);
+  outline-offset: 2px;
+}
