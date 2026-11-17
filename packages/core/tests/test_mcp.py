@@ -246,6 +246,7 @@ def cases(e):
         # (도구, 인자, HTTP method, 경로, body)
         ("search_brain", {"query": "합성"}, "GET", "/core/search?q=합성", None),
         ("list_experiences", {}, "GET", "/core/experiences", None),
+        ("portfolio_list", {}, "GET", "/core/portfolio/bundles", None),
         (
             "get_posting",
             {"posting_id": str(e["posting"])},

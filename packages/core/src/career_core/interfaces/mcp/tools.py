@@ -795,6 +795,39 @@ async def _resume_edit(env: ToolEnv, a: ResumeEditArgs) -> Any:
     return jsonable(res)
 
 
+# ---------------------------------------------------------------- 포트폴리오 (O18, 읽기만)
+
+PORTFOLIO_NOTE = (
+    "Portfolio lines with claim_id come from the user's confirmed claims; lines without claim_id, "
+    "and the problem/role text, are unsupported (written by a person). Repository numbers (stars, "
+    "forks, dates) are context, never evidence of the user's contribution. Items and images the "
+    "user keeps private are never returned, and image files are never returned."
+)
+
+
+class PortfolioListArgs(Args):
+    pass
+
+
+async def _portfolio_list(env: ToolEnv, a: PortfolioListArgs) -> Any:
+    from career_core.usecases import portfolios as portfolio_uc
+
+    return {"note": PORTFOLIO_NOTE, **jsonable(await portfolio_uc.agent_list(env.db, env.actor))}
+
+
+class PortfolioGetArgs(Args):
+    bundle_id: UUID | None = None
+    item_id: UUID | None = None
+
+
+async def _portfolio_get(env: ToolEnv, a: PortfolioGetArgs) -> Any:
+    """묶음을 고르면 그 묶음의 출력 규칙, 항목만 고르면 공개 규칙. 나만 항목·이미지는 늘 빠진다."""
+    from career_core.usecases import portfolios as portfolio_uc
+
+    got = await portfolio_uc.agent_get(env.db, env.actor, bundle_id=a.bundle_id, item_id=a.item_id)
+    return {"note": PORTFOLIO_NOTE, **jsonable(got)}
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -1159,6 +1192,26 @@ TOOLS: tuple[Tool, ...] = (
         ResumeEditArgs,
         _resume_edit,
         read_only=False,
+        untrusted=True,
+    ),
+    Tool(
+        "portfolio_list",
+        "List portfolio bundles (all, role, posting) and the portfolio items the user marked as "
+        "shareable, with line evidence counts. Private items and image files are never included.",
+        "portfolio.read",
+        PortfolioListArgs,
+        _portfolio_list,
+        untrusted=True,
+    ),
+    Tool(
+        "portfolio_get",
+        "Get one portfolio bundle (bundle_id: its items as that bundle would export them) or one "
+        "shareable item (item_id): problem, role, actions and results lines (claim-linked or "
+        "unsupported, state ok/stale/broken), tags, links and image captions. Private items and "
+        "images, and image files, are never returned.",
+        "portfolio.read",
+        PortfolioGetArgs,
+        _portfolio_get,
         untrusted=True,
     ),
 )

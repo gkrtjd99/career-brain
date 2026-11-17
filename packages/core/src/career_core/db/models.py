@@ -1662,3 +1662,138 @@ class InterviewPrepQuestion(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0049: 포트폴리오 (O18)
+
+
+class PortfolioItem(Base):
+    """포트폴리오 항목 하나. 경험 하나에 붙는다. 본문은 ``portfolio_item_revisions``, 설정(제목·공개 범위·태그·링크)은 여기."""
+
+    __tablename__ = "portfolio_items"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    experience_id: Mapped[UUID]
+    title: Mapped[str] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(
+        Text, default="public"
+    )  # public | application | private
+    tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    links: Mapped[list] = mapped_column(JSONB, default=list)
+    current_revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PortfolioItemRevision(Base):
+    """항목 본문 (``domain.portfolio``: 문제 · 내 역할 · 한 일 · 결과). 추가·조회만."""
+
+    __tablename__ = "portfolio_item_revisions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    item_id: Mapped[UUID]
+    revision_no: Mapped[int] = mapped_column(Integer)
+    content: Mapped[dict] = mapped_column(JSONB)
+    content_hash: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)  # user | agent
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PortfolioLineClaim(Base):
+    """항목 revision의 줄 ↔ 확인한 사실. 추가·조회만."""
+
+    __tablename__ = "portfolio_line_claims"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    revision_id: Mapped[UUID]
+    line_id: Mapped[str] = mapped_column(Text)
+    claim_id: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PortfolioImage(Base):
+    """스크린샷·구성도 한 장. 브라우저에서 줄여 다시 인코딩하고 서버가 메타데이터를 한 번 더 지운 바이트."""
+
+    __tablename__ = "portfolio_images"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    item_id: Mapped[UUID]
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(Text, default="screenshot")  # screenshot | diagram
+    caption: Mapped[str | None] = mapped_column(Text, default=None)
+    visibility: Mapped[str] = mapped_column(
+        Text, default="private"
+    )  # public | application | private
+    mime: Mapped[str] = mapped_column(Text)
+    width_px: Mapped[int] = mapped_column(Integer)
+    height_px: Mapped[int] = mapped_column(Integer)
+    bytes: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(Text)
+    blob_key: Mapped[str] = mapped_column(Text)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PortfolioBundle(Base):
+    """포트폴리오 묶음: 전체 → 직무별 → 공고별. 위 묶음의 항목 목록을 복사해 시작하고 출처를 남긴다."""
+
+    __tablename__ = "portfolio_bundles"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)  # all | role | posting
+    title: Mapped[str] = mapped_column(Text)
+    target_role: Mapped[str | None] = mapped_column(Text, default=None)
+    intro: Mapped[str | None] = mapped_column(Text, default=None)
+    parent_id: Mapped[UUID | None] = mapped_column(default=None)
+    source_revision: Mapped[int | None] = mapped_column(Integer, default=None)
+    application_id: Mapped[UUID | None] = mapped_column(default=None)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PortfolioBundleItem(Base):
+    __tablename__ = "portfolio_bundle_items"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    bundle_id: Mapped[UUID]
+    item_id: Mapped[UUID]
+    position: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GitHubToken(Base):
+    """비공개 저장소를 읽는 사용자 토큰의 암호문 (SecretBox). 내보내기에서 뺀다 (export.EXCLUDED_TABLES)."""
+
+    __tablename__ = "github_tokens"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    last4: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    def __repr__(self) -> str:  # 암호문도 로그에 남기지 않는다
+        return f"GitHubToken(workspace_id={self.workspace_id})"

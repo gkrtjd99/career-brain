@@ -99,6 +99,12 @@ ACTION_SCOPES: dict[str, str] = {
     "interview_prep.read": "read",
     "interview_prep.write": "draft-write",
     "interview_prep.ai": "egress",
+    # c0049 (O18) 포트폴리오. GitHub 공개 저장소 가져오기는 쓰기 권한(원본으로 들어간다). 비공개 저장소를 읽는
+    # 사용자 토큰을 넣고 빼거나 그 토큰으로 가져오기는 소유자만 (키를 다룬다)
+    "portfolio.read": "read",
+    "portfolio.write": "draft-write",
+    "portfolio.import": "draft-write",
+    "portfolio.token": "workspace-admin",
 }
 
 

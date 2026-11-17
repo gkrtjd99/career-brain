@@ -77,6 +77,8 @@ EXCLUDED_TABLES: dict[str, str] = {
     "지운 문서의 인용을 백업으로 옮기지 않는다",
     "core.model_connection_secrets": "모델 연결 키의 암호문 (c0030): 묶음에 키를 넣지 않는다. "
     "복원한 연결은 끝 4자리만 남아 '다시 넣어야 함'(needs_reentry)으로 보인다",
+    "core.github_tokens": "GitHub 토큰의 암호문 (c0049): 묶음에 토큰을 넣지 않는다. 복원한 공간에서 "
+    "비공개 저장소를 읽으려면 토큰을 다시 넣는다",
 }
 # 복원 후 다시 큐에 넣는 작업 종류 → 대상 표. 내보낼 때 대기·실행 중이던 것만 manifest에 적는다.
 REQUEUE_KINDS: dict[str, str] = {
@@ -1583,6 +1585,23 @@ def _c0048_interview_prep(arc) -> None:
     arc.ensure_tables("core.interview_preps", "core.interview_prep_questions")
 
 
+@schema_step(
+    "c0049",
+    "포트폴리오 표 portfolio_items·portfolio_item_revisions·portfolio_line_claims·portfolio_images·"
+    "portfolio_bundles·portfolio_bundle_items (옛 묶음에는 빈 표). 이미지 파일은 blob으로 함께 들어간다. "
+    "github_tokens는 묶음에 넣지 않는다",
+)
+def _c0049_portfolio(arc) -> None:
+    arc.ensure_tables(
+        "core.portfolio_items",
+        "core.portfolio_item_revisions",
+        "core.portfolio_line_claims",
+        "core.portfolio_images",
+        "core.portfolio_bundles",
+        "core.portfolio_bundle_items",
+    )
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2672,6 +2691,15 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "updated_at",
             )
         ),
+    ),
+    # c0049 포트폴리오 항목: 제목·공개 범위·기술 태그·링크·현재 revision은 고친다. 경험·만든 시각·만든 사람이
+    # 정체 (본문은 portfolio_item_revisions의 UNIQUE(항목, 번호)로 겹친다)
+    "core.portfolio_items": (
+        SameExcept(("title", "visibility", "tags", "links", "current_revision", "updated_at")),
+    ),
+    # c0049 포트폴리오 묶음: 제목·직무·소개·이은 지원·revision은 고친다. 종류·위 묶음·복사한 revision이 정체
+    "core.portfolio_bundles": (
+        SameExcept(("title", "target_role", "intro", "application_id", "revision", "updated_at")),
     ),
     # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)
     "core.company_facts": (

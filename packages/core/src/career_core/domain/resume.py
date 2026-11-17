@@ -851,6 +851,10 @@ class RenderItem:
     tertiary: str | None = None
     lines: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
+    # 경험 항목의 경험 ID (포트폴리오 항목과 맞추기). 출력에는 쓰지 않는다.
+    ref_id: str | None = None
+    # 함께 내보낸 포트폴리오 항목으로 가는 상대 링크 (정적 HTML 묶음에서만, 그 밖에는 None)
+    href: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -930,6 +934,7 @@ def render_item(
             or None,
             lines=lines,
             tags=tuple(f.get("tags") or ()),
+            ref_id=item["ref"]["id"],
         )
     if rtype == "education":
         school = None if blind else " ".join(v for v in (f.get("school"), f.get("campus")) if v)
@@ -1036,6 +1041,7 @@ def build_render(
                     tertiary=clean(r.tertiary) if r.tertiary else None,
                     lines=tuple(clean(x) for x in r.lines),
                     tags=r.tags,
+                    ref_id=r.ref_id,
                 )
             out.append(r)
         if out:
