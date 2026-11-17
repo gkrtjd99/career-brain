@@ -531,3 +531,18 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 사진을 지우면 같은 key를 가리키는 행이 이 공간에 남지 않을 때 BlobStore 파일도 지운다 (내보내기와 같은 `blob_columns` 규칙으로 찾는다).
 - 내보내기: 두 표는 카탈로그로 자동 포함, `blob_key`라 사진 바이트가 `blobs/`에 들어간다. `@schema_step("c0036")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 DB UNIQUE(`profiles`는 공간, `profile_photos`는 sha256). 삭제 기록(tombstone) 대상은 아니다.
 - 시험: `packages/core/tests/test_profiles.py` (메타데이터 지우기, 공간당 하나, 규칙·권한, 지운 바이트만 저장, 크기·형식·비율 상한, 기본 하나·지우면 옮김, 다른 공간 404, 내보내기 왕복 해시, 합치기에서 기본 사진, MCP 요약).
+
+## 지원 준비 문서 (c0037, O15)
+
+`c0037` (`down_revision = c0036`). 공고별 지원 준비 (plan §19.3). 지원마다 하나의 산출물: 문항마다 쓸 경험 후보와 근거, 요건 충족표. 글은 들어 있지 않다.
+
+| 테이블 | 내용 | 앱 role |
+|---|---|---|
+| `application_preps` | 지원당 하나 (`uq_application_preps_app`, FK (`workspace_id, application_id`) → `applications` CASCADE). `posting_id`·`posting_version_id`(만들 때 공고 확인 버전), `mode`(`model` \| `search`), `basis`(jsonb: 공고 저장 시각·항목 해시, 문항 해시, 경험마다 내용 해시), `questions`(jsonb 배열: 문항마다 후보 경험·근거 주장과 원문 인용·이유·맞은 요건 낱말·빈 곳·회사 항목 ID·참고 구성), `requirements`(요건 충족표: strong/weak/none), `company`(확인된 회사 항목, 없으면 NULL), `choices`(jsonb `{document_id: [{experience_id, claim_ids, chosen_at, chosen_by}]}`), `notes`, `model_call_id`, `generated_by/at`. CHECK: `mode`, jsonb 모양, `questions + requirements` 2MB 이하 | 전체 |
+
+- 오래됨은 저장 칸이 아니다: 읽을 때 `basis`와 지금 공고·문항·경험을 비교한다(`posting_changed`·`questions_changed`·`experience_changed`).
+- 다시 만들면 지원 행을 잠근 뒤 같은 행을 고친다. `choices`는 남는다.
+- 고르기(`choose_experience`)는 그 문항의 후보만 받고(`not_a_candidate`), 주장은 그 후보의 근거 주장 안에서만 남긴다. 문서 revision을 만들지 않는다.
+- 규칙: usecase `career_core.usecases.application_prep`. 후보 밖 ID 버리기는 `review_picks`.
+- 내보내기: 카탈로그로 자동 포함, `@schema_step("c0037")`가 옛 묶음에 빈 표를 넣는다. 합치기 키는 DB UNIQUE(지원당 하나: 받는 공간 것이 남는다). 삭제 기록(tombstone) 대상은 아니다.
+- 시험: `packages/core/tests/test_application_prep.py` (검색 순위 후보마다 원문 인용·빈 곳·충족표, 고르기가 글을 쓰지 않음·겹침 경고, 모델이 후보 밖 ID를 주면 버림·모델 호출 기록, `review_picks`, 경험 수정·공고 다시 확인·문항 추가로 오래됨, 공간 격리, HTTP·MCP, 내보내기 왕복).

@@ -1,7 +1,7 @@
 import type { Finding, ValidateResult } from "@career-brain/client";
 import { cn, EmptyState } from "@career-brain/ui";
 import { Link } from "@tanstack/react-router";
-import { AlertTriangle, ShieldAlert } from "lucide-react";
+import { AlertTriangle, ChevronRight, ShieldAlert } from "lucide-react";
 import { FINDING, FINDING_GROUP, type FindingGroup } from "../../lib/labels";
 import { toneText, VisibilityTable } from "../../pages/Application";
 
@@ -64,8 +64,7 @@ export function ChecksPanel({
   return (
     <div className="space-y-6">
       <p className="text-xs text-muted">
-        r{result.revision} 기준 · 코드 검사(모델 없음) · AI 수정 문단 {Math.round(result.ai_ratio * 100)}%
-        {dirty ? " · 저장하지 않은 편집은 아직 검사하지 않았습니다." : ""}
+        저장한 글의 기본 검사입니다{dirty ? ". 저장하지 않은 편집은 아직 검사하지 않았습니다." : "."}
       </p>
       {danger ? (
         <div
@@ -79,20 +78,14 @@ export function ChecksPanel({
           </span>
         </div>
       ) : null}
-      {!result.findings.length ? <EmptyState>경고가 없습니다.</EmptyState> : null}
+      {!result.findings.filter((f) => (FINDING[f.code]?.group ?? "info") !== "info").length ? (
+        <EmptyState>경고가 없습니다.</EmptyState>
+      ) : null}
       {ORDER.map((g) => {
         const list = groups.get(g);
         if (!list?.length) return null;
         const info = FINDING_GROUP[g];
-        return (
-          <section key={g}>
-            <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold">
-              {g !== "info" ? (
-                <AlertTriangle size={14} className={g === "evidence" ? "text-muted" : "text-danger"} />
-              ) : null}
-              {info.label}
-              <span className="font-normal text-muted tabular-nums">{list.length}</span>
-            </h3>
+        const items = (
             <ul className="divide-y divide-line border-t border-line">
               {list.map((f, i) => {
                 const no = f.block_id ? blockNo(f.block_id) : null;
@@ -124,13 +117,50 @@ export function ChecksPanel({
                 );
               })}
             </ul>
+        );
+        // 경고만 펼쳐 둔다. 참고는 접어 둔다.
+        if (g === "info")
+          return (
+            <details key={g} className="group text-[13px]">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden gap-1 text-muted hover:text-fg sm:min-h-6">
+                <ChevronRight size={14} className="transition-transform group-open:rotate-90" />
+                {info.label} <span className="tabular-nums">{list.length}</span>
+              </summary>
+              <div className="mt-2">{items}</div>
+            </details>
+          );
+        return (
+          <section key={g}>
+            <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold">
+              <AlertTriangle size={14} className={g === "evidence" ? "text-muted" : "text-danger"} />
+              {info.label}
+              <span className="font-normal text-muted tabular-nums">{list.length}</span>
+            </h3>
+            {items}
           </section>
         );
       })}
-      <section>
-        <h3 className="mb-2 text-[13px] font-semibold">요건 가시성 (이 문서)</h3>
-        <VisibilityTable rows={result.requirements} />
-      </section>
+      <RequirementsLine rows={result.requirements} />
     </div>
+  );
+}
+
+/** "요건 5개 중 글에 보임 2" 한 줄. 펼치면 요건마다. */
+export function RequirementsLine({ rows }: { rows: ValidateResult["requirements"] }) {
+  if (!rows.length) return null;
+  const visible = rows.filter((r) => r.verdict === "met_visible").length;
+  return (
+    <details className="group text-[13px]">
+      <summary className="flex min-h-9 cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden gap-1 hover:text-fg sm:min-h-6">
+        <ChevronRight size={14} className="text-muted transition-transform group-open:rotate-90" />
+        <span className="font-medium">공고 요건이 글에 보이나요</span>
+        <span className="text-muted tabular-nums">
+          · 요건 {rows.length}개 중 글에 보임 {visible}
+        </span>
+      </summary>
+      <div className="mt-2">
+        <VisibilityTable rows={rows} />
+      </div>
+    </details>
   );
 }

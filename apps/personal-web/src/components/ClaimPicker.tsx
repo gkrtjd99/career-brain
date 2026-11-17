@@ -2,7 +2,7 @@ import type { ClaimStatus, SearchHit } from "@career-brain/client";
 import { Button, Input, Sheet, STATUS_LABEL, type VerificationStatus } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Check, Search as SearchIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Loaded } from "./common";
 
@@ -21,7 +21,7 @@ export function ClaimPicker({
   onClose,
   onPick,
   selected = [],
-  title = "근거 주장 연결",
+  title = "근거 연결",
   initialQuery = "",
 }: {
   open: boolean;
@@ -33,6 +33,12 @@ export function ClaimPicker({
 }) {
   const [draft, setDraft] = useState(initialQuery);
   const [q, setQ] = useState(initialQuery);
+  // 열 때마다 바깥에서 준 검색어(문항·문단)로 다시 시작한다
+  useEffect(() => {
+    if (!open) return;
+    setDraft(initialQuery);
+    setQ(initialQuery.trim());
+  }, [open, initialQuery]);
   const result = useQuery({
     queryKey: ["search", "claim-picker", q],
     queryFn: ({ signal }) => api.search(q, { kinds: ["claim"], limit: 30 }, signal),
@@ -45,7 +51,7 @@ export function ClaimPicker({
       open={open}
       onOpenChange={(o) => !o && onClose()}
       title={title}
-      description="확인한 주장만 근거로 셉니다. 확인 전 주장은 브레인에서 먼저 확인하세요."
+      description="확인한 사실만 근거로 셉니다. 확인 전인 것은 브레인에서 먼저 확인합니다."
     >
       <form
         role="search"
@@ -60,7 +66,7 @@ export function ClaimPicker({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="예: 응답 시간, Kafka, 결제"
-          aria-label="주장 검색어"
+          aria-label="확인한 사실 검색어"
           maxLength={500}
           autoFocus
         />
@@ -69,7 +75,7 @@ export function ClaimPicker({
         </Button>
       </form>
       {!q ? (
-        <p className="text-sm text-muted">문단 내용과 관련된 낱말로 주장을 찾습니다.</p>
+        <p className="text-sm text-muted">문단 내용과 관련된 낱말로 확인한 사실을 찾습니다.</p>
       ) : (
         <Loaded query={result}>
           {(r) =>
@@ -93,7 +99,7 @@ export function ClaimPicker({
                             .join(" · ")}
                         </p>
                         {!confirmed ? (
-                          <p className="mt-0.5 text-[13px] font-medium">확인 전 주장은 근거로 세지 않습니다.</p>
+                          <p className="mt-0.5 text-[13px] font-medium">확인 전이라 근거로 세지 않습니다.</p>
                         ) : null}
                       </div>
                       <Button
@@ -124,7 +130,7 @@ export function ClaimPicker({
               </ul>
             ) : (
               <p className="border-t border-line pt-3 text-sm text-muted">
-                찾은 주장이 없습니다. 다른 낱말로 찾아 보세요.
+                찾은 사실이 없습니다. 다른 낱말로 찾아 봅니다.
               </p>
             )
           }

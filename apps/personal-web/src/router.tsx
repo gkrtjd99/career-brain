@@ -284,14 +284,15 @@ export const applicationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications/$applicationId",
   beforeLoad: requireToken,
-  component: lazyRouteComponent(() => import("./pages/Application"), "ApplicationPage"),
+  component: lazyRouteComponent(() => import("./pages/Workbench"), "ApplicationWorkbenchPage"),
 });
 
 export const documentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications/$applicationId/documents/$documentId",
   beforeLoad: requireToken,
-  component: lazyRouteComponent(() => import("./pages/Document"), "DocumentPage"),
+  // 지원 작업대에서 그 문서(문항)를 고른 화면. 예전 문서 화면 링크가 그대로 맞는다.
+  component: lazyRouteComponent(() => import("./pages/Workbench"), "DocumentWorkbenchPage"),
 });
 
 const sharedDocumentsRoute = createRoute({

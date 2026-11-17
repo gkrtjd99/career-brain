@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from career_core.domain.documents import DocumentRuleError, RevisionConflict
 from career_core.domain.runs import ApprovalError
+from career_core.interfaces.http.application_prep import add_prep_routes
 from career_core.interfaces.http.runs import approval_error
 from career_core.llm import ModelCallError, ModelDenied
 from career_core.ports import ActorContext
@@ -720,6 +721,7 @@ def add_application_routes(router: APIRouter, deps, authorize) -> None:
         return CreatedOut(id=did)
 
     _add_document_routes(router, deps, authorize, base + "/documents/{document_id}", _app_scope)
+    add_prep_routes(router, deps, authorize)  # c0037 지원 준비 문서 (O15)
 
     @router.get(base + "/checks")
     async def checks(actor: reader, application_id: UUID) -> dict:

@@ -4,6 +4,7 @@ import { liveEndpoints } from "./live";
 import { modelEndpoints } from "./models";
 import { referenceEndpoints } from "./references";
 import { profileEndpoints } from "./profile";
+import { prepEndpoints } from "./prep";
 import { settingsEndpoints } from "./settings";
 import { systemEndpoints } from "./system";
 import { tokenEndpoints } from "./tokens";
@@ -15,6 +16,7 @@ export * from "./live";
 export * from "./models";
 export * from "./references";
 export * from "./profile";
+export * from "./prep";
 export * from "./settings";
 export * from "./system";
 export * from "./tokens";
@@ -606,6 +608,7 @@ export function createClient({
     ...credentialEndpoints({ request, get, post, patch }),
     ...referenceEndpoints({ request, get, post, patch }),
     ...profileEndpoints({ request, get, patch }),
+    ...prepEndpoints({ request, get, post }),
   };
 }
 

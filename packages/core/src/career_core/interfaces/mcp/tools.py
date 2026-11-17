@@ -22,6 +22,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from career_core.ports import ActorContext
+from career_core.usecases import application_prep as prep_uc
 from career_core.usecases import applications as app_uc
 from career_core.usecases import approvals as approval_uc
 from career_core.usecases import brain as brain_uc
@@ -348,6 +349,29 @@ async def _get_application(env: ToolEnv, a: ApplicationArgs) -> Any:
 async def _check_application(env: ToolEnv, a: ApplicationArgs) -> Any:
     """코드 검사 결과: 글자·바이트 수, 범용·다른 회사 문장, 근거 없는 서술, 요건 가시성, 조작 의심."""
     return await app_uc.application_checks(env.db, env.actor, a.application_id)
+
+
+PREP_NOTE = (
+    "candidate experiences are the user's own confirmed claims with their source quotes; the user "
+    "chooses and writes. Company facts and reference structure notes are reference knowledge, "
+    "not evidence. Never draft the answer text from this."
+)
+
+
+async def _get_prep(env: ToolEnv, a: ApplicationArgs) -> Any:
+    """지원 준비 문서 (O15). 이 기기 밖으로 보내지 않는(restricted) 원본의 인용은 빼고 준다."""
+    out = jsonable(await prep_uc.get_prep(env.db, env.actor, a.application_id))
+    withheld = 0
+    for q in out["questions"]:
+        for c in q.get("candidates", []):
+            for ev in c.get("evidence", []):
+                if ev.get("restricted"):
+                    ev["quote"] = None
+                    withheld += 1
+    out["note"] = PREP_NOTE
+    if withheld:
+        out["quotes_withheld"] = withheld
+    return out
 
 
 class SuggestArgs(Args):
@@ -801,6 +825,20 @@ TOOLS: tuple[Tool, ...] = (
         "applications.read",
         ApplicationArgs,
         _check_application,
+        untrusted=True,
+    ),
+    Tool(
+        "application_prep_get",
+        "Get the application prep for an application: per question 2-3 candidate experiences "
+        "(the user's confirmed claims with source quotes, why they fit the question, posting "
+        "requirements and company values, gaps such as no metric, unclear own role, unknown "
+        "period), which experience the user chose, requirement coverage (strong | weak | none) "
+        "and experiences reused across questions. stale=true when the posting or a used experience "
+        "changed since it was made. Read-only: it never writes document text, and the user writes "
+        "the answers. Quotes from restricted sources are withheld.",
+        "applications.read",
+        ApplicationArgs,
+        _get_prep,
         untrusted=True,
     ),
     Tool(

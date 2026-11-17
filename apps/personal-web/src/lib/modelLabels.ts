@@ -99,6 +99,7 @@ export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
   doc_suggest: "문서 수정안",
   judge_claim: "학습 연결 판정 (참고)",
   judge_visibility: "요건 가시성 판정 (참고)",
+  application_prep: "지원 준비 (쓸 경험 고르기)",
 };
 
 /** default로 넘어가지 않는 용도 (models.example.toml): 비어 있으면 그 일을 하지 않는다 */

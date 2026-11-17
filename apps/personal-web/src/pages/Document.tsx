@@ -2,8 +2,8 @@ import type { AppDocument, ClaimBrief, CountRule, RevisionConflictDetail, TextCo
 import { Button, cn, Input, Label, Select, Sheet } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useBlocker } from "@tanstack/react-router";
-import { AlertTriangle, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronRight, Copy, Download, History, Lock, Save, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ClaimPicker } from "../components/ClaimPicker";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
 import { BatchSuggestButton } from "../components/doc/BatchSuggestSheet";
@@ -15,9 +15,8 @@ import { VisibilityJudgePanel } from "../components/doc/VisibilityJudgePanel";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
 import { int } from "../lib/format";
-import { DOC_KIND, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
+import { DOC_KIND, FINDING, NEWLINE_RULE, REVISION_ORIGIN, SPACES_RULE } from "../lib/labels";
 
-const route = getRouteApi("/applications/$applicationId/documents/$documentId");
 const sharedRoute = getRouteApi("/documents/$documentId");
 
 function toDraft(doc: AppDocument): DraftBlock[] {
@@ -69,15 +68,6 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
-export function DocumentPage() {
-  const { applicationId, documentId } = route.useParams();
-  const q = useQuery({
-    queryKey: ["document", documentId],
-    queryFn: () => api.document(applicationId, documentId),
-  });
-  return <Loaded query={q}>{(doc) => <DocumentEditor key={doc.id} appId={applicationId} initial={doc} />}</Loaded>;
-}
-
 /** 공용 문서 (지원에 묶이지 않은 포트폴리오·기본 이력서). 편집 규칙은 지원 문서와 같다. */
 export function SharedDocumentPage() {
   const { documentId } = sharedRoute.useParams();
@@ -90,7 +80,81 @@ export function SharedDocumentPage() {
 
 type Panel = "checks" | "ai" | "history";
 
-function DocumentEditor({ appId, initial }: { appId: string | null; initial: AppDocument }) {
+/** 지원 준비에서 고른 경험: 그 확인한 사실이 연결된 빈 문단을 화면에 둔다 (글은 사람이 쓴다). */
+export interface Scaffold {
+  experience_id: string;
+  claim_ids: string[];
+  hint: string;
+}
+
+/**
+ * 고른 경험마다 빈 문단(근거만 연결)을 둔다. 이미 그 사실들이 연결된 문단이 있으면 두지 않는다.
+ * 글이 없는 문단은 저장하지 않으므로(서버 규칙) 이 문단은 화면에만 있고, 다시 열 때 고른 것에서 다시 만든다.
+ * 고른 것을 취소하면 아직 글이 없는 그 빈 문단만 뺀다.
+ */
+function withScaffolds(blocks: DraftBlock[], scaffolds: Scaffold[]): DraftBlock[] {
+  const keep = new Set(scaffolds.map((s) => s.experience_id));
+  let next = blocks.filter((b) => !(b.scaffoldOf && !keep.has(b.scaffoldOf) && !b.text.trim()));
+  for (const s of scaffolds) {
+    if (!s.claim_ids.length) continue;
+    const covered = next.some(
+      (b) => b.scaffoldOf === s.experience_id || s.claim_ids.every((c) => b.claim_ids.includes(c)),
+    );
+    if (covered) continue;
+    const nb: DraftBlock = {
+      key: newKey(),
+      id: null,
+      text: "",
+      origin: "user",
+      claim_ids: [...s.claim_ids],
+      scaffoldOf: s.experience_id,
+      hint: s.hint,
+    };
+    // 아직 아무것도 없는 문서의 빈 첫 문단은 바꿔 쓴다
+    const lone = next.length === 1 && !next[0]!.id && !next[0]!.text.trim() && !next[0]!.claim_ids.length;
+    next = lone ? [nb] : [...next, nb];
+  }
+  return next.length === blocks.length && next.every((b, i) => b === blocks[i]) ? blocks : next;
+}
+
+/** 지원 작업대가 편집기 조각을 제 자리에 놓는다 (상태는 편집기가 가진다). */
+export interface EditorParts {
+  doc: AppDocument;
+  dirty: boolean;
+  editable: boolean;
+  /** 한 번이라도 저장했는가 */
+  saved: boolean;
+  counts: TextCounts;
+  saving: boolean;
+  canSave: boolean;
+  onSave: () => void;
+  openExport: () => void;
+  openSettings: () => void;
+  /** 저장한 글의 경고 수 (참고 제외) */
+  warnings: number;
+  /** 일괄 수정안이 "수정안 보기"를 누를 때마다 늘어난다 */
+  suggestAsk: number;
+  notices: ReactNode;
+  countBar: ReactNode;
+  editor: ReactNode;
+  checks: ReactNode;
+  suggestions: ReactNode;
+  batch: ReactNode;
+  history: ReactNode;
+  sheets: ReactNode;
+}
+
+export function DocumentEditor({
+  appId,
+  initial,
+  frame,
+  scaffolds,
+}: {
+  appId: string | null;
+  initial: AppDocument;
+  frame?: (parts: EditorParts) => ReactNode;
+  scaffolds?: Scaffold[];
+}) {
   const qc = useQueryClient();
   const docQuery = useQuery({
     queryKey: ["document", initial.id],
@@ -119,14 +183,23 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
   const [settings, setSettings] = useState(false);
   const [compare, setCompare] = useState(false);
   const [historyRev, setHistoryRev] = useState<number | null>(null);
+  const [suggestAsk, setSuggestAsk] = useState(0);
   const focusN = useRef(0);
+  const scaffoldRef = useRef<Scaffold[]>(scaffolds ?? []);
+  scaffoldRef.current = scaffolds ?? [];
 
   const reset = useCallback((d: AppDocument) => {
     setBase(d.revision_no);
     setBaseBlocks(baseShape(d.blocks));
-    setBlocks(toDraft(d));
+    setBlocks(withScaffolds(toDraft(d), scaffoldRef.current));
     setConflict(null);
   }, []);
+
+  // 고른 경험이 바뀌면 빈 문단을 더하거나 뺀다. 빈 문단은 저장할 편집으로 치지 않는다 (canonical 이 뺀다).
+  const scaffoldKey = JSON.stringify(scaffolds ?? []);
+  useEffect(() => {
+    setBlocks((bs) => withScaffolds(bs, scaffoldRef.current));
+  }, [scaffoldKey]);
 
   const dirty = canonical(blocks) !== canonical(baseBlocks);
   const editable = doc.editable;
@@ -240,77 +313,22 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
   };
   const activeBlock = blocks.find((b) => b.key === activeKey) ?? null;
   const pickBlock = blocks.find((b) => b.key === pickFor?.key) ?? null;
-  const docs = app.data?.documents ?? [];
-  const idx = docs.findIndex((d) => d.id === doc.id);
   const saveError =
     save.error && !(save.error instanceof ApiError && save.error.status === 409 && conflict) ? save.error : null;
 
-  return (
-    <div>
-      <PageHeader
-        back={
-          appId
-            ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" }
-            : { to: "/documents", label: "공용 문서" }
-        }
-        title={
-          <>
-            {doc.question_index !== null ? `${doc.question_index + 1}. ` : ""}
-            {doc.title}
-          </>
-        }
-        subtitle={
-          <span className="flex flex-wrap items-center gap-x-1.5 tabular-nums" aria-live="polite">
-            <span>{DOC_KIND[doc.kind] ?? doc.kind}</span>
-            {appId === null ? <span>· 공용</span> : null}
-            <span>· {base ? `r${base}` : "저장 전"}</span>
-            {dirty ? <span className="font-medium text-fg">· 저장 안 함</span> : base ? <span>· 저장됨</span> : null}
-            {!editable ? (
-              <span className="inline-flex items-center gap-1">
-                · <Lock size={12} /> 읽기 전용
-              </span>
-            ) : null}
-          </span>
-        }
-        actions={
-          <>
-            <BatchSuggestButton appId={appId} doc={doc} dirty={dirty} onShowSuggestions={() => setPanel("ai")} />
-            <Button size="sm" onClick={() => setExporting(true)} disabled={!doc.current_revision}>
-              <Download size={14} /> 내보내기
-            </Button>
-            {editable ? (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => save.mutate({ baseRevision: base })}
-                disabled={!dirty || !!conflict || save.isPending}
-              >
-                <Save size={14} /> {save.isPending ? "저장하는 중" : "저장"}
-              </Button>
-            ) : null}
-          </>
-        }
-      />
+  const pickQuery = useMemo(
+    () =>
+      [pickBlock?.text.trim().slice(0, 200), doc.question_prompt?.trim().slice(0, 200)]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 500),
+    // 고르는 창을 열 때의 문단·문항으로 정한다 (창이 열린 동안 근거를 더해도 검색어는 그대로)
+    [pickFor?.key, pickFor?.range?.quote, doc.question_prompt],
+  );
+  const warnings = (validate.data?.findings ?? []).filter((f) => (FINDING[f.code]?.group ?? "info") !== "info").length;
 
-      {appId && docs.length > 1 ? (
-        <nav className="-mx-2 mb-6 flex flex-wrap gap-x-1 text-[13px]" aria-label="같은 지원의 문서">
-          {docs.map((d, i) => (
-            <Link
-              key={d.id}
-              to="/applications/$applicationId/documents/$documentId"
-              params={{ applicationId: appId, documentId: d.id }}
-              aria-current={i === idx ? "page" : undefined}
-              className={cn(
-                "inline-flex h-9 items-center rounded-md px-2 transition-colors duration-150",
-                i === idx ? "bg-subtle font-medium text-fg" : "text-muted hover:bg-subtle/60 hover:text-fg",
-              )}
-            >
-              {d.question_index !== null ? `문항 ${d.question_index + 1}` : d.title}
-            </Link>
-          ))}
-        </nav>
-      ) : null}
-
+  const notices = (
+    <>
       {doc.source ? (
         <p className="mb-4 flex flex-wrap items-center gap-x-1.5 text-[13px] text-muted">
           <Copy size={14} />
@@ -322,15 +340,13 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
               className="text-fg underline underline-offset-2"
             >
               {doc.source.title ?? "(지운 문서)"}
-            </Link>{" "}
-            r{doc.source.revision_no ?? "?"}에서 복사했습니다.
+            </Link>
+            에서 복사했습니다.
           </span>
           {doc.source.current_revision &&
           doc.source.revision_no &&
           doc.source.current_revision > doc.source.revision_no ? (
-            <span>
-              원본은 그 뒤 r{doc.source.current_revision}까지 바뀌었습니다. 이 문서에는 자동으로 들어오지 않습니다.
-            </span>
+            <span>원본은 그 뒤에 바뀌었습니다. 이 문서에는 자동으로 들어오지 않습니다.</span>
           ) : null}
         </p>
       ) : null}
@@ -347,11 +363,10 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
           className="mb-6 rounded-md border border-danger/40 bg-danger-soft px-3 py-3 text-[13px] text-danger"
         >
           <p className="flex items-center gap-1.5 font-semibold">
-            <AlertTriangle size={15} /> 저장 충돌: 다른 곳에서 r{conflict.current_revision}을 먼저 저장했습니다
+            <AlertTriangle size={15} /> 저장 충돌: 다른 곳에서 먼저 저장했습니다
           </p>
           <p className="mt-1 text-fg">
-            이 편집은 r{base}를 기준으로 했습니다. 아직 아무것도 덮어쓰지 않았고, 내 편집은 이 화면에 그대로 있습니다.
-            어떻게 할지 고르세요.
+            아직 아무것도 덮어쓰지 않았고, 내 편집은 이 화면에 그대로 있습니다. 어떻게 할지 고릅니다.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             <Button size="sm" onClick={() => setCompare(true)}>
@@ -376,98 +391,123 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
                 })
               }
             >
-              확인했고, 내 편집으로 새 revision 저장
+              확인했고, 내 편집으로 저장
             </Button>
           </div>
         </div>
       ) : null}
+    </>
+  );
 
-      <div className="grid grid-cols-1 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] lg:gap-x-12">
-        <div className="min-w-0 space-y-3">
-          {doc.question_prompt ? <p className="text-sm leading-6">{doc.question_prompt}</p> : null}
-          <CountBar counts={counts} counting={counting} onSettings={editable ? () => setSettings(true) : undefined} />
-          <div className="rounded-lg border border-line bg-surface px-1 py-2 md:px-3 md:py-3">
-            <BlockEditor
-              blocks={blocks}
-              onChange={setBlocks}
-              readOnly={!editable || save.isPending}
-              claims={claimMap}
-              findings={
-                !dirty
-                  ? (validate.data?.findings ?? [])
-                  : (validate.data?.findings ?? []).filter((f) => {
-                      const b = blocks.find((x) => x.id === f.block_id);
-                      const orig = baseBlocks.find((x) => x.id === f.block_id);
-                      return b && orig && b.text === orig.text;
-                    })
-              }
-              activeKey={activeKey}
-              onActive={setActiveKey}
-              onPickEvidence={(key, range) => setPickFor({ key, range })}
-              focusRequest={focus}
-            />
-          </div>
-          <p className="text-xs text-muted">
-            Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장.
-            문장을 고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 주장만 셉니다.
-          </p>
-          <ErrorText error={saveError} />
-        </div>
-
-        <aside className="min-w-0">
-          <Tabs<Panel>
-            value={panel}
-            onChange={setPanel}
-            items={[
-              { value: "checks", label: "검사" },
-              { value: "ai", label: "AI 수정안" },
-              { value: "history", label: "기록" },
-            ]}
-          />
-          {panel === "checks" ? (
-            <Loaded query={validate}>
-              {(r) => <ChecksPanel result={r} dirty={dirty} onJump={jump} blockNo={blockNo} />}
-            </Loaded>
-          ) : null}
-          {panel === "checks" && appId ? (
-            <VisibilityJudgePanel
-              appId={appId}
-              docId={doc.id}
-              dirty={dirty}
-              blocks={baseBlocks}
-              onJump={jump}
-              blockNo={blockNo}
-            />
-          ) : null}
-          {panel === "ai" ? (
-            <SuggestionsPanel
-              appId={appId}
-              docId={doc.id}
-              base={base}
-              dirty={dirty}
-              editable={editable && !conflict}
-              activeBlockId={activeBlock?.id ?? null}
-              blockNo={blockNo}
-              onApplied={async () => {
-                const fresh = await qc.fetchQuery({
-                  queryKey: ["document", doc.id],
-                  queryFn: () => api.document(appId, doc.id),
-                });
-                reset(fresh);
-                qc.invalidateQueries({ queryKey: ["revisions", doc.id] });
-                if (appId) qc.invalidateQueries({ queryKey: ["application", appId] });
-              }}
-            />
-          ) : null}
-          {panel === "history" ? (
-            <HistoryPanel appId={appId} docId={doc.id} current={doc.current_revision} onOpen={setHistoryRev} />
-          ) : null}
-        </aside>
+  const editor = (
+    <div className="min-w-0 space-y-3">
+      <div className="rounded-lg border border-line bg-surface px-1 py-2 md:px-3 md:py-3">
+        <BlockEditor
+          blocks={blocks}
+          onChange={setBlocks}
+          readOnly={!editable || save.isPending}
+          claims={claimMap}
+          findings={
+            !dirty
+              ? (validate.data?.findings ?? [])
+              : (validate.data?.findings ?? []).filter((f) => {
+                  const b = blocks.find((x) => x.id === f.block_id);
+                  const orig = baseBlocks.find((x) => x.id === f.block_id);
+                  return b && orig && b.text === orig.text;
+                })
+          }
+          activeKey={activeKey}
+          onActive={setActiveKey}
+          onPickEvidence={(key, range) => setPickFor({ key, range })}
+          focusRequest={focus}
+        />
       </div>
+      <details className="group text-xs text-muted">
+        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1 hover:text-fg sm:min-h-6 [&::-webkit-details-marker]:hidden">
+          <ChevronRight size={13} className="transition-transform group-open:rotate-90" />
+          쓰는 법
+        </summary>
+        <p className="mt-1 leading-5">
+          Enter 문단 나누기 · Shift+Enter 문단 안 줄바꿈 · 맨 앞에서 Backspace 앞 문단과 합치기 · ⌘/Ctrl+S 저장. 문장을
+          고르면 그 문장에만 근거를 붙일 수 있습니다. 근거는 확인한 사실만 셉니다. 글이 없는 문단은 저장하지 않습니다.
+        </p>
+      </details>
+      <ErrorText error={saveError} />
+    </div>
+  );
 
+  const countBar = (
+    <CountBar counts={counts} counting={counting} onSettings={editable ? () => setSettings(true) : undefined} />
+  );
+
+  const checks = (
+    <>
+      <Loaded query={validate}>
+        {(r) => <ChecksPanel result={r} dirty={dirty} onJump={jump} blockNo={blockNo} />}
+      </Loaded>
+      {appId ? (
+        <VisibilityJudgePanel
+          appId={appId}
+          docId={doc.id}
+          dirty={dirty}
+          blocks={baseBlocks}
+          onJump={jump}
+          blockNo={blockNo}
+        />
+      ) : null}
+    </>
+  );
+
+  const suggestions = (
+    <SuggestionsPanel
+      appId={appId}
+      docId={doc.id}
+      base={base}
+      dirty={dirty}
+      editable={editable && !conflict}
+      activeBlockId={activeBlock?.id ?? null}
+      blockNo={blockNo}
+      onApplied={async () => {
+        const fresh = await qc.fetchQuery({
+          queryKey: ["document", doc.id],
+          queryFn: () => api.document(appId, doc.id),
+        });
+        reset(fresh);
+        qc.invalidateQueries({ queryKey: ["revisions", doc.id] });
+        if (appId) qc.invalidateQueries({ queryKey: ["application", appId] });
+      }}
+    />
+  );
+
+  const history = (
+    <div className="space-y-4">
+      <p className="text-xs text-muted tabular-nums">
+        {base ? `지금 r${base}` : "아직 저장 전"} · {int(counts.chars)}자 · {int(counts.bytes)} byte
+        {validate.data ? ` · AI 수정 문단 ${Math.round(validate.data.ai_ratio * 100)}%` : ""}
+        {doc.source?.revision_no ? ` · 공용 문서 r${doc.source.revision_no}에서 복사` : ""}
+      </p>
+      <HistoryPanel appId={appId} docId={doc.id} current={doc.current_revision} onOpen={setHistoryRev} />
+    </div>
+  );
+
+  const batch = (
+    <BatchSuggestButton
+      appId={appId}
+      doc={doc}
+      dirty={dirty}
+      onShowSuggestions={() => {
+        setPanel("ai");
+        setSuggestAsk((n) => n + 1);
+      }}
+    />
+  );
+
+  const sheets = (
+    <>
       <ClaimPicker
         open={!!pickFor}
         onClose={() => setPickFor(null)}
+        initialQuery={pickQuery}
         selected={
           pickFor?.range
             ? (pickBlock?.spans?.find((sp) => sp.quote === pickFor.range!.quote)?.claim_ids ?? [])
@@ -512,10 +552,108 @@ function DocumentEditor({ appId, initial }: { appId: string | null; initial: App
         base={base}
       />
       <RevisionSheet appId={appId} docId={doc.id} revision={historyRev} onClose={() => setHistoryRev(null)} />
+    </>
+  );
+
+  const parts: EditorParts = {
+    doc,
+    dirty,
+    editable,
+    saved: base > 0,
+    counts,
+    saving: save.isPending,
+    canSave: editable && dirty && !conflict && !save.isPending,
+    onSave: () => save.mutate({ baseRevision: base }),
+    openExport: () => setExporting(true),
+    openSettings: () => setSettings(true),
+    warnings,
+    suggestAsk,
+    notices,
+    countBar,
+    editor,
+    checks,
+    suggestions,
+    batch,
+    history,
+    sheets,
+  };
+  if (frame) return <>{frame(parts)}</>;
+
+  return (
+    <div>
+      <PageHeader
+        back={
+          appId
+            ? { to: `/applications/${appId}`, label: app.data?.title ?? "지원" }
+            : { to: "/documents", label: "공용 문서" }
+        }
+        title={
+          <>
+            {doc.question_index !== null ? `${doc.question_index + 1}. ` : ""}
+            {doc.title}
+          </>
+        }
+        subtitle={
+          <span className="flex flex-wrap items-center gap-x-1.5 tabular-nums" aria-live="polite">
+            <span>{DOC_KIND[doc.kind] ?? doc.kind}</span>
+            {appId === null ? <span>· 공용</span> : null}
+            {dirty ? (
+              <span className="font-medium text-fg">· 저장 안 함</span>
+            ) : base ? (
+              <span>· 저장됨</span>
+            ) : (
+              <span>· 저장 전</span>
+            )}
+            {!editable ? (
+              <span className="inline-flex items-center gap-1">
+                · <Lock size={12} /> 읽기 전용
+              </span>
+            ) : null}
+          </span>
+        }
+        actions={
+          <>
+            {batch}
+            <Button size="sm" onClick={() => setExporting(true)} disabled={!doc.current_revision}>
+              <Download size={14} /> 내보내기
+            </Button>
+            {editable ? (
+              <Button variant="primary" size="sm" onClick={parts.onSave} disabled={!parts.canSave}>
+                <Save size={14} /> {save.isPending ? "저장하는 중" : "저장"}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      {notices}
+      <div className="grid grid-cols-1 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] lg:gap-x-12">
+        <div className="min-w-0 space-y-3">
+          {doc.question_prompt ? <h2 className="text-sm leading-6 font-normal">{doc.question_prompt}</h2> : null}
+          {countBar}
+          {editor}
+        </div>
+        <aside className="min-w-0">
+          <h2 className="sr-only">검사·수정안·기록</h2>
+          <Tabs<Panel>
+            value={panel}
+            onChange={setPanel}
+            items={[
+              { value: "checks", label: "검사" },
+              { value: "ai", label: "AI 수정안" },
+              { value: "history", label: "기록" },
+            ]}
+          />
+          {panel === "checks" ? checks : null}
+          {panel === "ai" ? suggestions : null}
+          {panel === "history" ? history : null}
+        </aside>
+      </div>
+      {sheets}
     </div>
   );
 }
 
+/** 글자 수 한 줄: "238 / 700자"만. 바이트·세는 기준은 펼쳐서 본다. 숫자는 서버 코드가 센다. */
 function CountBar({
   counts,
   counting,
@@ -525,41 +663,46 @@ function CountBar({
   counting: boolean;
   onSettings?: () => void;
 }) {
-  const over = counts.over_char_limit || counts.over_byte_limit;
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] transition-opacity",
-        counting && "opacity-60",
-      )}
-      aria-live="polite"
-    >
-      <span className={cn("font-semibold tabular-nums", counts.over_char_limit && "text-danger")}>
-        {int(counts.chars)}
-        {counts.char_limit ? ` / ${int(counts.char_limit)}` : ""}자
-      </span>
-      <span className={cn("tabular-nums", counts.over_byte_limit ? "font-semibold text-danger" : "text-muted")}>
-        {int(counts.bytes)}
-        {counts.byte_limit ? ` / ${int(counts.byte_limit)}` : ""} byte
-      </span>
-      {over ? <span className="font-medium text-danger">분량 초과</span> : null}
-      <span className="text-xs text-muted tabular-nums">
-        {SPACES_RULE[counts.rule.spaces]} · {NEWLINE_RULE[counts.rule.newlines]} · {counts.rule.encoding} · 공백 포함{" "}
-        {int(counts.chars_with_spaces)} / 제외 {int(counts.chars_without_spaces)} · 서버 계산
-      </span>
-      {counts.unencodable.length ? (
-        <span className="text-xs font-medium">양식에 없는 문자: {counts.unencodable.join(" ")}</span>
-      ) : null}
-      {onSettings ? (
-        <Button
-          size="icon"
-          variant="ghost"
-          className="ml-auto -mr-2"
-          onClick={onSettings}
-          aria-label="세는 기준 바꾸기"
+    <div className={cn("text-[13px] transition-opacity", counting && "opacity-60")}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
+        <span className={cn("font-semibold tabular-nums", counts.over_char_limit && "text-danger")}>
+          {int(counts.chars)}
+          {counts.char_limit ? ` / ${int(counts.char_limit)}` : ""}자
+        </span>
+        {counts.over_char_limit ? <span className="font-medium text-danger">분량 초과</span> : null}
+        {counts.over_byte_limit ? <span className="font-medium text-danger">바이트 제한 초과</span> : null}
+        {counts.unencodable.length ? (
+          <span className="text-xs font-medium">양식에 없는 문자: {counts.unencodable.join(" ")}</span>
+        ) : null}
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="inline-flex min-h-9 items-center text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-6"
         >
-          <Settings2 size={15} />
-        </Button>
+          세는 기준
+        </button>
+        {onSettings ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="-mr-2 ml-auto sm:h-8 sm:w-8"
+            onClick={onSettings}
+            aria-label="제한·세는 기준 바꾸기"
+          >
+            <Settings2 size={15} />
+          </Button>
+        ) : null}
+      </div>
+      {open ? (
+        <p className="mt-1 text-xs text-muted tabular-nums">
+          {int(counts.bytes)}
+          {counts.byte_limit ? ` / ${int(counts.byte_limit)}` : ""} byte · {SPACES_RULE[counts.rule.spaces]} ·{" "}
+          {NEWLINE_RULE[counts.rule.newlines]} · {counts.rule.encoding} · 공백 포함 {int(counts.chars_with_spaces)} /
+          제외 {int(counts.chars_without_spaces)}
+        </p>
       ) : null}
     </div>
   );

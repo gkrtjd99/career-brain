@@ -1407,3 +1407,35 @@ class Profile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------- c0037: 공고별 지원 준비 (O15)
+
+
+class ApplicationPrep(Base):
+    """지원 하나의 준비 문서: 문항마다 쓸 경험 후보·요건 충족표. 공고 버전·쓴 경험의 해시(basis)에 묶인다.
+
+    글을 쓰지 않는다. 사람이 고른 경험(choices)은 다시 만들어도 남는다."""
+
+    __tablename__ = "application_preps"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    posting_version_id: Mapped[UUID | None] = mapped_column(default=None)
+    mode: Mapped[str] = mapped_column(Text)  # model | search
+    basis: Mapped[dict] = mapped_column(JSONB, default=dict)
+    questions: Mapped[list] = mapped_column(JSONB, default=list)
+    requirements: Mapped[list] = mapped_column(JSONB, default=list)
+    company: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    choices: Mapped[dict] = mapped_column(JSONB, default=dict)
+    notes: Mapped[list] = mapped_column(JSONB, default=list)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    generated_by: Mapped[UUID]
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

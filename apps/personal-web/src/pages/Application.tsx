@@ -3,7 +3,6 @@ import type {
   ApplicationChecks,
   ApplicationStage,
   DocumentKind,
-  DocumentSummary,
   RequirementVisibility,
   SensitiveUnacknowledgedDetail,
   StageKind,
@@ -26,27 +25,24 @@ import {
   type BadgeTone,
 } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRouteApi, Link } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { Copy, Download, Lock, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ErrorText, List, Loaded, PageHeader } from "../components/common";
+import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { ExportSheet } from "../components/doc/ExportSheet";
+import { visLabel } from "../components/doc/visibility";
 import { api, ApiError } from "../lib/api";
-import { daysLeft, ddayLabel, formatDateTime, formatDeadline, fromLocalInput, toLocalInput } from "../lib/dates";
+import { formatDateTime, formatDeadline, fromLocalInput, toLocalInput } from "../lib/dates";
 import { int } from "../lib/format";
 import {
   APP_STATUS,
   DOC_KIND,
   FINDING,
   FINDING_GROUP,
-  FIELD_LABEL,
   REQ_FIELD,
   STAGE_KIND,
   STAGE_OUTCOME,
-  VISIBILITY,
 } from "../lib/labels";
-
-const route = getRouteApi("/applications/$applicationId");
 
 export function countLine(c: TextCounts | null | undefined) {
   if (!c) return "아직 안 씀";
@@ -64,39 +60,20 @@ export function toneText(tone: BadgeTone) {
   return "text-muted";
 }
 
-export function ApplicationPage() {
-  const { applicationId } = route.useParams();
-  const q = useQuery({ queryKey: ["application", applicationId], queryFn: () => api.application(applicationId) });
-  return <Loaded query={q}>{(app) => <ApplicationView app={app} />}</Loaded>;
-}
-
-function ApplicationView({ app }: { app: Application }) {
-  const qc = useQueryClient();
-  const checks = useQuery({
-    queryKey: ["application-checks", app.id],
-    queryFn: () => api.applicationChecks(app.id),
-  });
-  const [adding, setAdding] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+/** 제출본을 고정했거나 끝난 지원 (준비 중인 지원은 pages/Workbench 의 작업대). */
+export function ApplicationView({ app }: { app: Application }) {
   const [statusOpen, setStatusOpen] = useState(false);
   const st = APP_STATUS[app.status];
-  const draft = app.status === "draft";
-  const company = app.posting.company as string | undefined;
-  const jobTitle = app.posting.title as string | undefined;
   const deadline = app.posting.deadline as string | undefined;
-  const dday = ddayLabel(deadline);
-  const left = daysLeft(deadline);
-  const soon = left !== null && left >= 0 && left <= 3;
 
   return (
     <div>
       <PageHeader
-        back={{ to: "/applications", label: "지원 현황" }}
+        back={{ to: "/applications", label: "지원" }}
         title={app.title}
         subtitle={
           <span className="flex flex-wrap items-center gap-x-1.5 tabular-nums">
             <span className="font-medium text-fg">{st.label}</span>
-            {draft && dday ? <span className={cn(soon && "font-semibold text-fg")}>· {dday}</span> : null}
             {deadline ? <span>· 마감 {formatDeadline(deadline)}</span> : null}
             <span aria-hidden>·</span>
             <Link
@@ -109,73 +86,22 @@ function ApplicationView({ app }: { app: Application }) {
           </span>
         }
         actions={
-          <>
-            {app.status !== "rejected" && app.status !== "withdrawn" ? (
-              <Button size="sm" onClick={() => setStatusOpen(true)}>
-                {draft ? "철회" : "결과 기록"}
-              </Button>
-            ) : null}
-            {draft ? (
-              <Button size="sm" variant="primary" onClick={() => setSubmitting(true)}>
-                <Lock size={14} /> 제출본 고정
-              </Button>
-            ) : null}
-          </>
+          app.status !== "rejected" && app.status !== "withdrawn" ? (
+            <Button size="sm" onClick={() => setStatusOpen(true)}>
+              결과 기록
+            </Button>
+          ) : null
         }
       />
       {app.result_note ? <p className="mb-4 text-[13px] text-muted">메모: {app.result_note}</p> : null}
-      {app.posting_pending_changes.length ? (
-        <p role="status" className="mb-6 rounded-md border border-line px-3 py-2.5 text-[13px]">
-          <span className="font-medium">공고에 확인하지 않은 변경이 있습니다:</span>{" "}
-          {app.posting_pending_changes.map((f) => FIELD_LABEL[f as keyof typeof FIELD_LABEL] ?? f).join(", ")}.{" "}
-          <Link
-            to="/postings/$postingId"
-            params={{ postingId: app.posting_id }}
-            className="underline underline-offset-2"
-          >
-            공고에서 확인
-          </Link>
-        </p>
-      ) : null}
-
-      {draft ? (
-        <div className="grid grid-cols-1 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,360px)] lg:gap-x-14">
-          <Section
-            title="문서"
-            action={
-              <Button size="sm" variant="ghost" onClick={() => setAdding(true)}>
-                <Plus size={14} /> 문서 추가
-              </Button>
-            }
-          >
-            <DocumentList app={app} checks={checks.data} />
-          </Section>
-          <Section title="요건 가시성 (모든 문서)">
-            <Loaded query={checks}>{(c) => <VisibilityTable rows={c.requirements} compact />}</Loaded>
-          </Section>
-        </div>
-      ) : (
-        <FrozenView app={app} />
-      )}
-
-      <AddDocumentSheet appId={app.id} open={adding} onClose={() => setAdding(false)} />
-      <SubmitDialog
-        app={app}
-        checks={checks.data}
-        open={submitting}
-        onClose={() => setSubmitting(false)}
-        onDone={() => {
-          qc.invalidateQueries({ queryKey: ["application", app.id] });
-          qc.invalidateQueries({ queryKey: ["applications"] });
-        }}
-      />
+      <FrozenView app={app} />
       <StatusSheet app={app} open={statusOpen} onClose={() => setStatusOpen(false)} />
     </div>
   );
 }
 
 /** 검사 요약(분량·위험·근거…)을 글자로. 참고(info)는 뺀다. */
-function summaryFlags(summary: Record<string, number> | undefined) {
+export function summaryFlags(summary: Record<string, number> | undefined) {
   if (!summary) return [];
   const groups: Record<string, number> = {};
   for (const [code, n] of Object.entries(summary)) {
@@ -189,7 +115,7 @@ function summaryFlags(summary: Record<string, number> | undefined) {
   });
 }
 
-function Flags({ items }: { items: { key: string; label: string; tone: BadgeTone }[] }) {
+export function Flags({ items }: { items: { key: string; label: string; tone: BadgeTone }[] }) {
   if (!items.length) return null;
   return (
     <span className="flex flex-wrap justify-end gap-x-2 text-[13px] tabular-nums">
@@ -202,59 +128,6 @@ function Flags({ items }: { items: { key: string; label: string; tone: BadgeTone
   );
 }
 
-function DocumentList({ app, checks }: { app: Application; checks?: ApplicationChecks }) {
-  if (!app.documents.length) return <EmptyState>문서가 없습니다. 이력서·자기소개서를 추가하세요.</EmptyState>;
-  const byDoc = new Map(checks?.documents.map((d) => [d.document_id, d]) ?? []);
-  return (
-    <List>
-      {app.documents.map((d) => (
-        <DocumentRow key={d.id} appId={app.id} d={d} summary={byDoc.get(d.id)?.summary} />
-      ))}
-    </List>
-  );
-}
-
-function DocumentRow({ appId, d, summary }: { appId: string; d: DocumentSummary; summary?: Record<string, number> }) {
-  const unwritten = d.current_revision === 0 || !d.counts?.chars_with_spaces;
-  const over = d.counts?.over_char_limit || d.counts?.over_byte_limit;
-  const flags = [
-    ...(unwritten ? [{ key: "unwritten", label: "안 씀", tone: "warn" as const }] : []),
-    ...(over ? [{ key: "over", label: "분량 초과", tone: "danger" as const }] : []),
-    ...summaryFlags(summary),
-  ];
-  const meta = [
-    DOC_KIND[d.kind] ?? d.kind,
-    countLine(d.counts),
-    d.current_revision ? `r${d.current_revision}` : null,
-    d.source ? `공용 문서 r${d.source.revision_no ?? "?"}에서 복사` : null,
-  ].filter(Boolean);
-  return (
-    <li>
-      <Link
-        to="/applications/$applicationId/documents/$documentId"
-        params={{ applicationId: appId, documentId: d.id }}
-        className="-mx-2 flex items-start gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium">
-            {d.question_index !== null ? `${d.question_index + 1}. ` : ""}
-            {d.title}
-          </div>
-          {d.question_prompt && d.question_prompt !== d.title ? (
-            <div className="mt-0.5 line-clamp-2 text-[13px] text-muted">{d.question_prompt}</div>
-          ) : null}
-          <div className="mt-0.5 text-[13px] text-muted tabular-nums">{meta.join(" · ")}</div>
-        </div>
-        {flags.length ? (
-          <div className="max-w-[40%] shrink-0 pt-0.5 text-right">
-            <Flags items={flags} />
-          </div>
-        ) : null}
-      </Link>
-    </li>
-  );
-}
-
 /** 요건 × 문서 × 브레인 표. 값은 "근거가 보이는가"이지 합격 가능성이 아니다. */
 export function VisibilityTable({ rows, compact }: { rows: RequirementVisibility[]; compact?: boolean }) {
   if (!rows.length) return <EmptyState>공고에 자격·우대 요건이 없습니다.</EmptyState>;
@@ -262,7 +135,7 @@ export function VisibilityTable({ rows, compact }: { rows: RequirementVisibility
     <div>
       <ul className="divide-y divide-line border-t border-line">
         {rows.map((r, i) => {
-          const v = VISIBILITY[r.verdict] ?? { label: r.verdict, tone: "neutral" as const };
+          const v = visLabel(r.verdict);
           return (
             <li key={i} className="py-2.5">
               <div className="flex items-start gap-3">
@@ -272,13 +145,13 @@ export function VisibilityTable({ rows, compact }: { rows: RequirementVisibility
               <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted">
                 <span>{REQ_FIELD[r.kind] ?? r.kind}</span>
                 {r.brain_claim_ids.length ? (
-                  <span>브레인 근거 {r.brain_claim_ids.length}</span>
+                  <span>확인한 사실 {r.brain_claim_ids.length}</span>
                 ) : (
-                  <span>브레인 근거 없음</span>
+                  <span>확인한 사실 없음</span>
                 )}
-                {r.document_terms.length ? <span>문서: {r.document_terms.join(", ")}</span> : null}
+                {r.document_terms.length ? <span>글: {r.document_terms.join(", ")}</span> : null}
                 {r.verdict === "met_visible" ? (
-                  <span>{r.linked ? "문단에 근거 연결됨" : "문단에 근거 연결 안 됨"}</span>
+                  <span>{r.linked ? "문단에 근거 연결함" : "문단에 근거 연결 안 함"}</span>
                 ) : null}
               </div>
               {!compact || r.verdict !== "met_visible" ? <p className="mt-0.5 text-xs">{r.suggestion}</p> : null}
@@ -295,7 +168,7 @@ export function VisibilityTable({ rows, compact }: { rows: RequirementVisibility
 
 const KINDS: DocumentKind[] = ["resume", "cover_letter", "portfolio", "question", "other"];
 
-function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boolean; onClose: () => void }) {
+export function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<"new" | "copy">("new");
   const [form, setForm] = useState({ kind: "resume" as DocumentKind, title: "", prompt: "", limit: "" });
@@ -456,7 +329,7 @@ function AddDocumentSheet({ appId, open, onClose }: { appId: string; open: boole
   );
 }
 
-function SubmitDialog({
+export function SubmitDialog({
   app,
   checks,
   open,
@@ -603,7 +476,7 @@ function SubmitDialog({
   );
 }
 
-function StatusSheet({ app, open, onClose }: { app: Application; open: boolean; onClose: () => void }) {
+export function StatusSheet({ app, open, onClose }: { app: Application; open: boolean; onClose: () => void }) {
   const qc = useQueryClient();
   const options: ("passed" | "rejected" | "withdrawn")[] =
     app.status === "draft"
@@ -936,7 +809,7 @@ function SubmissionBody({ sub }: { sub: Submission }) {
         </section>
       ))}
       {sub.checks.requirements?.length ? (
-        <Section title="고정 당시 요건 가시성">
+        <Section title="고정 당시 공고 요건이 글에 보였나요">
           <VisibilityTable rows={sub.checks.requirements} compact />
         </Section>
       ) : null}

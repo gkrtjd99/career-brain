@@ -105,6 +105,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `coverage` | `study.read` | `GET /core/study/postings/{id}/coverage` |
 | `get_application` | `applications.read` | `GET /core/applications/{id}` |
 | `check_application` (글자·바이트 수와 검사 결과는 이것만 쓴다) | `applications.read` | `GET /core/applications/{id}/checks` |
+| `application_prep_get` — 지원 준비 문서(문항마다 쓸 경험 후보·근거·이유·빈 곳, 요건 충족표, 고른 것, 오래됨). 읽기 전용, restricted 원본 인용은 `null`과 `quotes_withheld`, c0037 | `applications.read` | `GET /core/applications/{id}/prep` |
 | `propose_document_suggestion` | `documents.ai` (egress) | `POST …/documents/{id}/suggestions` |
 | `study_record_attempt` | `study.write` | `POST /core/study/attempts` |
 | `approval_request` · `approval_status` | `approvals.request` · `approvals.read` | `POST/GET /core/approvals` |
@@ -119,6 +120,8 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `profile_summary` — 이름·한 줄 소개·링크만, 읽기 전용, c0036 | `profile.read` | `GET /core/profile` (그중 세 칸) |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
+
+`application_prep_get`(c0037)은 **글 쓰기 재료가 아니다**: 설명과 결과의 `note`에 "이것으로 답 글을 쓰지 말 것"을 싣는다. 후보는 사용자가 확인한 주장과 원문 근거뿐이고, 회사 항목·참고 구성은 참고 지식이다. 만들기·고르기는 MCP에 없다(웹에서 사람이 한다).
 
 `profile_summary`(c0036)는 프로필에서 **이름·한 줄 소개·링크만** 준다. 생년월일·이메일·전화·주소·증명사진은 개인 식별 정보(restricted)라 어떤 MCP 도구로도 나가지 않는다 — 에이전트가 이력서 초안에 연락처가 필요하면 사용자가 직접 채운다. 결과에 `record: "profile"`과 그 안내(`note`)가 붙고, 사용자가 쓴 글이라 `untrusted_content: true`다 (`test_profiles.py`).
 
