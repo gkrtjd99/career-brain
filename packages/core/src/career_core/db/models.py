@@ -1273,3 +1273,40 @@ class CompanyFact(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class Credential(Base):
+    """자격·이수 기록 하나 (c0034, plan §20): 자격증·어학·수료·수상·학력·그 밖의 증명. 경험(주장)이 아니다.
+
+    ``field_spans``: 증빙에서 뽑은 칸의 원문 위치 ``{칸: {"block": 순번, "start", "end", "page"}}``
+    (``parse_run_id``의 블록 안). 원문 글은 복사하지 않는다. 사람이 고친 칸은 위치가 없다.
+    """
+
+    __tablename__ = "credentials"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)  # license | language | course | award | degree | other
+    name: Mapped[str] = mapped_column(Text)
+    issuer: Mapped[str | None] = mapped_column(Text, default=None)
+    number: Mapped[str | None] = mapped_column(Text, default=None)
+    acquired_on: Mapped[date | None] = mapped_column(Date, default=None)
+    expires_on: Mapped[date | None] = mapped_column(Date, default=None)
+    started_on: Mapped[date | None] = mapped_column(Date, default=None)
+    ended_on: Mapped[date | None] = mapped_column(Date, default=None)
+    score: Mapped[str | None] = mapped_column(Text, default=None)
+    hours: Mapped[int | None] = mapped_column(Integer, default=None)
+    detail: Mapped[str | None] = mapped_column(Text, default=None)
+    # extracted | self_confirmed | evidence_supported
+    status: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[UUID | None] = mapped_column(default=None)
+    experience_id: Mapped[UUID | None] = mapped_column(default=None)
+    parse_run_id: Mapped[UUID | None] = mapped_column(default=None)
+    field_spans: Mapped[dict] = mapped_column(JSONB, default=dict)
+    confirmed_by: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
