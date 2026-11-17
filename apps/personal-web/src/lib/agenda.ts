@@ -104,7 +104,8 @@ export function buildAgenda(input: {
       kind: "stage",
       title: a?.company ?? a?.title ?? "지원",
       sub: [STAGE_KIND[s.kind], s.name !== STAGE_KIND[s.kind] ? s.name : null].filter(Boolean).join(" · "),
-      to: "/applications/$applicationId",
+      // 면접 일정은 그 지원의 면접 준비로 잇는다 (O16)
+      to: s.kind === "interview" || s.kind === "final" ? "/applications/$applicationId/interview" : "/applications/$applicationId",
       params: { applicationId: s.application_id },
     });
   }

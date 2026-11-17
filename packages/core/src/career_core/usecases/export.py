@@ -1574,6 +1574,15 @@ def _c0047_resumes(arc) -> None:
     arc.ensure_tables("core.resume_versions", "core.resume_revisions", "core.resume_line_claims")
 
 
+@schema_step(
+    "c0048",
+    "면접 준비 표 interview_preps·interview_prep_questions (옛 묶음에는 빈 표). 질문마다 출처와 "
+    "사람이 쓴 답변 메모가 함께 들어간다",
+)
+def _c0048_interview_prep(arc) -> None:
+    arc.ensure_tables("core.interview_preps", "core.interview_prep_questions")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

@@ -123,6 +123,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 | `answer_asset_list` (`kind`) · `answer_asset_get` (`answer_id`, 본문·근거·쓴 곳) — 공통 답변, 읽기 전용, c0042 | `answers.read` | `GET /core/answer-assets`, `/core/answer-assets/{id}` |
 | `resume_list` · `resume_get` (`version_id`, `revision`) — 이력서 판본(계보·설정·근거 없는 줄 수)과 본문(항목·줄·상태)·체크리스트·어림 쪽 수, c0047 | `resume.read` | `GET /core/resumes`, `/core/resumes/{id}`, `…/check` |
 | `resume_create_version` (`kind`, `parent_id`, `target_role`, `application_id`, 마스터는 `fill`·`fill_claims`) · `resume_edit` (`base_revision`, `operations` 100개까지, `reason`, `idempotency_key`) — c0047 | `resume.write` | `POST /core/resumes`, `/core/resumes/{id}/revisions` |
+| `interview_prep_get` (`application_id`) — 면접 준비: 예상 질문·출처·쓸 경험·답 메모·오래됨, 읽기 전용, c0048 | `interview_prep.read` | `GET /core/applications/{id}/interview-prep` |
 
 `company_list`·`company_get`은 **참고 지식**(사용자가 모은 회사 공개 정보)이다. 결과에 `record: "reference"`와 "사용자의 경험이 아니며 경험·성과의 근거로 인용하지 않는다"는 안내(`note`)가 붙고, 외부 자료라 `untrusted_content: true`다. 문서 근거는 주장(`claims`)만 가리키므로 회사 항목 ID를 근거로 넣으면 `unknown_claim`으로 거부된다 (`test_companies.py`). 회사 항목을 쓰거나 확인하는 MCP 도구는 없다 — 확인은 사람이 웹에서 한다.
 
@@ -135,6 +136,8 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 `education_list`·`skills_overview`·`answer_asset_list`·`answer_asset_get`(c0040·c0042)은 사용자가 쓴 기록이라 `untrusted_content: true`다. 기술 보기는 따로 저장한 값이 아니라 경험 태그·확인한 "사용한 기술" 사실·자격증 이름에서 모은 것이고, 확인 전 사실은 세지 않는다. 공통 답변의 근거는 확인한 사실만 이어져 있다. 공통 답변을 쓰거나 지원서에 넣는 MCP 도구는 아직 없다 — HTTP `POST /core/answer-assets/{id}/use`(지원 쓰기 권한)를 쓴다.
 
 이력서 도구(c0047)는 웹 편집기와 같은 usecase·연산(`add_item`·`add_line`·`update_line`·`move_item`·`order_items`·`set_section`·`refill_item`·`refresh_line`·`remove_item`·`remove_line`·`fill_all`·`apply_prep_order`)·409 충돌·멱등 키를 쓴다. 결과에 안내(`note`)가 붙는다: `claim_id`가 있는 줄만 사용자가 확인한 사실이고, 없는 줄은 근거 없음이며, 사실·숫자·역할을 지어내지 않는다. 에이전트가 쓴 줄은 출처 `ai`(근거 없음)로 남고 revision 출처는 `agent`다. `resume_get`의 프로필은 이름·한 줄 소개·링크만 — 연락처·생년월일·주소·사진·병역은 블라인드와 상관없이 주지 않고, 블라인드 판본이면 학교·캠퍼스와 학력 자격의 이름·기관도 뺀다. 사용자가 쓴 글이라 `resume_list`·`resume_get`·`resume_edit` 결과는 `untrusted_content: true`다. 파일 내보내기·줄 다듬기 제안 도구는 없다 — 웹에서 사람이 한다 (`test_resumes.py::test_mcp_parity_and_restricted_profile`).
+
+`interview_prep_get`(c0048)은 웹과 같은 usecase다. 사용자가 쓴 답 메모·제출한 글·회사 페이지 글이 들어 있어 `untrusted_content: true`이고, restricted 사실의 원문 인용은 비우고 `quotes_withheld`에 수를 남긴다. 참고 면접 후기에서 온 질문의 출처에는 `record: "reference"`와 "남의 글이며 근거로 쓰지 않는다"는 안내가 붙는다. 쓰기 도구는 두지 않았다 — 답은 사람이 쓰고, 질문 만들기·답 의견은 웹에서 사람이 누른다 (`test_interview_prep.py::test_http_permissions_and_mcp`).
 
 `search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`). `routes.rerank`가 있으면 검색 화면처럼 앞 결과를 다시 정렬하고 응답에 `reranked`·`rerank_note`·결과마다 `rerank_rank`가 붙는다 (`search.md` "결과 다시 정렬").
 

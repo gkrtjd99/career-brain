@@ -199,6 +199,13 @@ export function noteLabel(note: string): string {
 
 /** 서버 오류 코드 → 사람이 읽는 문장 */
 export const ERROR_TEXT: Record<string, string> = {
+  // 면접 준비 (c0048)
+  answer_required: "답이 비어 있습니다. 먼저 답을 씁니다.",
+  answer_too_long: "답변 메모는 5,000자까지입니다.",
+  question_empty: "질문이 비어 있습니다.",
+  interview_question_too_long: "질문은 300자까지입니다.",
+  prep_not_ready: "먼저 예상 질문을 만들어야 합니다.",
+  too_many_questions: "직접 더한 질문이 너무 많습니다.",
   // 보고 있는 페이지 보내기 (c0043)
   capture_too_short: "본문을 찾지 못했습니다. 공고 본문을 선택한 뒤 다시 보내 주세요.",
   html_too_large: "페이지가 너무 큽니다. 공고 본문을 선택한 뒤 다시 보내 주세요.",

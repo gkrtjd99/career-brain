@@ -86,11 +86,22 @@ export function ApplicationView({ app }: { app: Application }) {
           </span>
         }
         actions={
-          app.status !== "rejected" && app.status !== "withdrawn" ? (
-            <Button size="sm" onClick={() => setStatusOpen(true)}>
-              결과 기록
-            </Button>
-          ) : null
+          <div className="flex items-center gap-2">
+            {app.status === "submitted" || app.status === "passed" ? (
+              <Link
+                to="/applications/$applicationId/interview"
+                params={{ applicationId: app.id }}
+                className="inline-flex h-9 items-center rounded-md border border-line bg-surface px-2.5 text-[13px] font-medium text-fg hover:bg-subtle sm:h-8"
+              >
+                면접 준비
+              </Link>
+            ) : null}
+            {app.status !== "rejected" && app.status !== "withdrawn" ? (
+              <Button size="sm" onClick={() => setStatusOpen(true)}>
+                결과 기록
+              </Button>
+            ) : null}
+          </div>
         }
       />
       {app.result_note ? <p className="mb-4 text-[13px] text-muted">메모: {app.result_note}</p> : null}

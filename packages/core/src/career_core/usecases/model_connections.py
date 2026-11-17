@@ -60,6 +60,8 @@ KNOWN_PURPOSES: tuple[str, ...] = (
     "company_facts",
     "reference_notes",
     "application_prep",
+    "interview_prep",
+    "interview_feedback",
     "embed",
     "rerank",
     "judge_claim",

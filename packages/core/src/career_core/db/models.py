@@ -1602,3 +1602,63 @@ class ResumeLineClaim(Base):
     line_id: Mapped[str] = mapped_column(Text)
     claim_id: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------- c0048: 면접 준비 (O16)
+
+
+class InterviewPrep(Base):
+    """지원 하나의 면접 준비: 예상 질문 묶음. 공고·제출본·회사·참고·경험의 해시(basis)에 묶인다.
+
+    O04 경험 인터뷰(``interview_sessions``)와 다른 것이다: 그것은 경험을 채우려는 질문, 이것은 면접 대비 질문."""
+
+    __tablename__ = "interview_preps"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    application_id: Mapped[UUID]
+    posting_id: Mapped[UUID]
+    submission_id: Mapped[UUID | None] = mapped_column(default=None)
+    mode: Mapped[str] = mapped_column(Text)  # model | search
+    basis: Mapped[dict] = mapped_column(JSONB, default=dict)
+    notes: Mapped[list] = mapped_column(JSONB, default=list)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    generated_by: Mapped[UUID]
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class InterviewPrepQuestion(Base):
+    """예상 질문 하나와 그 출처. 답변 메모(``answer``)는 사람이 쓴다 — 앱이 만들지 않는다."""
+
+    __tablename__ = "interview_prep_questions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    prep_id: Mapped[UUID]
+    position: Mapped[int] = mapped_column(Integer)
+    # posting | submission | company | reference | common | user
+    source_kind: Mapped[str] = mapped_column(Text)
+    source_key: Mapped[str] = mapped_column(Text)
+    origin: Mapped[str] = mapped_column(Text)  # rule | model | user (질문 문구를 누가 썼나)
+    question: Mapped[str] = mapped_column(Text)
+    source: Mapped[dict] = mapped_column(JSONB)
+    submission_id: Mapped[UUID | None] = mapped_column(default=None)
+    company_fact_id: Mapped[UUID | None] = mapped_column(default=None)
+    reference_note_id: Mapped[UUID | None] = mapped_column(default=None)
+    common_kind: Mapped[str | None] = mapped_column(Text, default=None)
+    suggestions: Mapped[list] = mapped_column(JSONB, default=list)
+    answer: Mapped[str] = mapped_column(Text, default="")
+    answer_asset_id: Mapped[UUID | None] = mapped_column(default=None)
+    answer_updated_by: Mapped[UUID | None] = mapped_column(default=None)
+    answer_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

@@ -95,6 +95,10 @@ ACTION_SCOPES: dict[str, str] = {
     # c0047 (O17) 이력서 판본. 줄 다듬기(모델 호출)는 documents.ai도 있어야 한다
     "resume.read": "read",
     "resume.write": "draft-write",
+    # c0048 (O16) 면접 준비. 답변 메모는 사람이 쓴다(쓰기). 모델로 질문 다듬기·답 의견 받기는 egress
+    "interview_prep.read": "read",
+    "interview_prep.write": "draft-write",
+    "interview_prep.ai": "egress",
 }
 
 
