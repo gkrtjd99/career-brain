@@ -61,7 +61,7 @@ usecase ─ run(actor, purpose, ModelRequest) ─▶ ModelGateway
   나중에 파일에 같은 이름이 생기면 파일이 이긴다. 라우트·예산은 화면 값이 파일 값을 덮고, 라우트 `null`·예산 `null`이면 파일 값으로 돌아간다.
   가리키는 연결이 사라진 라우트 덮기는 건너뛴다(파일 값).
 - **검사는 `parse_models_config`와 같다.** 아는 preset, OpenAI 호환은 주소 필수, 과금 `metered`·`subscription`·`free`, 토큰 파라미터 `max_tokens`·`max_completion_tokens`,
-  로컬(`local`) 연결은 `embed` 라우트만, `embed`는 Anthropic 불가. 화면 규칙을 더한다: `data_classes`는 `public`·`private`만(`restricted` → 422 `restricted_not_allowed`),
+  로컬(`local`) 연결은 `embed`·`rerank` 라우트만, `embed`는 Anthropic 불가. 화면 규칙을 더한다: `data_classes`는 `public`·`private`만(`restricted` → 422 `restricted_not_allowed`),
   주소는 `http(s)://`, `price_as`는 단가표 제공자(anthropic·openai·gemini·xai) 중 하나. 종량제 직접 연결(LiteLLM 등)은 `price_as`를 단가 제공자로 쓴다.
 - **키.** `cryptography` Fernet으로 암호화해 `core.model_connection_secrets`에 둔다 (연결과 1:1, 끊으면 같이 지워짐). 암호 키는 `CAREER_SECRET_KEY`(urlsafe base64 Fernet 키),
   없으면 `CAREER_SECRET_KEY_FILE`(기본 `data/secret.key`, 이미지 `/data/secret.key`)을 처음 암호화할 때 0600으로 만든다. API·CLI는 키를 돌려주지 않는다 (상태 `set`·`missing`·`not_needed`·`needs_reentry`, 끝 4자리만).
@@ -197,6 +197,12 @@ MCP 도구로는 열지 않는다. `personal-api models`는 `CAREER_API_TOKEN`�
 - 기준선이 틀린 것: 학습·계획을 경험으로, 부정문("써 본 적 없다"), 같은 낱말 다른 뜻, 다른 표현(낱말이 안 겹침).
 - 2026-11-17 다시 잰 기준선(`--baseline-only`, 모델 호출 없음): 기본 별칭 표를 넓혀(c32 `프로메테우스`·`그라파나`, c59 `지라`·`컨플루언스`) 주장 31/64 → **33/64**, 가시성 21/36 그대로. 형태소 모드(kiwi)도 33/64 — 복합명사 규칙으로 c19가 다시 맞음 (`search.md` "복합명사 낱말 일치"). 판정 모델 숫자는 다시 재지 않았다.
 - 표본이 작다 (합성 100건, 같은 사람이 만듦). 기본 라우트로 켜지 않는다. 쓰려면 `models.toml`에 `judge_claim`·`judge_visibility`를 적는다.
+
+## 검색 결과 다시 정렬 (`rerank`, 선택)
+
+`routes.rerank`가 있을 때만 검색 화면·MCP `search_brain`의 앞 결과(`[rerank] top_n`, 기본 20)를 다시 정렬한다. `default`로 넘어가지 않는다.
+로컬 연결이면 fastembed cross-encoder(이 기계 안), 그 밖의 연결이면 대화 모델에 질문 + 결과 발췌 목록을 보내고 순서를 받는다
+(장부 `purpose = 'rerank'`, egress·단가·예산 같음, restricted 결과는 보내지 않음). 측정·권장 설정: `search.md` "결과 다시 정렬".
 
 ## 모니터링
 

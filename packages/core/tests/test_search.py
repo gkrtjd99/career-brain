@@ -128,7 +128,7 @@ def test_query_terms_and_snippet():
 
 
 def test_embedding_config_rules():
-    with pytest.raises(ConfigError, match="local endpoints only serve the embed route"):
+    with pytest.raises(ConfigError, match="local endpoints only serve the embed and rerank routes"):
         parse_models_config('[endpoints.l]\npreset="local"\n[routes]\ndefault="l/m"\n')
     with pytest.raises(ConfigError, match="OpenAI-compatible or local"):
         parse_models_config('[endpoints.c]\npreset="anthropic"\n[routes]\nembed="c/m"\n')

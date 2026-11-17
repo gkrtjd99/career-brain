@@ -31,7 +31,7 @@ export function RoutesTab({ status, canEdit }: { status: ModelsStatus; canEdit: 
   return (
     <div className="max-w-3xl space-y-6">
       <p className="text-[13px] text-muted">
-        작업마다 쓸 모델을 고릅니다. 정하지 않은 작업은 기본 모델을 씁니다. 검색 색인·이미지 읽기·판정은 기본으로 넘어가지
+        작업마다 쓸 모델을 고릅니다. 정하지 않은 작업은 기본 모델을 씁니다. 검색 색인·다시 정렬·이미지 읽기·판정은 기본으로 넘어가지
         않으니 따로 정해야 합니다.
       </p>
       <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] gap-4 border-b border-line pb-2 text-xs text-muted sm:grid">

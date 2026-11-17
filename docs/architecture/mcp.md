@@ -132,7 +132,7 @@ stdio는 API 서버 없이 DB에 직접 붙는다 (`.env`도 읽는다). 백그�
 
 `education_list`·`skills_overview`·`answer_asset_list`·`answer_asset_get`(c0040·c0042)은 사용자가 쓴 기록이라 `untrusted_content: true`다. 기술 보기는 따로 저장한 값이 아니라 경험 태그·확인한 "사용한 기술" 사실·자격증 이름에서 모은 것이고, 확인 전 사실은 세지 않는다. 공통 답변의 근거는 확인한 사실만 이어져 있다. 공통 답변을 쓰거나 지원서에 넣는 MCP 도구는 아직 없다 — HTTP `POST /core/answer-assets/{id}/use`(지원 쓰기 권한)를 쓴다.
 
-`search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`).
+`search_brain`은 기본으로 경험 근거(주장·블록·인터뷰 답)만 찾는다. `include_study: true`를 주면 학습 메모(`study_note`)·오답(`study_mistake`)을 더하고, 학습 결과마다 `record: "study"`, `note: "study, not experience"`를 붙인다 (응답에도 `include_study: true`). `kinds`로는 학습 종류를 고를 수 없다 (경험 종류만, 섞이지 않게). 학습 기록은 경험 근거가 아니므로 문서 근거로 쓰지 않는다 (c0021, `search.md`). `routes.rerank`가 있으면 검색 화면처럼 앞 결과를 다시 정렬하고 응답에 `reranked`·`rerank_note`·결과마다 `rerank_rank`가 붙는다 (`search.md` "결과 다시 정렬").
 
 `include_reference: true`(c0032)를 주면 참고 자료(남의 자기소개서·면접 후기·회사 자료) 원본의 글도 찾고, 그 결과마다 `record: "reference"`, `note: "reference material written by others, not the user's experience"`를 붙인다 (응답에도 `include_reference: true`). 증빙 서류(`purpose = proof`)의 글은 어떤 인자로도 나오지 않고, 증빙 원본의 근거 위치를 `get_evidence`로 열면 `proof_not_shared` 오류다.
 

@@ -12,7 +12,12 @@ from datetime import datetime
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-from career_core.llm.types import EmbeddingCompletion, ModelCompletion, ModelRequest
+from career_core.llm.types import (
+    EmbeddingCompletion,
+    ModelCompletion,
+    ModelRequest,
+    RerankCompletion,
+)
 
 ACTOR_HUMAN = "human"
 ACTOR_AGENT = "agent"
@@ -80,6 +85,18 @@ class EmbeddingClient(Protocol):
     async def embed(
         self, model: str, texts: Sequence[str], *, input_type: str, dimensions: int | None
     ) -> EmbeddingCompletion: ...
+
+
+@runtime_checkable
+class RerankClient(Protocol):
+    """검색 결과 다시 정렬 (로컬 cross-encoder). 게이트웨이만 직접 부른다.
+
+    점수는 보낸 글 순서 그대로 하나씩. 척도는 모델마다 다르다 (순서만 쓴다).
+    """
+
+    async def rerank(
+        self, model: str, query: str, documents: Sequence[str]
+    ) -> RerankCompletion: ...
 
 
 @runtime_checkable
@@ -259,4 +276,5 @@ __all__ = [
     "ParserProvider",
     "PermissionPolicy",
     "ProviderParseStatus",
+    "RerankClient",
 ]

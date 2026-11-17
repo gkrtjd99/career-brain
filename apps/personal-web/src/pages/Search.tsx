@@ -129,6 +129,7 @@ export function SearchPage() {
               <p className="mb-2 text-[13px] text-muted tabular-nums">
                 {r.hits.length}건 · {r.mode === "hybrid" ? "키워드 + 의미" : r.mode === "keyword" ? "키워드" : r.mode}
                 {r.semantic_note ? ` · 의미 검색 안 함: ${semanticNote(r.semantic_note)}` : ""}
+                {r.reranked ? " · 앞 결과 다시 정렬" : ""}
               </p>
               {r.expanded_terms?.length ? (
                 <p className="mb-2 text-[13px] text-muted">

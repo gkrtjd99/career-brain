@@ -28,7 +28,7 @@ career-brain은 Apache-2.0이다. 직접 의존하는 패키지와 라이선스�
 | `age` | pyrage | MIT |
 | `browser` | playwright | Apache-2.0 (Chromium은 별도 설치) |
 
-로컬 임베딩 모델 파일(예: `minishlab/potion-multilingual-128M`)은 처음 쓸 때 받으며 이 레포에 들어 있지 않다. 각 모델 카드의 라이선스를 따른다.
+로컬 임베딩 모델 파일(예: `minishlab/potion-multilingual-128M`)과 검색 결과 다시 정렬 모델(권장 `BAAI/bge-reranker-v2-m3-int8`, Apache-2.0)은 처음 쓸 때 받으며 이 레포에 들어 있지 않다. 각 모델 카드의 라이선스를 따른다. 비상업 라이선스(CC-BY-NC 등) 모델은 권하지 않는다 (예: `jinaai/jina-reranker-v2-base-multilingual`).
 
 ## 웹 (번들에 들어감)
 

@@ -335,7 +335,7 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_route: "용도별 모델은 '연결/모델' 형식이어야 합니다.",
   invalid_purpose: "알 수 없는 용도입니다.",
   unknown_endpoint: "없는 연결입니다.",
-  local_only_embed: "로컬 모델은 임베딩 용도에만 쓸 수 있습니다.",
+  local_only_embed: "로컬 모델은 검색 색인과 검색 결과 다시 정렬에만 쓸 수 있습니다.",
   embed_needs_openai: "임베딩에는 OpenAI 호환 또는 로컬 연결이 필요합니다.",
   invalid_budget: "예산은 0 이상의 금액이어야 합니다.",
   name_immutable: "연결 이름은 바꿀 수 없습니다. 새로 만들고 예전 것을 해제하세요.",

@@ -12,6 +12,8 @@ from career_core.llm.types import (
     ModelDenied,
     ModelRequest,
     ModelResult,
+    RerankCompletion,
+    RerankResult,
     TokenUsage,
     UsagePart,
 )
@@ -28,6 +30,8 @@ __all__ = [
     "ModelDenied",
     "ModelRequest",
     "ModelResult",
+    "RerankCompletion",
+    "RerankResult",
     "TokenUsage",
     "UsagePart",
 ]

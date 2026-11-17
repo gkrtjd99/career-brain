@@ -9,6 +9,9 @@
 
 `--spec`은 `<엔드포인트>/<모델>[:차원]`. 엔드포인트 설정·키 환경변수 이름은 `--models` 파일에서
 읽는다(키 값은 출력하지 않는다). API 임베딩은 과금된다: 글 40개 + 질문 52개, 실행당 수천 토큰.
+
+`--rerank <엔드포인트>/<모델>`을 주면 벡터 순위의 앞 `--rerank-top`(기본 20)개를 그 모델로 다시 정렬한
+결과와 질문마다 걸린 시간도 잰다 (로컬 cross-encoder, 검색의 `routes.rerank`와 같은 클라이언트).
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import asyncio
 import json
 import math
 import os
+import time
 from dataclasses import dataclass, field
 from importlib import resources
 from typing import Any
@@ -58,6 +62,8 @@ class Result:
     spec: str
     scores: dict[str, Score] = field(default_factory=dict)
     input_tokens: int = 0
+    reranked: dict[str, Score] = field(default_factory=dict)
+    rerank_seconds: list[float] = field(default_factory=list)
 
 
 def _norm(v: tuple[float, ...]) -> tuple[float, ...]:
@@ -65,17 +71,19 @@ def _norm(v: tuple[float, ...]) -> tuple[float, ...]:
     return tuple(x / n for x in v)
 
 
-def rank(query_vec, passage_vecs: dict[str, tuple[float, ...]], expect: str) -> int:
+def ordering(query_vec, passage_vecs: dict[str, tuple[float, ...]]) -> list[str]:
     q = _norm(query_vec)
     sims = {
         pid: sum(a * b for a, b in zip(q, _norm(v), strict=True)) for pid, v in passage_vecs.items()
     }
-    ordered = sorted(sims, key=lambda pid: (-sims[pid], pid))
-    return ordered.index(expect) + 1
+    return sorted(sims, key=lambda pid: (-sims[pid], pid))
 
 
-async def evaluate_spec(models_path: str | None, spec: str, fx: dict[str, Any]) -> Result:
-    route_text, _, dims_text = spec.partition(":")
+def rank(query_vec, passage_vecs: dict[str, tuple[float, ...]], expect: str) -> int:
+    return ordering(query_vec, passage_vecs).index(expect) + 1
+
+
+def _client(models_path: str | None, route_text: str):
     route = parse_route(route_text)
     config = load_models_config(models_path)
     endpoint = config.endpoints.get(route.endpoint)
@@ -84,7 +92,19 @@ async def evaluate_spec(models_path: str | None, spec: str, fx: dict[str, Any]) 
     key = os.environ.get(endpoint.api_key_env) if endpoint.api_key_env else None
     if endpoint.api_key_env and not key:
         raise SystemExit(f"{endpoint.api_key_env} is not set")
-    client = default_client_factory(endpoint, key)
+    return route, default_client_factory(endpoint, key)
+
+
+async def evaluate_spec(
+    models_path: str | None,
+    spec: str,
+    fx: dict[str, Any],
+    *,
+    rerank: str | None = None,
+    rerank_top: int = 20,
+) -> Result:
+    route_text, _, dims_text = spec.partition(":")
+    route, client = _client(models_path, route_text)
     dims = int(dims_text) if dims_text else None
 
     ids = list(fx["passages"])
@@ -103,26 +123,54 @@ async def evaluate_spec(models_path: str | None, spec: str, fx: dict[str, Any]) 
         r = rank(qv, vecs, q["expect"])
         res.scores[q["type"]].add(r)
         res.scores["all"].add(r)
+    if rerank:
+        rr_route, rr_client = _client(models_path, rerank)
+        if not hasattr(rr_client, "rerank"):
+            raise SystemExit(f"{rerank} is not a local rerank endpoint")
+        await rr_client.rerank(rr_route.model, "warm up", ["a", "b"])  # 모델을 먼저 올린다
+        res.reranked = {t: Score() for t in (*TYPES, "all")}
+        for q, qv in zip(fx["queries"], asked.vectors, strict=True):
+            order = ordering(qv, vecs)
+            head = order[:rerank_top]
+            started = time.perf_counter()
+            comp = await rr_client.rerank(rr_route.model, q["q"], [fx["passages"][i] for i in head])
+            res.rerank_seconds.append(time.perf_counter() - started)
+            new = sorted(range(len(head)), key=lambda j: (-comp.scores[j], j))
+            r = ([head[j] for j in new] + order[rerank_top:]).index(q["expect"]) + 1
+            res.reranked[q["type"]].add(r)
+            res.reranked["all"].add(r)
     return res
 
 
-async def _main(models_path: str | None, specs: list[str]) -> None:
+async def _main(
+    models_path: str | None, specs: list[str], rerank: str | None, rerank_top: int
+) -> None:
     fx = load_fixture()
     counts = {t: sum(q["type"] == t for q in fx["queries"]) for t in TYPES}
     print(f"passages {len(fx['passages'])}, queries {len(fx['queries'])} {counts}")
     for spec in specs:
-        res = await evaluate_spec(models_path, spec, fx)
+        res = await evaluate_spec(models_path, spec, fx, rerank=rerank, rerank_top=rerank_top)
         print(f"\n{spec}  (input tokens {res.input_tokens})")
         for kind, score in res.scores.items():
             print(f"  {kind:9} {score}")
+        if res.reranked:
+            ms = sorted(x * 1000 for x in res.rerank_seconds)
+            p95 = ms[min(len(ms) - 1, int(len(ms) * 0.95))]
+            print(
+                f"\n{spec} top {rerank_top} + {rerank}  (p50 {ms[len(ms) // 2]:.0f}ms p95 {p95:.0f}ms)"
+            )
+            for kind, score in res.reranked.items():
+                print(f"  {kind:9} {score}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--models", default="models.toml")
     parser.add_argument("--spec", action="append", required=True)
+    parser.add_argument("--rerank", help="<endpoint>/<model> (local cross-encoder)")
+    parser.add_argument("--rerank-top", type=int, default=20)
     args = parser.parse_args()
-    asyncio.run(_main(args.models, args.spec))
+    asyncio.run(_main(args.models, args.spec, args.rerank, args.rerank_top))
 
 
 if __name__ == "__main__":

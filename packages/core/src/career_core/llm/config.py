@@ -108,7 +108,19 @@ class EmbeddingConfig:
     batch_size: int = 64
 
 
+DEFAULT_RERANK_TOP_N = 20
+
+
+@dataclass(frozen=True, slots=True)
+class RerankConfig:
+    # RRF로 합친 결과의 앞 몇 개를 다시 정렬할지. 나머지는 RRF 순서 그대로 뒤에 둔다.
+    top_n: int = DEFAULT_RERANK_TOP_N
+
+
 EMBED_PURPOSE = "embed"
+RERANK_PURPOSE = "rerank"
+# 로컬(이 프로세스 안) 모델이 맡을 수 있는 용도
+LOCAL_PURPOSES = frozenset({EMBED_PURPOSE, RERANK_PURPOSE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,10 +130,15 @@ class ModelsConfig:
     budget: BudgetConfig = field(default_factory=BudgetConfig)
     price_files: tuple[Path, ...] = ()
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
+    rerank: RerankConfig = field(default_factory=RerankConfig)
 
     def embedding_route(self) -> Route | None:
         """임베딩은 기본 라우트로 넘어가지 않는다 (대화 모델로 임베딩을 부르지 않게)."""
         return self.routes.get(EMBED_PURPOSE)
+
+    def rerank_route(self) -> Route | None:
+        """검색 결과 다시 정렬. 기본 라우트로 넘어가지 않는다 (정하지 않으면 RRF 순서 그대로)."""
+        return self.routes.get(RERANK_PURPOSE)
 
     def route_for(self, purpose: str) -> Route | None:
         return self.routes.get(purpose) or self.routes.get("default")
@@ -199,11 +216,16 @@ def parse_models_config(text: str, *, base_dir: Path | None = None) -> ModelsCon
         dimensions=dims, batch_size=max(1, int(raw_embed.get("batch_size", 64)))
     )
     for purpose, route in routes.items():
-        if purpose != EMBED_PURPOSE and endpoints[route.endpoint].kind == KIND_LOCAL:
-            raise ConfigError(f"route {purpose!r}: local endpoints only serve the embed route")
+        if purpose not in LOCAL_PURPOSES and endpoints[route.endpoint].kind == KIND_LOCAL:
+            raise ConfigError(
+                f"route {purpose!r}: local endpoints only serve the embed and rerank routes"
+            )
     if (r := routes.get(EMBED_PURPOSE)) and endpoints[r.endpoint].kind == "anthropic":
         raise ConfigError("the embed route needs an OpenAI-compatible or local endpoint")
-    return ModelsConfig(endpoints, routes, budget, price_files, embedding)
+    top_n = data.get("rerank", {}).get("top_n", DEFAULT_RERANK_TOP_N)
+    if not isinstance(top_n, int) or not 2 <= top_n <= 50:
+        raise ConfigError("rerank.top_n must be an integer between 2 and 50")
+    return ModelsConfig(endpoints, routes, budget, price_files, embedding, RerankConfig(top_n))
 
 
 def load_models_config(path: Path | str | None) -> ModelsConfig:

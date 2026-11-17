@@ -144,6 +144,7 @@ async def _search(env: ToolEnv, a: SearchArgs) -> Any:
         kinds=kinds,
         limit=a.limit,
         include_reference=a.include_reference,
+        rerank=True,
     )
     if not a.include_study and not a.include_reference:
         return result

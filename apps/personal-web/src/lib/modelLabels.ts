@@ -88,6 +88,7 @@ export function dataClassText(classes: string[]) {
 export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
   default: "기본 (따로 정하지 않은 용도)",
   embed: "검색 색인 (임베딩)",
+  rerank: "검색 결과 다시 정렬 (선택)",
   extract: "경험 후보 추출",
   brain_extract: "경험 후보 추출",
   interview: "인터뷰 질문",
@@ -103,4 +104,4 @@ export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
 };
 
 /** default로 넘어가지 않는 용도 (models.example.toml): 비어 있으면 그 일을 하지 않는다 */
-export const NO_FALLBACK = new Set(["embed", "job_extract_image", "judge_claim", "judge_visibility"]);
+export const NO_FALLBACK = new Set(["embed", "rerank", "job_extract_image", "judge_claim", "judge_visibility"]);

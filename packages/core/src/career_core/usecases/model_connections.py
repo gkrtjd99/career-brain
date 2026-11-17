@@ -39,6 +39,7 @@ from career_core.llm.config import (
     BILLINGS,
     EMBED_PURPOSE,
     KIND_LOCAL,
+    LOCAL_PURPOSES,
     PRESETS,
     TOKEN_PARAMS,
     EndpointConfig,
@@ -60,6 +61,7 @@ KNOWN_PURPOSES: tuple[str, ...] = (
     "reference_notes",
     "application_prep",
     "embed",
+    "rerank",
     "judge_claim",
     "judge_visibility",
 )
@@ -178,7 +180,7 @@ def _endpoint(row: ModelConnection, has_key: bool) -> EndpointConfig:
 def _route_problem(purpose: str, endpoint: EndpointConfig | None) -> str | None:
     if endpoint is None:
         return "unknown_endpoint"
-    if purpose != EMBED_PURPOSE and endpoint.kind == KIND_LOCAL:
+    if purpose not in LOCAL_PURPOSES and endpoint.kind == KIND_LOCAL:
         return "local_only_embed"
     if purpose == EMBED_PURPOSE and endpoint.kind == "anthropic":
         return "embed_needs_openai"
@@ -238,6 +240,7 @@ def _merge(
         budget=budget,
         price_files=base.price_files,
         embedding=base.embedding,
+        rerank=base.rerank,
     )
     env: Mapping[str, str] = ChainMap(keys, base_env) if keys else base_env  # type: ignore[arg-type]
     return _Merged(

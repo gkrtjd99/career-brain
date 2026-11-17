@@ -39,6 +39,8 @@ class HitOut(BaseModel):
     study_title: str | None = None
     # c0032: 원본 용도 (experience | reference). 증빙 원본의 글은 결과에 없다
     purpose: str = "experience"
+    # 다시 정렬(routes.rerank)한 결과만: 앞 묶음 안의 순위. score는 RRF 점수 그대로
+    rerank_rank: int | None = None
 
 
 class ExpandedTermOut(BaseModel):
@@ -55,6 +57,9 @@ class SearchOut(BaseModel):
     include_reference: bool = False
     # 공간 별칭 사전으로 키워드 검색에 더한 표기 ("패스트API" → FastAPI, fast api)
     expanded_terms: list[ExpandedTermOut] = []
+    # 앞 결과를 다시 정렬했는가 (routes.rerank가 있을 때만). 못 했으면 rerank_note에 이유
+    reranked: bool = False
+    rerank_note: str | None = None
 
 
 class QueuedOut(BaseModel):
@@ -90,6 +95,7 @@ def add_search_routes(router: APIRouter, deps, authorize) -> None:
             kinds=wanted,
             limit=limit,
             include_reference=include_reference,
+            rerank=True,
         )
         return SearchOut(
             query=result.query,
@@ -101,6 +107,8 @@ def add_search_routes(router: APIRouter, deps, authorize) -> None:
                 ExpandedTermOut.model_validate(e, from_attributes=True)
                 for e in result.expanded_terms
             ],
+            reranked=result.reranked,
+            rerank_note=result.rerank_note,
         )
 
     @router.post("/search/reindex", response_model=QueuedOut, status_code=202)

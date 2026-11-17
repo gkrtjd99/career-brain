@@ -2,7 +2,7 @@
 
 import pytest
 from career_core.evals import embed_eval
-from career_core.llm.types import EmbeddingCompletion, TokenUsage, UsagePart
+from career_core.llm.types import EmbeddingCompletion, RerankCompletion, TokenUsage, UsagePart
 
 
 def test_fixture_is_consistent():
@@ -44,3 +44,35 @@ async def test_evaluate_spec_with_scripted_client(monkeypatch, tmp_path):
     res = await embed_eval.evaluate_spec(str(models), "local/fake:64", fx)
     assert res.scores["all"].hit1 == len(fx["queries"])
     assert res.input_tokens == len(fx["passages"]) + len(fx["queries"])
+
+
+@pytest.mark.anyio
+async def test_evaluate_spec_with_rerank(monkeypatch, tmp_path):
+    """--rerank: 벡터 순위 앞 N개만 다시 정렬한다 (가짜는 보낸 순서를 거꾸로)."""
+    fx = embed_eval.load_fixture()
+    order = list(fx["passages"])
+    answer = {q["q"]: q["expect"] for q in fx["queries"]}
+
+    class Scripted:
+        async def embed(self, model, texts, *, input_type, dimensions):
+            def vec(t):
+                pid = answer.get(t) or next(p for p in order if fx["passages"][p] == t)
+                return tuple(1.0 if p == pid else 0.0 for p in order)
+
+            return EmbeddingCompletion(vectors=tuple(vec(t) for t in texts), model=model)
+
+        async def rerank(self, model, query, documents):
+            scores = tuple(float(i) for i in range(len(documents)))
+            return RerankCompletion(scores=scores, model=model)
+
+    monkeypatch.setattr(embed_eval, "default_client_factory", lambda ep, key: Scripted())
+    models = tmp_path / "models.toml"
+    models.write_text('[endpoints.local]\npreset = "local"\n', encoding="utf-8")
+    res = await embed_eval.evaluate_spec(
+        str(models), "local/fake:64", fx, rerank="local/fake-ce", rerank_top=3
+    )
+    n = len(fx["queries"])
+    assert res.scores["all"].hit1 == n
+    # 1위였던 정답이 앞 3개 안에서 3위로 간다
+    assert res.reranked["all"].hit1 == 0 and res.reranked["all"].hit5 == n
+    assert len(res.rerank_seconds) == n
