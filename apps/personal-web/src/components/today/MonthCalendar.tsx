@@ -61,7 +61,7 @@ export function MonthCalendar({
 
   return (
     <div className="rounded-lg border border-line bg-surface">
-      <div className="flex items-center gap-1 border-b border-line px-3 py-2">
+      <div className="flex items-center gap-1 border-b border-line px-3 py-1.5 sm:py-2">
         <div className="text-sm font-semibold">
           {view.y}년 {view.m + 1}월
         </div>
@@ -95,7 +95,7 @@ export function MonthCalendar({
       </div>
       <div className="grid grid-cols-7 border-b border-line text-center text-[11px] text-muted">
         {WEEKDAYS.map((w, i) => (
-          <div key={w} className={cn("py-1.5", i === 0 && "text-danger/80")}>
+          <div key={w} className={cn("py-1 sm:py-1.5", i === 0 && "text-danger/80")}>
             {w}
           </div>
         ))}
@@ -110,7 +110,7 @@ export function MonthCalendar({
             <div
               key={day ?? `blank-${i}`}
               className={cn(
-                "min-h-14 border-line p-1 sm:min-h-20",
+                "min-h-10 border-line p-0.5 sm:min-h-20 sm:p-1",
                 i % 7 !== 6 && "border-r",
                 i < cells.length - 7 && "border-b",
                 !day && "bg-subtle/40",
@@ -129,7 +129,7 @@ export function MonthCalendar({
                 >
                   <span
                     className={cn(
-                      "mx-auto inline-flex size-6 items-center justify-center rounded-full text-xs sm:mx-0",
+                      "mx-auto inline-flex size-5 items-center justify-center rounded-full text-[11px] sm:mx-0 sm:size-6 sm:text-xs",
                       isToday ? "bg-fg font-semibold text-bg" : past ? "text-muted/70" : "text-fg",
                     )}
                   >
@@ -165,14 +165,14 @@ export function MonthCalendar({
           );
         })}
       </div>
-      <div className="flex flex-wrap items-center gap-3 border-t border-line px-3 py-2 text-[11px] text-muted">
+      <div className="flex flex-wrap items-center gap-3 border-t border-line px-3 py-1.5 text-[11px] text-muted sm:py-2">
         {(Object.keys(AGENDA_KIND) as AgendaKind[]).map((k) => (
           <span key={k} className="inline-flex items-center gap-1.5">
             <span className={cn("inline-block h-2.5 w-4 rounded-sm", KIND_DOT[k])} />
             {AGENDA_KIND[k]}
           </span>
         ))}
-        <Link to="/postings" className="ml-auto hover:text-fg">
+        <Link to="/postings" className="ml-auto hidden hover:text-fg sm:inline">
           공고 마감은 저장한 공고에서
         </Link>
       </div>
