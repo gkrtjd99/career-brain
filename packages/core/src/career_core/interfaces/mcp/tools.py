@@ -176,6 +176,8 @@ class ListExperiencesArgs(Args):
     status: Literal["needs_review", "confirmed", "no_claims"] | None = None
     query: str | None = Field(default=None, max_length=200)
     sort: Literal["start", "updated", "title"] = "start"
+    # c0050: "같은 경험일 수 있음" 표시가 있는 경험만 (possible_duplicate_of·possible_duplicate_title)
+    duplicates: bool = False
     limit: int = Field(default=200, ge=1, le=brain_uc.MAX_LIST_LIMIT)
     offset: int = Field(default=0, ge=0)
 
@@ -194,6 +196,7 @@ async def _list_experiences(env: ToolEnv, a: ListExperiencesArgs) -> Any:
             review=a.status,
             q=a.query,
             sort=a.sort,
+            duplicates=a.duplicates,
             limit=a.limit,
             offset=a.offset,
         ),
@@ -757,6 +760,7 @@ async def _resume_get(env: ToolEnv, a: ResumeGetArgs) -> Any:
         **resume_uc.agent_view(view, blind=view.summary.blind),
         "checklist": check["checklist"],
         "estimated_pages": check["estimated_pages"],
+        "pages_estimated": True,
     }
 
 
@@ -849,7 +853,9 @@ TOOLS: tuple[Tool, ...] = (
         "activity, other), parent (one level: projects under a work experience), months "
         "(YYYY-MM, null when the source period was ambiguous; period_text is the original) "
         "and tags. Optional filters: kind, parent_id, top_level, tags (any), year (overlaps), "
-        "organization, status (needs_review|confirmed|no_claims), query, sort, limit/offset.",
+        "organization, status (needs_review|confirmed|no_claims), query, sort, limit/offset, "
+        "duplicates (only experiences flagged possible_duplicate_of: extraction thought it may be "
+        "the same experience as that one; the user merges or dismisses it in the web app).",
         "brain.read",
         ListExperiencesArgs,
         _list_experiences,

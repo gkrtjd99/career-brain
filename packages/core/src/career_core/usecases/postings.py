@@ -67,6 +67,8 @@ from career_core.domain.postings import (
     PostingStatus,
     ats_request_allowed,
     classify_heading,
+    clean_list_item,
+    clean_question,
     date_digits_in_quote,
     is_heading_line,
     normalize_url,
@@ -253,7 +255,7 @@ def verify_llm_fields(raw: dict[str, Any], text: str) -> tuple[dict, int]:
                 for it in [_Item.model_validate(v) for v in value][:40]:
                     hit = _ev_quote(text, it.quote)
                     if hit:
-                        items.append({"text": hit[1], "evidence": hit[0]})
+                        items.append({"text": clean_list_item(hit[1]), "evidence": hit[0]})
                     else:
                         dropped += 1
                 if items:
@@ -273,7 +275,10 @@ def verify_llm_fields(raw: dict[str, Any], text: str) -> tuple[dict, int]:
                         lq = _ev_quote(text, q.limit_quote or "") if q.limit_quote else None
                         if not lq or str(limit) not in lq[1].replace(",", ""):
                             limit = None  # 글자 수 근거가 없으면 비운다
-                    qs.append({"prompt": hit[1], "char_limit": limit, "evidence": hit[0]})
+                    prompt, paren = clean_question(hit[1])
+                    if limit is None:
+                        limit = paren  # 인용한 문항 글 끝의 "(700자 이내)"가 근거다
+                    qs.append({"prompt": prompt, "char_limit": limit, "evidence": hit[0]})
                 if qs:
                     out[name] = {
                         "value": [

@@ -410,3 +410,41 @@ def posting_season(deadline: object, opens_at: object, fallback: datetime | None
     if day is None:
         return None
     return f"{day.year}-H{1 if day.month <= 6 else 2}"
+
+
+# --- 자기소개서 문항 글 다듬기 -------------------------------------------------------------
+
+_QUESTION_MARK = re.compile(
+    r"^\s*(?:[-–—•·▪■□▶▷◆◇●○◎※*]+|(?:Q|문항|질문)?\s*\d{1,2}\s*[.)．:：]|\(\d{1,2}\)|\[\d{1,2}\])\s*",
+    re.IGNORECASE,
+)
+# 글자 수만 적은 괄호 ("(700자 이내)", "[최대 1,000자]"). 공백 제외·바이트 같은 세는 기준이 있으면 남긴다
+# (``rule_from_prompt``가 문항 글에서 읽는다).
+_QUESTION_LIMIT = re.compile(
+    r"\s*[(\[（【]\s*(?:최대\s*)?(\d[\d,]*)\s*자\s*(?:이내|이하|내외|까지|미만)?\s*[)\]）】]\s*$"
+)
+
+_QUESTION_RULE = re.compile(r"[(\[（【][^()\[\]]*?(\d[\d,]*)\s*자[^()\[\]]*[)\]）】]\s*$")
+
+
+def clean_list_item(text: str) -> str:
+    """목록 항목 앞의 기호·번호("- ", "• ", "1. ")를 뗀다. 다 떼면 빈 글이면 원래 글."""
+    t = " ".join(text.split())
+    return _QUESTION_MARK.sub("", t, count=1) or t
+
+
+def clean_question(prompt: str) -> tuple[str, int | None]:
+    """문항 글 앞의 목록 기호·번호("- ", "1. ", "Q2)")와 끝의 글자 수 괄호를 뗀다. (글, 괄호의 글자 수)
+
+    뜻은 바꾸지 않는다. 다 떼고 나면 빈 글이면 원래 글을 그대로 둔다."""
+    text = " ".join(prompt.split())
+    stripped = _QUESTION_MARK.sub("", text, count=1)
+    limit = None
+    if m := _QUESTION_LIMIT.search(stripped):
+        limit = int(m.group(1).replace(",", "")) or None
+        stripped = stripped[: m.start()].rstrip()
+    elif m := _QUESTION_RULE.search(stripped):
+        limit = int(m.group(1).replace(",", "")) or None  # 세는 기준이 같이 있으면 글은 그대로 둔다
+    if not stripped:
+        return text, None
+    return stripped, limit

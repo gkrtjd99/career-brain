@@ -258,6 +258,9 @@ export interface ExperienceSummary extends ExperienceStructure {
   needs_review: number;
   children_count: number;
   updated_at: IsoDateTime | null;
+  /** c0050: 추출이 "같은 경험일 수 있음"으로 표시한 기존 경험 (합치기·무시 전까지) */
+  possible_duplicate_of?: Uuid | null;
+  possible_duplicate_title?: string | null;
 }
 
 export type ExperienceReviewFilter = "needs_review" | "confirmed" | "no_claims";
@@ -276,6 +279,8 @@ export interface ExperienceQuery {
   status?: ExperienceReviewFilter;
   q?: string;
   sort?: ExperienceSort;
+  /** true면 "같은 경험일 수 있음" 표시가 있는 경험만 */
+  duplicates?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -319,6 +324,8 @@ export interface Evidence {
   answer_id: Uuid | null;
   question: string | null;
   answer: string | null;
+  /** 인용에 주장의 숫자·핵심 낱말이 보이지 않는다 (화면: "인용이 약함"). 주장은 그대로 둔다. */
+  weak_quote?: boolean;
 }
 
 export interface Claim {
@@ -343,6 +350,80 @@ export interface Experience extends ExperienceStructure {
   claims: Claim[];
   children: ChildExperience[];
   updated_at: IsoDateTime | null;
+  /** c0050: 다른 경험에 합쳤으면(status retired) 그 경험 */
+  merged_into_id?: Uuid | null;
+  merged_at?: IsoDateTime | null;
+  possible_duplicate_of?: Uuid | null;
+  possible_duplicate_title?: string | null;
+}
+
+/** POST /core/experiences/{target}/merge — source 경험들을 target에 합친다 (target 칸이 이긴다) */
+export interface MergeIn {
+  source_ids: Uuid[];
+}
+
+export interface MergeOut {
+  target_id: Uuid;
+  merged: Uuid[];
+  claims_moved: number;
+  /** 대상에 같은 문장이 있어 근거만 옮기고 접은 추출 주장 수 */
+  claims_folded: number;
+  children_moved: number;
+  links_moved: Partial<Record<"credentials" | "education" | "portfolio_items" | "interview_sessions", number>>;
+}
+
+/** DELETE /core/experiences/{id}. 409 experience_in_use면 ``references``에 쓰는 곳 수 */
+export interface DeleteExperienceOut {
+  id: Uuid;
+  claims_deleted: number;
+  unlinked: Partial<Record<"credentials" | "education", number>>;
+}
+
+export type ExperienceReferences = Partial<
+  Record<
+    | "children"
+    | "portfolio_items"
+    | "interview_sessions"
+    | "claims_in_use"
+    | "resumes"
+    | "application_preps"
+    | "confirmed_claims",
+    number
+  >
+>;
+
+/** POST /core/claims/confirm-batch: 셋 중 하나만. ``as_is``는 구분이 "모름"인 사실을 건너뛴다 */
+export interface BatchConfirmIn {
+  contribution: "personal" | "team" | "as_is";
+  experience_id?: Uuid;
+  source_id?: Uuid;
+  claim_ids?: Uuid[];
+}
+
+export interface BatchConfirmOut {
+  confirmed: { id: Uuid; status: ClaimStatus }[];
+  skipped: { id: Uuid; reason: "contribution_required" | string }[];
+  /** 200개를 넘어 나머지는 다음 호출로 */
+  truncated: boolean;
+}
+
+export interface EducationSuggestion {
+  school: string;
+  major: string | null;
+  degree: string | null;
+  period_text: string | null;
+  entered_on: YearMonth | null;
+  graduated_on: YearMonth | null;
+  quote: { block: number; start: number; end: number; page: number | null; text: string } | null;
+  extraction_run_id: Uuid;
+  source_id: Uuid;
+  source_title: string;
+}
+
+/** GET /core/extraction-suggestions: 추출이 경험으로 만들지 않은 학력·기술 줄 (사람이 저장한다) */
+export interface ExtractionSuggestions {
+  education: EducationSuggestion[];
+  skills: string[];
 }
 
 export interface ClaimBrief {
@@ -414,6 +495,16 @@ export interface ExtractionRun {
   experiences_created: number;
   claims_created: number;
   claims_dropped: number;
+  /** c0050: 기존 경험에 붙인 경험 수, 기존 사실에 근거로 붙인 수 */
+  experiences_matched?: number;
+  claims_attached?: number;
+  suggestions?: {
+    education?: Omit<EducationSuggestion, "extraction_run_id" | "source_id" | "source_title">[];
+    skills?: string[];
+    possible_duplicates?: { experience_id: Uuid; possible_duplicate_of: Uuid }[];
+    credentials_created?: number;
+    filtered?: Partial<Record<"education" | "credentials" | "skills", number>>;
+  };
 }
 
 export interface InterviewQuestion {

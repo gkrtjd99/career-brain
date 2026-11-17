@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import io
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from html.parser import HTMLParser
+from itertools import pairwise
 from typing import ClassVar
 from xml.etree import ElementTree as ET
 
@@ -24,6 +26,7 @@ from career_core.adapters.office_parsers import (
     XlsxTextParser,
 )
 from career_core.domain import docx_zip
+from career_core.domain.text_clean import clean_control
 from career_core.ports import LocalParser, LocalParseResult, ParsedBlock, ParseError
 from career_core.uploads import DOCX_MIME, HWP_MIME, HWPX_MIME, PPTX_MIME, XLSX_MIME
 
@@ -106,6 +109,22 @@ class HtmlTextParser:
 
 
 class PdfTextParser:
+    """텍스트 PDF → 문단 블록 (2026-11-18).
+
+    pypdf는 쪽 하나를 줄 단위 글로 준다. Chrome으로 인쇄한 한국어 PDF는 띄어쓰기를 ``\\x01``(글꼴에 따라
+    ``\\t``)로 읽고, 화면 폭에서 꺾인 줄이 낱말 중간에서 끊긴다("40분으\\n로"). 그래서:
+
+    1. 제어 문자·탭을 공백으로 (``domain.text_clean``).
+    2. 쪽 글이 깨져 보이면(띄어쓰기가 거의 없는 긴 줄, ``�``) 선택 설치 ``pdf-render``(pypdfium2)가 있을 때
+       PDFium 글로 바꿔 본다 — 더 나을 때만 (``_looks_broken``).
+    3. 꺾인 줄을 다시 잇는다 (``rejoin_lines``): 쪽에서 가장 긴 줄 폭의 85% 이상인 줄은 다음 줄로 이어진
+       글로 본다 (문장이 끝나지 않았고 다음 줄이 글머리표·번호로 시작하지 않을 때). 한글↔한글 경계는 붙여
+       잇는다 (Chrome은 한글 낱말 중간에서 꺾는다), 그 밖에는 공백 하나로.
+    4. 이어 붙인 줄 하나 = 블록 하나 (다른 파서의 문단 블록과 같은 크기). 쪽 번호는 그대로.
+
+    붙여 이을 때 띄어쓰기를 잘못 맞힐 수 있다. 추출의 인용 확인(``find_quote``)은 공백 차이를 보지 않는다.
+    """
+
     def parse(self, data: bytes) -> LocalParseResult:
         from pypdf import PdfReader
         from pypdf.errors import PdfReadError
@@ -117,18 +136,114 @@ class PdfTextParser:
             total = len(reader.pages)
             if total > MAX_PDF_PAGES:
                 raise ParseError("too_many_pages")
-            blocks: list[ParsedBlock] = []
-            with_text: set[int] = set()
-            for index, page in enumerate(reader.pages, start=1):
-                text = (page.extract_text() or "").strip()
-                if text:
-                    with_text.add(index)
-                    blocks.append(ParsedBlock(page=index, text=text))
+            texts = [_pdf_clean(page.extract_text() or "") for page in reader.pages]
         except PdfReadError as exc:
             raise ParseError("malformed") from exc
+        broken = [i for i, t in enumerate(texts) if _looks_broken(t)]
+        if broken:
+            texts = _with_pdfium(data, texts, broken)
+        blocks: list[ParsedBlock] = []
+        with_text: set[int] = set()
+        for index, text in enumerate(texts, start=1):
+            paragraphs = rejoin_lines(text)
+            if paragraphs:
+                with_text.add(index)
+                blocks.extend(ParsedBlock(page=index, text=p) for p in paragraphs)
         return LocalParseResult(
             blocks=tuple(blocks), pages_total=total, pages_with_text=frozenset(with_text)
         )
+
+
+_BULLET = re.compile(r"^(?:[•·▪◦○●■□▶►◆◇※✓✔\-–—*]|\(?\d{1,2}[.)]\s|[가-하][.)]\s)")
+_SENTENCE_END = re.compile(r"(?:[.!?。:;]|[다요음함됨임]\.?)$")
+_HANGUL = re.compile(r"[가-힣]")
+
+
+def _pdf_clean(text: str) -> str:
+    """제어 문자·탭 → 공백, 줄마다 겹친 공백을 하나로. 빈 줄(문단 경계)은 남긴다."""
+    lines = clean_control(text.replace("\r\n", "\n")).replace("\t", " ").split("\n")
+    return "\n".join(" ".join(line.split()) for line in lines).strip()
+
+
+def _width(line: str) -> float:
+    """대략의 글 폭 (한글·한자·전각 = 1, 그 밖 글자 = 0.55, 공백 = 0.3)."""
+    w = 0.0
+    for ch in line:
+        if ch == " ":
+            w += 0.3
+        elif ord(ch) >= 0x1100 and unicodedata.east_asian_width(ch) in ("W", "F"):
+            w += 1.0
+        else:
+            w += 0.55
+    return w
+
+
+def _looks_broken(text: str) -> bool:
+    """띄어쓰기가 거의 없는 긴 줄(낱말이 붙어 읽혔다)이나 대체 문자(�)가 많으면 깨져 보인다."""
+    if not text:
+        return False
+    if text.count("�") >= 3:
+        return True
+    long_lines = [ln for ln in text.split("\n") if len(ln) >= 40]
+    if not long_lines:
+        return False
+    spaces = sum(ln.count(" ") for ln in long_lines)
+    return spaces / sum(len(ln) for ln in long_lines) < 0.02
+
+
+def _quality(text: str) -> float:
+    if not text:
+        return 0.0
+    return text.count(" ") / max(1, len(text)) - text.count("�") * 0.05
+
+
+def _with_pdfium(data: bytes, texts: list[str], pages: list[int]) -> list[str]:
+    """깨져 보이는 쪽만 PDFium 글로 바꿔 본다 (설치가 없거나 실패하면 그대로)."""
+    from career_core.adapters.pdf_render import PdfRenderError, PdfRenderUnavailable, page_texts
+
+    try:
+        other = page_texts(data, pages)
+    except (PdfRenderUnavailable, PdfRenderError):
+        return texts
+    out = list(texts)
+    for index, text in other.items():
+        cleaned = _pdf_clean(text)
+        if cleaned and _quality(cleaned) > _quality(out[index]):
+            out[index] = cleaned
+    return out
+
+
+def _joiner(prev: str, nxt: str) -> str:
+    if _HANGUL.match(prev[-1:]) and _HANGUL.match(nxt[:1]):
+        return ""
+    return " "
+
+
+def rejoin_lines(text: str) -> list[str]:
+    """쪽 글 → 문단 목록. 화면 폭에서 꺾인 줄을 다시 잇고, 빈 줄·짧은 줄·문장 끝·글머리표에서 끊는다."""
+    out: list[str] = []
+    for chunk in _PARAGRAPH_SPLIT.split(text):
+        lines = [ln for ln in chunk.split("\n") if ln.strip()]
+        if not lines:
+            continue
+        full = max(_width(ln) for ln in lines) * 0.85 if len(lines) >= 3 else float("inf")
+        current = lines[0]
+        for prev, nxt in pairwise(lines):
+            # 다음 줄이 짧고 문장으로 끝나지 않으면 제목("자격", "기술")이다 — 꺾인 끝("로 줄였다.")과 구별
+            heading = _width(nxt) < full * 0.3 and not _SENTENCE_END.search(nxt)
+            wrapped = (
+                _width(prev) >= full
+                and not _SENTENCE_END.search(prev)
+                and not _BULLET.match(nxt)
+                and not heading
+            )
+            if wrapped:
+                current += _joiner(current, nxt) + nxt
+            else:
+                out.append(current)
+                current = nxt
+        out.append(current)
+    return [p.strip() for p in out if p.strip()]
 
 
 _W = docx_zip.W

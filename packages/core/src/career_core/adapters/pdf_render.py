@@ -239,3 +239,37 @@ def render_pages(
     return RenderedPages(
         images=tuple(images), pages_total=total, pages=tuple(drawn), sizes=tuple(sizes)
     )
+
+
+def page_texts(data: bytes, pages: Sequence[int]) -> dict[int, str]:
+    """PDFium이 읽은 쪽 글 (0부터 쪽 번호 → 글). 텍스트 PDF에서 pypdf 글이 깨져 보일 때만 부른다
+    (``adapters.parsers.PdfTextParser``). 동기 CPU 작업. 설치가 없으면 ``PdfRenderUnavailable``."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as exc:
+        raise PdfRenderUnavailable from exc
+    out: dict[int, str] = {}
+    with _LOCK:
+        try:
+            pdf = pdfium.PdfDocument(data)
+        except pdfium.PdfiumError as exc:
+            raise PdfRenderError("malformed") from exc
+        try:
+            total = len(pdf)
+            for index in pages:
+                if not 0 <= index < total:
+                    continue
+                page = pdf[index]
+                try:
+                    textpage = page.get_textpage()
+                    try:
+                        out[index] = textpage.get_text_range()
+                    finally:
+                        textpage.close()
+                finally:
+                    page.close()
+        except pdfium.PdfiumError as exc:
+            raise PdfRenderError("text_failed") from exc
+        finally:
+            pdf.close()
+    return out

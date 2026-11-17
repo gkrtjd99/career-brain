@@ -40,16 +40,29 @@ def experience_kind(value: str) -> str:
 # ---------------------------------------------------------------- 태그
 
 
-def normalize_tags(values: list[str] | tuple[str, ...] | None, *, strict: bool = True) -> list[str]:
+def normalize_tags(
+    values: list[str] | tuple[str, ...] | None,
+    *,
+    strict: bool = True,
+    skills_only: bool = False,
+    titles: list[str | None] | tuple[str | None, ...] = (),
+) -> list[str]:
     """앞뒤·안쪽 겹친 공백 정리, 빈 값 빼기, 대소문자 무시 중복 빼기.
 
     ``strict``면 30개·40자를 넘을 때 거부(``too_many_tags``·``tag_too_long``), 아니면(모델 후보) 넘는 것을 버린다.
+    ``skills_only``(모델 후보·기술 보기): 전공("컴퓨터공학과")·학위·학교·자격증 이름("정보처리기사")과
+    경험 제목(``titles``: 프로젝트 이름 "배차 추천 API")은 기술이 아니라 뺀다
+    (``domain.experience_match.non_skill_tag``). 사람이 직접 단 태그는 거르지 않는다.
     """
+    from career_core.domain.experience_match import non_skill_tag
+
     out: list[str] = []
     seen: set[str] = set()
     for raw in values or ():
         tag = " ".join(str(raw).split())
         if not tag:
+            continue
+        if skills_only and non_skill_tag(tag, titles=titles):
             continue
         if len(tag) > MAX_TAG_CHARS:
             if strict:
@@ -146,3 +159,14 @@ def parse_period(text: str | None) -> Period | None:
     if end is None or end < start:
         return None
     return Period(start, end, False)
+
+
+_SINGLE = re.compile(rf"^\s*{_YM}(?:\s*(?:취득|합격|졸업|수료|발급))?{_TAIL}$", re.IGNORECASE)
+
+
+def parse_single_month(text: str | None) -> date | None:
+    """달 하나 ("2020년 11월", "2020.11", "2020.11 취득")만 읽는다. 범위·연도만·그 밖의 글이 섞이면 None."""
+    if not text:
+        return None
+    m = _SINGLE.match(" ".join(text.split()))
+    return _ym(m.group(1), m.group(2)) if m else None

@@ -31,6 +31,7 @@ from career_core.domain.document_export import (
     _run,
     docx_package,
     md_escape,
+    md_inline,
 )
 from career_core.domain.resume import RenderDoc, RenderItem, RenderProfile, RenderSection
 
@@ -405,9 +406,10 @@ def render_resume_markdown(doc: RenderDoc) -> str:
             parts.append(esc(_skills_text(sec)))
             continue
         for it in sec.items:
-            head = f"### {esc(it.primary)}"
+            # 제목 줄 안의 글은 줄 앞이 아니다: 숫자·기호를 목록 표시로 escape하지 않는다 ("2024.09")
+            head = f"### {md_inline(it.primary)}"
             if it.period:
-                head += f" — {esc(it.period)}"
+                head += f" — {md_inline(it.period)}"
             chunk = [head]
             sub = " · ".join(v for v in (it.secondary, it.tertiary) if v)
             if sub:
@@ -784,10 +786,12 @@ def render_resume(fmt: str, doc: RenderDoc, **meta: Any) -> bytes:
 
 
 def resume_filename(title: str, fmt: str) -> str:
+    """판본 이름 + 형식 확장자 (``.html``·``.docx``·``.md``·``.json``). HTML은 인쇄용이지만 PDF가 아니므로
+    ``.pdf.html``로 쓰지 않는다 (지원 문서 내보내기와 다르다)."""
     from career_core.domain.document_export import export_filename
 
-    if fmt == "json":
-        return export_filename(title, "md")[: -len(".md")] + ".json"
+    if fmt in ("json", "html"):
+        return export_filename(title, "md")[: -len(".md")] + f".{fmt}"
     return export_filename(title, fmt)
 
 

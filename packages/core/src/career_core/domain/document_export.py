@@ -30,7 +30,7 @@ MEDIA_TYPES = {
 _ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 # XML 1.0에 넣을 수 없는 제어 문자 (탭·줄바꿈 제외)
 _XML_INVALID = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f￾￿]")
-_MD_LINE_START = re.compile(r"^(\s*)([#>*+\-=|`]|\d+[.)])", re.MULTILINE)
+_MD_LINE_START = re.compile(r"^(\s*)([#>*+\-=|`]|\d+[.)](?=\s|$))", re.MULTILINE)
 
 
 class ExportError(ValueError):
@@ -67,6 +67,11 @@ def export_filename(title: str, fmt: str) -> str:
 
 
 # ---------------------------------------------------------------- Markdown
+
+
+def md_inline(text: str) -> str:
+    """줄 가운데 글: 역슬래시와 '<'만 escape (줄 앞 기호 escape는 하지 않는다)."""
+    return (text or "").replace("\\", "\\\\").replace("<", "\\<").replace("\n", " ")
 
 
 def md_escape(text: str) -> str:

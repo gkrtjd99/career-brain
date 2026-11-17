@@ -46,8 +46,9 @@ import re
 import unicodedata
 import zipfile
 from collections.abc import Iterable, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -361,10 +362,18 @@ def _period(start: date | None, end: date | None, ongoing: bool, raw: str | None
     return " ".join((raw or "").split()) or None
 
 
+# 날짜만 적는 시각(제출·결정·가져온 때)은 공간 시간대의 날짜로 적는다 (파일 이름에도 쓰인다).
+# ``export_markdown``이 내보내는 동안 정한다. 정하지 않았으면 UTC.
+_ZONE: ContextVar[tzinfo] = ContextVar("markdown_zone", default=UTC)
+
+
 def _day(value: date | datetime | None) -> str | None:
     if value is None:
         return None
-    return value.date().isoformat() if isinstance(value, datetime) else value.isoformat()
+    if isinstance(value, datetime):
+        at = value if value.tzinfo else value.replace(tzinfo=UTC)
+        return at.astimezone(_ZONE.get()).date().isoformat()
+    return value.isoformat()
 
 
 def _bullets(pairs: Sequence[tuple[str, Any]]) -> list[str]:
@@ -492,7 +501,11 @@ async def export_markdown(
         zf = await asyncio.to_thread(zipfile.ZipFile, partial, "w", zipfile.ZIP_DEFLATED)
         try:
             w = _Writer(zf, local_now, limit)
-            counts = await _write_all(w, data, skills, opts, blobs, ws, local_now)
+            token = _ZONE.set(zone)
+            try:
+                counts = await _write_all(w, data, skills, opts, blobs, ws, local_now)
+            finally:
+                _ZONE.reset(token)
         finally:
             await asyncio.to_thread(zf.close)
         os.replace(partial, out)
