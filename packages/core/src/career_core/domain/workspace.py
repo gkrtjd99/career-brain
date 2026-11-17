@@ -73,6 +73,9 @@ ACTION_SCOPES: dict[str, str] = {
     # O22 모델 연결·라우트·예산 (개인 앱이 켤 때). 바꾸기·연결 시험은 키를 다루므로 소유자만.
     "models.read": "read",
     "models.manage": "workspace-admin",
+    # c0033 (O13) 회사 조사: 참고 지식. 항목 후보 확인은 사람만 (usecase가 agent를 막는다)
+    "companies.read": "read",
+    "companies.write": "draft-write",
 }
 
 

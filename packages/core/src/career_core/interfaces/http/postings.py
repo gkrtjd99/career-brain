@@ -44,6 +44,7 @@ class SummaryOut(BaseModel):
     last_fetch_error: str | None
     created_at: datetime | None
     saved_at: datetime | None
+    company_id: UUID | None = None  # c0033 (O13) 이은 회사
 
 
 class CostPartOut(BaseModel):
@@ -118,6 +119,7 @@ class PostingOut(BaseModel):
     saved_at: datetime | None
     latest: VersionOut | None
     runs: list[RunOut]
+    company_id: UUID | None = None  # c0033 (O13) 이은 회사
 
 
 class ConfirmIn(BaseModel):

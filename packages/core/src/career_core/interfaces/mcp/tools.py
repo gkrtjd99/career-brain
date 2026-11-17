@@ -25,6 +25,7 @@ from career_core.ports import ActorContext
 from career_core.usecases import applications as app_uc
 from career_core.usecases import approvals as approval_uc
 from career_core.usecases import brain as brain_uc
+from career_core.usecases import companies as company_uc
 from career_core.usecases import interviews as interview_uc
 from career_core.usecases import postings as posting_uc
 from career_core.usecases import runs as run_uc
@@ -437,6 +438,38 @@ async def _run_cancel(env: ToolEnv, a: RunIdArgs) -> Any:
     return await run_uc.cancel_run(env.db, env.actor, a.run_id)
 
 
+# ---------------------------------------------------------------- 참고 지식: 회사 조사 (O13)
+
+# 회사 도구 결과마다 붙이는 표시. 외부 AI가 회사 정보를 사용자의 경험·근거로 쓰지 않게 한다.
+REFERENCE_NOTE = (
+    "Reference knowledge about a company (external material the user collected), not the "
+    "user's experience. Never cite it as evidence of the user's experience or achievements."
+)
+
+
+class CompanyListArgs(Args):
+    query: str | None = Field(default=None, max_length=200)
+
+
+async def _company_list(env: ToolEnv, a: CompanyListArgs) -> Any:
+    rows = await company_uc.list_companies(env.db, env.actor, a.query)
+    return {"record": "reference", "note": REFERENCE_NOTE, "companies": [jsonable(r) for r in rows]}
+
+
+class CompanyArgs(Args):
+    company_id: UUID
+    # 기본은 확인된 항목만. 후보(모델이 뽑고 사람이 아직 확인하지 않은 것)도 보려면 켠다
+    include_candidates: bool = False
+
+
+async def _company_get(env: ToolEnv, a: CompanyArgs) -> Any:
+    view = jsonable(await company_uc.get_company(env.db, env.actor, a.company_id))
+    view.pop("pages", None)  # 원문 목록·글은 주지 않는다 (항목마다 인용이 있다)
+    if not a.include_candidates:
+        view["facts"] = [f for f in view["facts"] if f["status"] == "confirmed"]
+    return {"record": "reference", "note": REFERENCE_NOTE, **view}
+
+
 TOOLS: tuple[Tool, ...] = (
     Tool(
         "search_brain",
@@ -519,6 +552,29 @@ TOOLS: tuple[Tool, ...] = (
         "brain.read",
         GetInterviewArgs,
         _get_interview,
+        untrusted=True,
+    ),
+    Tool(
+        "company_list",
+        "List companies in the user's reference notes (참고 지식, company research) with fact "
+        "counts and stale counts. This is external reference knowledge, NOT the user's "
+        "experience: never use it as evidence of what the user did.",
+        "companies.read",
+        CompanyListArgs,
+        _company_list,
+        untrusted=True,
+    ),
+    Tool(
+        "company_get",
+        "Get one company's reference facts (talent, values, business, product, finance, "
+        "culture, news, hiring) with citations (verbatim quote, source URL, fetched_at), as_of "
+        "(written date or fiscal year, null if unknown) and stale=true when older than about "
+        "12 months; plus linked postings and applications. Confirmed facts only unless "
+        "include_candidates=true. Reference knowledge (참고 지식), NOT the user's experience: "
+        "never cite it as evidence in documents.",
+        "companies.read",
+        CompanyArgs,
+        _company_get,
         untrusted=True,
     ),
     Tool(
@@ -629,6 +685,7 @@ TOOLS: tuple[Tool, ...] = (
 TOOLS_BY_NAME: dict[str, Tool] = {t.name: t for t in TOOLS}
 
 __all__ = [
+    "REFERENCE_NOTE",
     "TOOLS",
     "TOOLS_BY_NAME",
     "UNTRUSTED_NOTICE",

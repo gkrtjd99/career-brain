@@ -83,6 +83,7 @@ REQUEUE_KINDS: dict[str, str] = {
     "parse": "core.parse_runs",
     "extract": "core.extraction_runs",
     "job_fetch": "core.job_fetch_runs",
+    "company_fetch": "core.company_pages",  # c0033 회사 페이지 가져오기
 }
 # 삭제 기록(core.deletions, record_deletion trigger)을 남기는 표. c0014: 앞의 4개, c0018: 나머지.
 # migration의 trigger·CHECK와 같아야 한다 (test_export.py가 DB와 비교한다).
@@ -1395,6 +1396,17 @@ def _c0031_experience_structure(arc) -> None:
     arc.rewrite("core.experiences", change)
 
 
+@schema_step(
+    "c0033",
+    "회사 조사 표 companies·company_pages·company_facts (옛 묶음에는 빈 표), "
+    "job_postings.company_id(null: 옛 공고는 회사에 이어져 있지 않다)",
+)
+def _c0033_companies(arc) -> None:
+    if arc.has("core.job_postings"):
+        arc.add_columns("core.job_postings", company_id=None)
+    arc.ensure_tables("core.companies", "core.company_pages", "core.company_facts")
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 
@@ -2371,6 +2383,40 @@ EXTRA_MERGE_KEYS: dict[str, tuple[MergeKey, ...]] = {
                 "updated_at",
             ),
             ("question", "wrong_answer", "correct_answer"),
+        ),
+    ),
+    # c0033 회사 원문: 가져오기 결과 칸은 작업이 채운다. 회사·종류·주소·요청자·만든 시각이 정체
+    "core.company_pages": (
+        SameExcept(
+            (
+                "final_url",
+                "title",
+                "status",
+                "error_code",
+                "http_status",
+                "method",
+                "text",
+                "content_hash",
+                "fetched_at",
+                "model_call_id",
+                "candidates",
+                "notes",
+                "updated_at",
+            )
+        ),
+    ),
+    # c0033 회사 항목: 확인·기준일은 바뀐다. 본문·종류·인용은 정체 (고친 행은 비슷한 행)
+    "core.company_facts": (
+        SameExcept(
+            (
+                "status",
+                "confirmed_by",
+                "confirmed_at",
+                "as_of",
+                "as_of_precision",
+                "updated_at",
+            ),
+            ("kind", "body", "quote", "quote_start", "quote_end"),
         ),
     ),
 }

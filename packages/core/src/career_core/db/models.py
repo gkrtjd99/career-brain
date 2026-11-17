@@ -352,6 +352,8 @@ class JobPosting(Base):
     evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
     confirmed_version_id: Mapped[UUID | None] = mapped_column(default=None)
     pending_changes: Mapped[list] = mapped_column(JSONB, default=list)
+    # c0033 (O13): 회사 조사의 회사 (같은 공간). 회사를 지우면 비워진다
+    company_id: Mapped[UUID | None] = mapped_column(default=None)
     saved_by: Mapped[UUID | None] = mapped_column(default=None)
     saved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_by: Mapped[UUID]
@@ -1182,6 +1184,89 @@ class ModelSettings(Base):
     monthly_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), default=None)
     version: Mapped[int] = mapped_column(BigInteger, default=0)
     updated_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+# ---------------------------------------------------------------- c0033: 회사 조사 (O13, 참고 지식)
+
+
+class Company(Base):
+    """회사 하나. 참고 지식 칸이다: 이 표와 항목은 내 경험(주장)이 아니고 문서 근거가 되지 않는다."""
+
+    __tablename__ = "companies"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    name: Mapped[str] = mapped_column(Text)
+    # 정규화한 이름 (domain.companies.name_key). 공간 안에서 유일
+    name_key: Mapped[str] = mapped_column(Text)
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    homepage: Mapped[str | None] = mapped_column(Text, default=None)
+    corp_code: Mapped[str | None] = mapped_column(Text, default=None)
+    business_no: Mapped[str | None] = mapped_column(Text, default=None)
+    created_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class CompanyPage(Base):
+    """회사 항목의 원문: 가져온 페이지 한 건 또는 붙여넣은 글. 인용은 이 글 안에서 찾는다."""
+
+    __tablename__ = "company_pages"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    company_id: Mapped[UUID]
+    origin: Mapped[str] = mapped_column(Text)  # url | paste
+    url: Mapped[str | None] = mapped_column(Text, default=None)
+    final_url: Mapped[str | None] = mapped_column(Text, default=None)
+    title: Mapped[str | None] = mapped_column(Text, default=None)
+    status: Mapped[str] = mapped_column(Text, default="pending")  # pending | done | failed
+    error_code: Mapped[str | None] = mapped_column(Text, default=None)
+    http_status: Mapped[int | None] = mapped_column(Integer, default=None)
+    method: Mapped[str | None] = mapped_column(Text, default=None)
+    text: Mapped[str | None] = mapped_column(Text, default=None)
+    content_hash: Mapped[str | None] = mapped_column(Text, default=None)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    candidates: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[list] = mapped_column(JSONB, default=list)
+    requested_by: Mapped[UUID]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class CompanyFact(Base):
+    """회사 항목 하나: 인용(원문 위치 + 그대로 복사한 글)과 기준일(모르면 비움)이 붙는다."""
+
+    __tablename__ = "company_facts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID]
+    company_id: Mapped[UUID]
+    page_id: Mapped[UUID]
+    kind: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text)
+    quote_start: Mapped[int] = mapped_column(Integer)
+    quote_end: Mapped[int] = mapped_column(Integer)
+    source_url: Mapped[str | None] = mapped_column(Text, default=None)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    as_of: Mapped[date | None] = mapped_column(Date, default=None)
+    as_of_precision: Mapped[str | None] = mapped_column(Text, default=None)  # year | month | day
+    status: Mapped[str] = mapped_column(Text, default="candidate")  # candidate | confirmed
+    origin: Mapped[str] = mapped_column(Text)  # model | user
+    model_call_id: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_by: Mapped[UUID | None] = mapped_column(default=None)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
