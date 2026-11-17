@@ -222,7 +222,7 @@ def add_reference_routes(router: APIRouter, deps, authorize) -> None:
         mask = data.pop("mask_pii", False)
         for required in ("kind", "title"):
             if required in data and data[required] is None:
-                raise HTTPException(status_code=422, detail=f"{required}_required")
+                raise HTTPException(status_code=422, detail=f"reference_{required}_required")
         await guarded(uc.update_reference(db, actor, reference_id, **data, mask=mask))
         return IdOut(id=reference_id)
 

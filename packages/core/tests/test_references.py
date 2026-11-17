@@ -501,7 +501,7 @@ async def test_http_routes_errors_and_isolation(db, env):
             json={"role": "물류 엔지니어", "title": None},
             headers=auth("owner"),
         )
-        assert (r.status_code, r.json()) == (422, {"detail": "title_required"})
+        assert (r.status_code, r.json()) == (422, {"detail": "reference_title_required"})
         r = await c.patch(
             f"/core/references/{rid}", json={"role": "물류 엔지니어"}, headers=auth("owner")
         )

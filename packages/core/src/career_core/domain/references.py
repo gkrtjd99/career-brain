@@ -73,7 +73,7 @@ def _one_line(value: str | None, limit: int, code: str) -> str | None:
 def clean_title(value: str | None) -> str:
     s = _one_line(value, MAX_TITLE, "title_too_long")
     if not s:
-        raise ReferenceRuleError("title_required")
+        raise ReferenceRuleError("reference_title_required")
     return s
 
 
