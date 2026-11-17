@@ -1,5 +1,5 @@
 import type { ReferenceKind, ReferenceSummary } from "@career-brain/client";
-import { Button, cn, Input, Select } from "@career-brain/ui";
+import { Button, cn, FilterChips, Input, Select } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
@@ -11,16 +11,13 @@ import { REFERENCE_KIND_LABEL, REFERENCE_KIND_ORDER, referenceMeta } from "../li
 
 const route = getRouteApi("/brain/references");
 const ROW = "-mx-2 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const CHIP =
-  "inline-flex h-9 items-center rounded-full px-3.5 text-[13px] tabular-nums transition-colors duration-150 " +
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
 /** 참고 › 참고 글: 다른 사람의 자기소개서·이력서·면접 후기·직무 글. 내 경험과 따로 둔다. */
 export function ReferencesPage() {
   const search = route.useSearch();
   const navigate = useNavigate();
   const [adding, setAdding] = useState(!!search.from);
-  // 자료 올리기에서 "참고 글로 만들기"로 들어오면 만들기 시트를 연다
+  // 자료 넣기에서 "참고 글로 만들기"로 들어오면 만들기 시트를 연다
   useEffect(() => {
     if (search.from) setAdding(true);
   }, [search.from]);
@@ -70,25 +67,15 @@ export function ReferencesPage() {
       />
       {!empty ? (
         <div className="mb-6 space-y-3">
-          <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="종류 필터">
-            {[{ v: undefined as ReferenceKind | undefined, label: "전체" }, ...REFERENCE_KIND_ORDER.map((k) => ({ v: k, label: REFERENCE_KIND_LABEL[k] }))].map(
-              (f) => (
-                <button
-                  key={f.v ?? "all"}
-                  type="button"
-                  role="radio"
-                  aria-checked={search.type === f.v}
-                  onClick={() => setSearch({ type: f.v })}
-                  className={cn(
-                    CHIP,
-                    search.type === f.v ? "bg-fg font-medium text-bg" : "text-muted hover:bg-subtle hover:text-fg",
-                  )}
-                >
-                  {f.label}
-                </button>
-              ),
-            )}
-          </div>
+          <FilterChips<ReferenceKind | undefined>
+            label="종류 필터"
+            value={search.type}
+            onChange={(type) => setSearch({ type })}
+            items={[
+              { value: undefined, label: "전체" },
+              ...REFERENCE_KIND_ORDER.map((k) => ({ value: k, label: REFERENCE_KIND_LABEL[k] })),
+            ]}
+          />
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_8rem]">
             <Input
               type="search"
@@ -178,7 +165,7 @@ function ReferenceRow({ r, withKind }: { r: ReferenceSummary; withKind: boolean 
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{r.title}</div>
-          {meta ? <div className="truncate text-[13px] text-muted tabular-nums">{meta}</div> : null}
+          {meta ? <div className="line-clamp-2 text-[13px] text-muted tabular-nums">{meta}</div> : null}
         </div>
         <div className="shrink-0 text-right text-[13px] leading-tight tabular-nums">
           {r.notes_candidate ? <div className="font-semibold">확인 필요 {r.notes_candidate}</div> : null}

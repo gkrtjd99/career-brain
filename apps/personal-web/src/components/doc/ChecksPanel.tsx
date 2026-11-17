@@ -27,7 +27,7 @@ function SimilarReference({ f }: { f: Finding }) {
   const title = typeof d.reference_title === "string" ? d.reference_title : "참고 자료";
   const score = typeof d.score === "number" ? Math.round(d.score * 100) : null;
   const label = `${title}${score !== null ? ` · 겹침 ${score}%` : ""}`;
-  const cls = "mt-1 inline-flex min-h-9 items-center text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-0";
+  const cls = "mt-1 inline-flex min-h-9 items-center text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-6";
   if (typeof d.reference_id === "string")
     return (
       <Link to="/brain/references/$referenceId" params={{ referenceId: d.reference_id }} className={cls}>

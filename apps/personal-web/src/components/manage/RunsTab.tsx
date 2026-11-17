@@ -1,5 +1,17 @@
 import type { Approval, ApprovalChange, ApprovalStatus, RunStatus } from "@career-brain/client";
-import { Badge, Button, ConfirmDialog, Label, Section, Select, Sheet, Spinner, Textarea } from "@career-brain/ui";
+import {
+  Badge,
+  Button,
+  Chip,
+  ConfirmDialog,
+  FilterChips,
+  Label,
+  Section,
+  Select,
+  Sheet,
+  Spinner,
+  Textarea,
+} from "@career-brain/ui";
 import type { BadgeTone } from "@career-brain/ui";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
@@ -554,42 +566,39 @@ export function AuditSection() {
           <div className={q.isFetching ? "space-y-6 opacity-70" : "space-y-6"}>
             <p className="text-[13px] text-muted">
               {page.retention_days
-                ? `보존 기간 ${page.retention_days}일: 더 오래된 기록은 주기 유지보수가 지웁니다 (CAREER_AUDIT_RETENTION_DAYS).`
-                : "보존 기간 없음: 기록을 지우지 않습니다 (CAREER_AUDIT_RETENTION_DAYS=0)."}
+                ? `보존 기간 ${page.retention_days}일: 더 오래된 기록은 정기 유지보수가 삭제합니다.`
+                : "보존 기간 없음: 기록을 삭제하지 않습니다."}
             </p>
             {page.last_24h.length ? (
               <Section title="지난 24시간">
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="도구 필터">
                   {page.last_24h.map((t) => (
-                    <button
+                    <Chip
                       key={t.tool}
+                      pressed={tool === t.tool}
                       onClick={() => setTool(tool === t.tool ? "" : t.tool)}
-                      type="button"
-                      aria-pressed={tool === t.tool}
-                      className={
-                        tool === t.tool
-                          ? "h-8 rounded-md border border-accent bg-accent-soft px-2.5 text-xs tabular-nums"
-                          : "h-8 rounded-md border border-line px-2.5 text-xs tabular-nums transition-colors duration-150 hover:bg-subtle"
-                      }
+                      count={t.calls}
                     >
-                      <span className="font-mono">{t.tool}</span> {int(t.calls)}
-                      {t.errors ? <span className="text-danger"> · 오류 {int(t.errors)}</span> : null}
-                    </button>
+                      <span className="font-mono text-xs">{t.tool}</span>
+                      {t.errors ? (
+                        <span className={tool === t.tool ? "text-bg" : "text-danger"}>오류 {int(t.errors)}</span>
+                      ) : null}
+                    </Chip>
                   ))}
                 </div>
               </Section>
             ) : null}
-            <div className="flex flex-wrap gap-2">
-              <Select
+            <div className="flex flex-wrap items-center gap-2">
+              <FilterChips<"" | "ok" | "error">
+                label="결과"
                 value={status}
-                onChange={(e) => setStatus(e.target.value as "" | "ok" | "error")}
-                className="w-auto"
-                aria-label="결과"
-              >
-                <option value="">모든 결과</option>
-                <option value="ok">성공</option>
-                <option value="error">오류</option>
-              </Select>
+                onChange={setStatus}
+                items={[
+                  { value: "", label: "모든 결과" },
+                  { value: "ok", label: "성공" },
+                  { value: "error", label: "오류" },
+                ]}
+              />
               {tool ? (
                 <Button size="sm" variant="ghost" onClick={() => setTool("")}>
                   도구 필터 해제: {tool}

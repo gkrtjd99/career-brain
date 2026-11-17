@@ -212,15 +212,15 @@ export const ERROR_TEXT: Record<string, string> = {
   expires_before_acquired: "만료일이 취득일보다 앞섭니다.",
   ended_before_started: "종료일이 시작일보다 앞섭니다.",
   source_not_found: "자료를 찾을 수 없습니다.",
-  source_not_proof: "증빙 서류로 올린 자료가 아닙니다.",
+  source_not_proof: "증빙 서류로 넣은 자료가 아닙니다.",
   experience_not_found: "경험을 찾을 수 없습니다.",
   original_missing: "원본 파일이 없습니다.",
   original_changed: "저장한 원본과 내용이 달라 내려보내지 않았습니다. 원본을 다시 올려 주세요.",
   // 원본 용도 (c0032)
   source_has_confirmed_claims:
-    "확인한 주장이 이 자료를 근거로 쓰고 있어 용도를 바꿀 수 없습니다. 그 주장을 먼저 보관하세요.",
+    "확인한 사실이 이 자료를 근거로 쓰고 있어 용도를 바꿀 수 없습니다. 그 사실을 먼저 보관하세요.",
   source_not_experience: "내 경험 자료가 아니라서 경험 추출과 근거 연결을 하지 않습니다.",
-  proof_requires_restricted: "증빙 서류는 외부로 보내지 않는 제한 등급만 쓸 수 있습니다.",
+  proof_requires_restricted: "증빙 서류는 이 기기 밖으로 보내지 않는 자료로만 둘 수 있습니다.",
   purpose_changed: "용도를 바꿔 추출을 멈췄습니다.",
   // 경험 구조 (c0030)
   invalid_experience_kind: "알 수 없는 경험 종류입니다.",
@@ -236,7 +236,7 @@ export const ERROR_TEXT: Record<string, string> = {
   experience_has_children: "안에 경험이 있는 경험은 다른 경험 아래로 옮길 수 없습니다 (한 단계만).",
   contribution_required: "본인 기여인지 팀 성과인지 먼저 골라 주세요.",
   confirm_requires_approve: "확정 권한(approve)이 없는 토큰입니다.",
-  claim_retired: "보관된 주장은 바꿀 수 없습니다.",
+  claim_retired: "보관한 사실은 바꿀 수 없습니다.",
   interview_closed: "닫힌 인터뷰입니다.",
   parse_not_finished: "아직 원본 읽기가 끝나지 않았습니다.",
   title_required: "공고명은 비울 수 없습니다.",
@@ -264,7 +264,7 @@ export const ERROR_TEXT: Record<string, string> = {
   submit_requires_approve: "제출 권한(approve)이 없는 토큰입니다.",
   invalid_model_output: "모델 출력 형식이 맞지 않았습니다.",
   unknown_block: "없는 문단입니다. 새로고침 후 다시 시도하세요.",
-  unknown_claim: "없는 주장을 근거로 연결했습니다.",
+  unknown_claim: "없는 사실을 근거로 연결했습니다.",
   empty_block: "빈 문단은 저장하지 않습니다.",
   block_too_long: "문단 하나가 너무 깁니다 (최대 1만 자).",
   document_too_long: "문서가 너무 깁니다 (최대 6만 자).",
@@ -298,7 +298,7 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_minutes: "시간(분) 값이 맞지 않습니다.",
   minutes_required: "공부한 시간(분)을 넣어 주세요.",
   question_required: "문제(무엇을 틀렸는지)를 적어 주세요.",
-  statement_required: "주장 문장을 직접 적어 주세요.",
+  statement_required: "사실 문장을 직접 적어 주세요.",
   requirement_not_in_posting: "공고에 없는 요건 문장입니다.",
   attempt_not_for_item: "이 학습 항목의 응시 기록이 아닙니다.",
   text_too_long: "글이 너무 깁니다.",
@@ -316,7 +316,7 @@ export const ERROR_TEXT: Record<string, string> = {
   alias_conflict: "같은 표기가 두 기술에 들어 있습니다.",
   // 연결·관리 (O22)
   connection_name_taken: "같은 이름의 연결이 이미 있습니다 (models.toml의 연결 이름과도 겹치면 안 됩니다).",
-  connection_in_use: "이 연결을 쓰는 용도별 모델이 있어 끊을 수 없습니다. 용도별 모델에서 먼저 바꾸세요.",
+  connection_in_use: "이 연결을 쓰는 용도별 모델이 있어 해제할 수 없습니다. 용도별 모델에서 먼저 바꾸세요.",
   invalid_preset: "알 수 없는 연결 종류입니다.",
   unknown_preset: "알 수 없는 연결 종류입니다.",
   connection_not_found: "연결을 찾을 수 없습니다.",
@@ -330,14 +330,14 @@ export const ERROR_TEXT: Record<string, string> = {
   invalid_data_class: "보낼 수 있는 자료 등급이 맞지 않습니다.",
   invalid_api_key: "키 형식이 맞지 않습니다.",
   key_not_used: "이 연결 종류는 키를 쓰지 않습니다.",
-  key_missing: "저장된 키가 없어 시험하지 않았습니다.",
+  key_missing: "저장된 키가 없어 연결을 확인하지 않았습니다.",
   invalid_route: "용도별 모델은 '연결/모델' 형식이어야 합니다.",
   invalid_purpose: "알 수 없는 용도입니다.",
   unknown_endpoint: "없는 연결입니다.",
   local_only_embed: "로컬 모델은 임베딩 용도에만 쓸 수 있습니다.",
   embed_needs_openai: "임베딩에는 OpenAI 호환 또는 로컬 연결이 필요합니다.",
   invalid_budget: "예산은 0 이상의 금액이어야 합니다.",
-  name_immutable: "연결 이름은 바꿀 수 없습니다. 새로 만들고 예전 것을 끊으세요.",
+  name_immutable: "연결 이름은 바꿀 수 없습니다. 새로 만들고 예전 것을 해제하세요.",
   restricted_not_allowed: "민감 자료(restricted)는 모델 연결로 보낼 수 없습니다.",
   not_enabled: "이 설치에서는 화면에서 모델 연결을 바꿀 수 없습니다.",
   unreachable: "주소에 닿지 않습니다. 서버가 켜져 있는지, 주소가 맞는지 확인하세요.",
@@ -351,7 +351,7 @@ export const ERROR_TEXT: Record<string, string> = {
   source_note_too_long: "출처 메모는 1,000자까지입니다.",
   invalid_year: "연도는 1950~2100 사이 숫자입니다.",
   text_or_source_required: "글을 붙여넣거나 참고 자료를 하나 골라 주세요.",
-  source_not_reference: "참고 자료로 올린 자료만 참고 글로 만들 수 있습니다.",
+  source_not_reference: "참고 자료로 넣은 자료만 참고 글로 만들 수 있습니다.",
   source_not_ready: "아직 자료를 읽는 중입니다. 읽기가 끝나면 다시 시도합니다.",
   source_empty: "자료에서 읽은 글이 없습니다.",
   source_has_reference_items: "참고 글이 이 자료를 쓰고 있어 용도를 바꿀 수 없습니다. 참고 글을 먼저 삭제하세요.",
@@ -464,10 +464,10 @@ export const FINDING_GROUP: Record<FindingGroup, { label: string; tone: BadgeTon
 };
 
 export const VISIBILITY: Record<Visibility, { label: string; tone: BadgeTone }> = {
-  met_visible: { label: "충족 표시됨", tone: "ok" },
-  missing: { label: "누락", tone: "warn" },
+  met_visible: { label: "글에 보임", tone: "ok" },
+  missing: { label: "경험은 있는데 글에 없음", tone: "warn" },
   overclaim_risk: { label: "과장 위험", tone: "danger" },
-  unmet: { label: "미충족", tone: "none" },
+  unmet: { label: "경험 없음", tone: "none" },
   not_checkable: { label: "직접 확인", tone: "neutral" },
 };
 
@@ -519,7 +519,7 @@ export const EXPORT_FORMAT: Record<ExportFormat, string> = {
 
 export const COVERAGE: Record<CoverageStatus, { label: string; tone: BadgeTone }> = {
   evidenced: { label: "입증함", tone: "ok" },
-  claim_pending: { label: "주장 확인 대기", tone: "warn" },
+  claim_pending: { label: "사실 확인 대기", tone: "warn" },
   studied: { label: "학습함", tone: "accent" },
   studying: { label: "학습 중", tone: "accent" },
   uncovered: { label: "근거 없음", tone: "none" },
@@ -610,16 +610,17 @@ export const ATTENTION_LABEL: Record<SourceAttention, { label: string; tone: Bad
   extraction_failed: { label: "추출 실패", tone: "danger" },
   processing: { label: "읽는 중", tone: "neutral" },
   extracting: { label: "추출 중", tone: "neutral" },
-  pending_claims: { label: "확인할 주장", tone: "warn" },
+  pending_claims: { label: "확인할 사실", tone: "warn" },
   parse_partial: { label: "일부만 읽음", tone: "warn" },
   extraction_partial: { label: "일부만 추출", tone: "warn" },
   not_extracted: { label: "추출 전", tone: "warn" },
 };
 
+/** 자료를 어디까지 보내는지 (data_class). 화면에는 등급 이름 대신 이 문장으로 */
 export const DATA_CLASS_LABEL: Record<string, string> = {
-  public: "공개",
-  private: "비공개",
-  restricted: "제한",
+  public: "공개 자료",
+  private: "내 연결에만 보냄",
+  restricted: "이 기기 밖으로 보내지 않음",
 };
 
 export const PARSE_STATUS: Record<string, { label: string; tone: BadgeTone }> = {
@@ -638,8 +639,8 @@ export const EXTRACTION_STATUS: Record<string, { label: string; tone: BadgeTone 
 };
 
 export const ACTIVITY_LABEL: Record<string, string> = {
-  "claim:created": "주장 추가",
-  "claim:confirmed": "주장 확인",
+  "claim:created": "사실 추가",
+  "claim:confirmed": "사실 확인",
   "posting:created": "공고 추가",
   "posting:saved": "공고 저장",
   "fetch_run:fetched": "공고 가져오기",

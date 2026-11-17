@@ -245,7 +245,7 @@ function FactItem({
                 href={source}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex min-h-9 items-center gap-0.5 underline-offset-2 hover:text-fg hover:underline sm:min-h-0"
+                className="inline-flex min-h-9 items-center gap-0.5 underline-offset-2 hover:text-fg hover:underline sm:min-h-6"
               >
                 {hostOf(source)} <ExternalLink size={12} />
               </a>
@@ -253,7 +253,7 @@ function FactItem({
               <button
                 type="button"
                 onClick={() => onOpenPage(f.citation.page_id)}
-                className="inline-flex min-h-9 items-center underline-offset-2 hover:text-fg hover:underline sm:min-h-0"
+                className="inline-flex min-h-9 items-center underline-offset-2 hover:text-fg hover:underline sm:min-h-6"
               >
                 {page ? pageName(page) : "붙여넣은 글"}
               </button>

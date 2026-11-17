@@ -25,7 +25,8 @@ packages/client/src/
   models.ts       연결·관리의 모델 연결 API (/core/models/…, O22). 키 값 칸이 없다 (상태·끝 4자리만)
 packages/ui/src/  Button, Badge, Card/Section/EmptyState/Spinner, Input/Textarea/Select/Label,
                   Sheet(옆 패널, Radix Dialog), ConfirmDialog(가운데 확인 창), Highlight(원문 위치 강조), EvidenceCard/StatusBadge,
-                  MarkdownView(위키용 최소 Markdown, HTML 해석 안 함)
+                  MarkdownView(위키용 최소 Markdown, HTML 해석 안 함),
+                  FilterChips·Chip(목록 거르기 회색 알약)·ViewTabs(보기 바꾸기 밑줄 탭), CommandDialog(명령 팔레트 틀)
 apps/personal-web/src/
   router.tsx      TanStack Router (코드 기반 route, 파일 생성기 없음)
   lib/api.ts      토큰 저장, client, QueryClient (401 → 설정)
@@ -33,10 +34,10 @@ apps/personal-web/src/
   lib/diff.ts     단어 단위 비교 (AI 수정안 보기)
   lib/photo.ts    사진 변환 순수 로직: cm↔px, 자르기 기하(틀 채우기·위치 제한), 용량 맞추기(품질 이분 탐색), JPEG JFIF·PNG pHYs dpi 쓰기
   lib/dates.ts    날짜 표시 도우미: 공간 표시 시간대(설정 "작업 공간")로 날짜·시각·D-day·datetime-local 변환 (AppShell이 설정을 읽어 정한다)
-  components/     AppShell(메뉴), ClaimItem, ClaimPicker(검색으로 주장 고르기), InterviewPanel, SpanSheet,
+  components/     AppShell(메뉴·⌘K), GlobalActions(IngestProvider: 자료 넣기·경험 추가 시트), palette/CommandPalette, ClaimItem, ClaimPicker(검색으로 주장 고르기), InterviewPanel, SpanSheet,
                   SourceSheet(검색 결과 → 원본 블록), UploadSheet, DdayBadge
   components/doc/ BlockEditor(문단 편집), ChecksPanel(품질 검사), SuggestionsPanel(AI 수정안), BatchSuggestSheet(문단별 일괄 수정안, c0023)
-  components/runs/ RunParts(예상 비용·실행 진행·멱등 키), InterviewBatchSheet(경험별 일괄 인터뷰 질문, c0023)
+  components/runs/ RunParts(예상 비용·실행 진행·멱등 키), InterviewBatchSheet(질문 받으며 채우기: 경험별 AI 보충 질문 묶음 실행, c0023)
   components/study/ parts(응시·오답 기록, 복습 카드)
   components/settings/ WorkspaceSettingsSection(표시 시간대, 기술명 별칭 사전), JudgeCacheSection(판정 응답 캐시 크기·비우기, egress 권한)
   components/manage/ 연결·관리 탭: ModelsTab(모델 연결·추가 시트), RoutesTab(용도별 모델), UsageTab(사용량·월 예산),
@@ -44,19 +45,35 @@ apps/personal-web/src/
   components/system/ MaintenanceTab(백업·유지보수), OAuthTab(원격 연결), live(SSE)
   lib/modelLabels.ts 모델 연결 종류·과금·키 상태·자료 등급·용도 이름
   pages/          Today, Brain, Experience, Search, Postings, Posting, Applications, Application, Document,
-                  Study, StudyItem, Manage(연결·관리), Connect(첫 연결), PhotoTool(사진 변환)
+                  Study, StudyItem, Manage(연결·관리), Connect(첫 연결), PhotoTool(사진 변환), HiddenTextTool(숨김 글 검사)
 ```
 
-`packages/ui` 의 클래스는 앱의 색 토큰(`bg-surface`, `text-muted`, `border-line`, `text-accent`, `bg-ok-soft` …)을 쓴다. 토큰은 `apps/personal-web/src/index.css` 의 CSS 변수로 정의하고, 다른 앱(서비스)은 같은 이름으로 자기 값을 주면 된다.
+`packages/ui` 의 클래스는 앱의 색 토큰(`bg-surface`, `text-muted`, `border-line`, `border-line-strong`, `text-accent`, `bg-ok-soft` …)을 쓴다. `line`은 목록 사이 얇은 선, `line-strong`은 입력·선택 칸 테두리(밝게·어둡게 모두 바탕 대비 3:1 이상)다. 토큰은 `apps/personal-web/src/index.css` 의 CSS 변수로 정의하고, 다른 앱(서비스)은 같은 이름으로 자기 값을 주면 된다.
+
+## 메뉴와 명령 팔레트
+
+주 메뉴는 하루 일의 순서대로 **오늘 · 공고 · 지원 · 브레인 · 학습** 다섯 개다. 넓은 화면은 왼쪽 메뉴 아래에 작은 "도구" 무리(사진 변환 `/tools/photo`, 숨김 글 검사 `/tools/hidden-text`)와 맨 아래 **연결·관리**를 둔다. 좁은 화면은 아래 탭 **오늘 · 공고 · 지원 · 브레인 · 더보기**, 더보기 시트에 학습·도구·연결·관리. 공용 문서(`/documents`)는 메뉴에 두지 않고 브레인 색인에서 들어간다. 근거 검색(`/search`)도 메뉴에서 빠지고 팔레트에서 들어간다 (주소는 그대로).
+
+검색은 명령 팔레트 하나로 모은다. 넓은 화면은 메뉴 맨 위의 입력 칸 모양 단추("검색 ⌘K"), 좁은 화면은 위 막대의 돋보기, 어디서나 ⌘K / Ctrl+K(입력 중에도, 다시 누르면 닫힘)로 연다. 입력 칸이 `combobox`, 결과가 `listbox`(무리마다 `group`)이고 ↑↓로 옮기고 Enter로 고르며 Esc로 닫는다. 좁은 화면에서는 위에 붙은 거의 전체 폭 창이라 키보드가 올라와도 가리지 않는다.
+
+| 무리 | 내용 |
+|---|---|
+| 이동 | 빈 입력: 주요 화면 목록. 입력하면 화면 이름 + 공고·지원·기본 문서(이미 받은 목록 캐시를 브라우저에서 거름) + 경험·회사·참고 글(서버 `q`, 200ms 뒤). 종류마다 3개, 모두 8개까지 |
+| 할 일 | 공고 추가(`/postings`로 가서 URL 칸에 초점), 자료 넣기(`IngestProvider`의 UploadSheet), 경험 추가, 오늘 마감 보기(`/?day=오늘` — 그날 일정만 펼침). 빈 입력에서는 맨 위 |
+| 근거에서 찾기 | 두 글자부터 `GET /core/search?limit=3` 상위 3개(경험·학습 항목으로 이동) + "근거 전체 검색" → `/search?q=` |
+
+새 API는 없다. 화면 어디서나 자료 넣기·경험 추가 시트를 여는 일은 `useIngest().open(purpose?)` · `useIngest().openExperience()`로 한다 (AppShell이 한 번 놓음).
+
+거르기와 보기 바꾸기는 모양을 둘로만 쓴다: 목록을 거르면 회색 알약 `FilterChips`(하나 고르기, `radiogroup`, 화살표 키, 수 표시)·`Chip`(켜고 끄기, `aria-pressed`), 같은 자료를 다른 보기로 바꾸면 밑줄 탭 `ViewTabs`(`tablist`). 누르는 것은 좁은 화면 36px·넓은 화면 24px 이상(문장 안 링크는 예외)이고, 좁은 화면에서 잘리는 메타 줄은 두 줄까지 접거나 날짜를 앞에 둔다.
 
 ## 화면
 
 | 경로 | 내용 |
 |---|---|
 | `/` 오늘 | 지원 대시보드, 카드·통계 타일 없이 목록과 여백으로. 제목 아래 한 줄 요약(2주 안 마감·쓰는 중·확인할 것). 다가오는 일정(14일, 날짜별: 저장 공고 마감 + 그 지원의 남은 문항, 제출한 지원의 결과 전 전형, 시험) → 진행 중인 지원(준비 중은 남은 문항·D-day, 제출함은 다음 전형) → 아직 지원 전인 공고(있을 때만). 옆 칸: 작은 월 달력(날짜 + 일정 점, 마감 = 채운 점·전형 = 빈 점·시험 = 점선 점, 날짜를 누르면 그날 일정만) → 확인할 것(개수만) → 최근 저장 3개(주장 확인·공고 저장·문서 저장·응시). 좁은 화면은 달력 대신 한 주 띠를 맨 위에, 확인할 것을 일정 바로 아래에. 토큰 만료·승인 요청은 있을 때만 맨 위, 모델 비용은 예산 80% 이상·오류가 있을 때만 맨 아래 한 줄. 전형 일정은 제출한 지원마다 `stages`를 읽는다 (개인 규모) |
-| `/brain` | 색인 (O19, c0030): 머리에 종류별 수·확인할 주장 수(`GET /core/brain/overview`), 브레인 안 찾기 상자(경험 제목·조직·역할·태그, `q`) + "주장·문단까지 검색" → `/search?q=`, 맨 위 "확인할 것"(확인할 주장이 있는 경험 3개 + 모두 보기, 거름을 걸면 숨김), 거름 줄(종류 글자 토글·자주 쓴 태그 칩 여럿(모바일 6개)·연도·확인 필요만·거름 지우기)과 보기 토글(연표/표). 거름·보기는 주소 search params(`q`·`kind`·`tag`(배열)·`year`·`review`·`view=table`·`sort`)라 링크로 같은 보기가 열린다. 연표(기본): 시작 연도별(최근 먼저, 날짜 없으면 "기간 없음"), 경력 아래 프로젝트는 접힘(거름을 걸면 펼침, 접힌 자식의 확인 수를 부모 행에 표시). 표: 제목·종류·조직·기간·태그·확인 상태, 자체 가로 스크롤(390px에서 페이지 넘침 없음), 정렬(시작 달·최근 고침·제목). 경험 추가(종류·상위·시작/끝 달·진행 중·원문 기간·태그), 일괄 인터뷰(c0023), 자료 올리기, 아래에 접힌 "올린 자료" 목록(읽기·추출 상태, 추출 요청) |
+| `/brain` | 색인 (O19, c0030): 머리에 종류별 수·확인할 주장 수(`GET /core/brain/overview`), 경험 찾기 상자(경험 제목·조직·역할·태그, `q`) + "근거 전체 검색" → `/search?q=`, 맨 위 "확인할 것"(확인할 주장이 있는 경험 3개 + 모두 보기, 거름을 걸면 숨김), 거름 줄(종류 글자 토글·자주 쓴 태그 칩 여럿(모바일 6개)·연도·확인 필요만·거름 지우기)과 보기 토글(연표/표). 거름·보기는 주소 search params(`q`·`kind`·`tag`(배열)·`year`·`review`·`view=table`·`sort`)라 링크로 같은 보기가 열린다. 연표(기본): 시작 연도별(최근 먼저, 날짜 없으면 "기간 없음"), 경력 아래 프로젝트는 접힘(거름을 걸면 펼침, 접힌 자식의 확인 수를 부모 행에 표시). 표: 제목·종류·조직·기간·태그·확인 상태, 자체 가로 스크롤(390px에서 페이지 넘침 없음), 정렬(시작 달·최근 고침·제목). 경험 추가(종류·상위·시작/끝 달·진행 중·원문 기간·태그), 질문 받으며 채우기(c0023), 자료 넣기, 받은 자료함(손이 가야 하는 자료만, "모두 보기" → `/brain/sources` "받은 자료") |
 | `/brain/:id` | 구조 줄(상위 경험 링크, 기간 + "원문 기간: …", 태그), 고치기 패널(만들기와 같은 폼, 자식이 있으면 상위 고르기 잠금), 경력·교육이면 "안에 프로젝트 추가", 안의 경험 목록. 주장 탭: 확인 대기/확인함/이견/보관, 맞아요(기여 미상이면 본인·팀 선택)·고치기·사실과 달라요·보관, 원문 근거 패널. 위키 탭: Markdown 보기·복사·내려받기. 인터뷰 탭: 서버의 세션 목록(최근 세션 기본, 여러 개면 고르기)·질문·답변·AI 보충 질문 |
-| `/search` | 검색어, 종류(주장·원문·인터뷰 답변) 필터, 키워드/의미 모드와 이유, 원문 결과 → 원본 보기(앞뒤 2블록, 일치 범위 강조) |
+| `/search` 근거 검색 | 명령 팔레트의 "근거 전체 검색"으로 들어온다. 검색어, 종류(사실·원문·인터뷰 답변·학습 메모·오답) 필터, 키워드/의미 모드와 이유, 원문 결과 → 원본 보기(앞뒤 2블록, 일치 범위 강조) |
 | `/postings` | URL 여러 개 붙여넣기(최대 20), 요청 결과, 상태별 목록, 가져오는 중이면 자동 새로고침 |
 | `/postings/:id` | 항목별 추출값과 근거(구조화 데이터 경로 / 원문 인용 → 원문 패널에서 강조 / 직접 입력), 고쳐서 저장(바뀐 값은 `overrides`, 비운 값은 `clear`), 다시 가져오기, 보관, 실패 사유, 목록 후보 고르기, 본문 직접 붙여넣기, 전체 버전 목록·가져오기 기록, 저장한 공고면 지원 만들기/열기·요건별 준비 상태 |
 | `/manage` 연결·관리 | 탭(`?tab=`): 모델 연결(기본) · 용도별 모델(`routes`) · 사용량·예산(`usage`) · MCP·에이전트(`mcp`) · 작업·승인(`runs`) · 토큰(`tokens`) · 백업·유지보수(`maintenance`) · 설정(`settings`). `?approval=`·`?run=`은 작업·승인 탭의 시트로 바로 열린다. 아래 "연결·관리" |
@@ -66,6 +83,7 @@ apps/personal-web/src/
 | `/applications/:id/documents/:docId` | 문단 편집기, 서버 계산 글자/바이트 수(입력 중 350ms 뒤 `/count`), 저장(`base_revision`, 멱등 키, Ctrl/Cmd+S), 409 충돌 창(비교 / 버리고 최신 받기 / 확인 후 내 글로 새 revision), 저장 안 한 채 떠나면 막음, 문단별 근거 연결(검색으로 확인된 주장 고르기), 검사 탭(제한·위험·조작·근거·참고 묶음, 문단으로 이동), AI 수정안 탭(요청 → 단어 비교 → 적용/거절, 사실 변경 거부 사유 표시), 기록 탭(이전 revision 읽기), 고른 문장에만 근거 붙이기(문장 근거 칩), 내보내기(형식 고르기 → 만든 파일 검사 경고 → 확인 후 받기, PDF는 인쇄 창), 공용 문서에서 복사한 문서면 출처·원본 변경 안내, 제출 뒤 읽기 전용 |
 | `/documents` · `/documents/:docId` | 공용 문서 목록(복사해 간 지원 수)·만들기, 편집기는 지원 문서와 같음(공고 문맥 없음) |
 | `/study` | 탭: 오늘 복습(답 보기 → 다시·어려움·보통·쉬움 → 다음 날짜) · 요건별 준비(공고 고르기, 근거 있음/확인 대기/학습함/학습 중/빈칸, 주장 연결·해제, 줄별·전체 학습 계획) · 학습 항목 · 시험·과제(상태, 응시, 응시별 오답) · 오답(상태 필터) |
+| `/tools/hidden-text` 숨김 글 검사 | 다른 도구로 만든 제출 DOCX·PDF의 숨김 서식·흰 글씨·아주 작은 글자·쪽 밖 글·지시 문장 경고 (`POST /core/file-checks/hidden-text`, 저장하지 않음). 공용 문서 화면 아래의 같은 검사와 같은 API |
 | `/tools/photo` 사진 변환 | 지원서 사진을 정한 px·형식·용량으로 자르고 저장. 브라우저 안에서만 처리하고 API를 부르지 않아 토큰 없이 열린다. 아래 "사진 변환" |
 | `/study/items/:id` | 상태, 연결 요건, 학습 기록(분·메모·자료), 연습 응시, 오답, 경험 후보로 올리기(완료나 응시가 있어야, 문장은 직접 쓰고 확인 대기로 들어감) |
 

@@ -85,7 +85,7 @@ function CompanyRow({ c }: { c: CompanySummary }) {
       <Link to="/brain/companies/$companyId" params={{ companyId: c.id }} className={cn(ROW, "flex items-center gap-4")}>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{c.name}</div>
-          {sub ? <div className="truncate text-[13px] text-muted">{sub}</div> : null}
+          {sub ? <div className="line-clamp-2 text-[13px] text-muted">{sub}</div> : null}
         </div>
         <div className="shrink-0 text-right text-[13px] leading-tight tabular-nums">
           {c.facts_candidate ? <div className="font-semibold">확인 필요 {c.facts_candidate}</div> : null}

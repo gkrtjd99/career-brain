@@ -256,7 +256,7 @@ export function AddReferenceSheet({
               <div className="font-medium">{source.data?.title ?? "참고 자료"}</div>
               <div className="flex items-center gap-2 text-muted">
                 {sourceReady ? (
-                  "올린 자료의 글로 만듭니다. 원본 파일은 그대로 남습니다."
+                  "받은 자료의 글로 만듭니다. 원본 파일은 그대로 남습니다."
                 ) : (
                   <>
                     <Spinner /> 자료를 읽는 중입니다. 끝나면 저장할 수 있습니다.

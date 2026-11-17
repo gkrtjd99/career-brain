@@ -8,7 +8,7 @@ import type {
   StudyItemKind,
   StudyItemStatus,
 } from "@career-brain/client";
-import { Button, cn, Input, Label, Section, Select, Sheet, StatusBadge } from "@career-brain/ui";
+import { Button, cn, FilterChips, Input, Label, Section, Select, Sheet, StatusBadge } from "@career-brain/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { Link2, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
@@ -35,7 +35,8 @@ export type StudyTab = "reviews" | "coverage" | "frequency" | "items" | "assessm
 
 /** Today의 PlainRow와 같은 행: 제목 줄과 가장자리를 맞추고, 누를 때만 옅게 칠한다. */
 const ROW = "-mx-2 flex items-center gap-4 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const TEXT_LINK = "text-fg underline underline-offset-2 hover:text-muted";
+/** 밑줄 글자 단추: 좁은 화면 36px, 넓은 화면 24px 높이를 지킨다 */
+const TEXT_LINK = "inline-flex min-h-9 items-center text-fg underline underline-offset-2 hover:text-muted sm:min-h-6";
 
 export function StudyPage() {
   const { tab = "reviews", posting } = route.useSearch();
@@ -63,13 +64,13 @@ export function StudyPage() {
           { value: "mistakes", label: "오답" },
         ]}
       />
-      {tab === "reviews" ? <TimezoneLine /> : null}
       {tab === "reviews" && reviewed ? <p className="mb-3 text-[13px] font-medium">{reviewed}</p> : null}
       {tab === "reviews" ? (
         <Loaded query={due}>
           {(rows) =>
             rows.length ? (
               <div>
+                <TimezoneLine />
                 <p className="mb-3 text-[13px] text-muted">
                   답을 떠올려 본 뒤 “답 보기”를 누르고, 얼마나 쉬웠는지 고르면 다음 복습 날짜가 정해집니다.
                 </p>
@@ -190,7 +191,7 @@ function CoverageView({ postingId }: { postingId: string }) {
                   {counts.length ? <p className="text-sm font-medium tabular-nums">{counts.join(" · ")}</p> : null}
                   <p className="text-[13px] text-muted">
                     근거 없는 요건마다 학습 항목을, 전형 절차의 시험 단계마다 시험 준비를 만듭니다. 여러 번 눌러도 같은
-                    항목을 다시 만들지 않습니다. 판정은 연결한 주장과 학습 기록만 보며 합격 가능성이 아닙니다.
+                    항목을 다시 만들지 않습니다. 판정은 연결한 사실과 학습 기록만 보며 합격 가능성이 아닙니다.
                   </p>
                 </div>
                 <Button
@@ -208,7 +209,7 @@ function CoverageView({ postingId }: { postingId: string }) {
               {stale ? (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-subtle/60 px-3 py-2 text-[13px]">
                   <span className="min-w-0 flex-1 basis-56">
-                    공고를 다시 확정하면서 빠진 요건 {stale}줄이 남아 있습니다. 정리하면 그 요건과 주장 연결만 지우고,
+                    공고를 다시 확정하면서 빠진 요건 {stale}줄이 남아 있습니다. 정리하면 그 요건과 사실 연결만 없애고,
                     학습 항목은 그대로 둡니다.
                   </span>
                   <Button
@@ -290,7 +291,7 @@ function CoverageView({ postingId }: { postingId: string }) {
             <ClaimPicker
               open={!!linkFor}
               onClose={() => setLinkFor(null)}
-              title="요건에 주장 연결"
+              title="요건에 사실 연결"
               initialQuery=""
               selected={linkFor?.claims.map((c) => c.id) ?? []}
               onPick={(c) => linkFor && link.mutate({ req: linkFor, claimId: c.id })}
@@ -374,7 +375,7 @@ function RequirementRow({
       ) : null}
       <div className="mt-2 -ml-2.5 flex flex-wrap gap-1">
         <Button size="sm" variant="ghost" className={TAP} onClick={onLink}>
-          <Link2 size={14} /> 주장 연결
+          <Link2 size={14} /> 사실 연결
         </Button>
         {r.current ? (
           <Button size="sm" variant="ghost" className={TAP} aria-expanded={suggestOpen} onClick={onSuggest}>
@@ -416,7 +417,7 @@ function SuggestionPanel({
           return (
             <div className="space-y-2">
               <p className="text-[13px] text-muted">
-                검색 제안 ({res.mode === "hybrid" ? "키워드 + 의미" : "키워드"}, 검색어 “{line?.query}”). 맞는 주장만
+                검색 제안 ({res.mode === "hybrid" ? "키워드 + 의미" : "키워드"}, 검색어 “{line?.query}”). 맞는 사실만
                 직접 연결하세요. 제안만으로는 연결되거나 충족으로 바뀌지 않습니다.
               </p>
               {line?.candidates.length ? (
@@ -449,7 +450,7 @@ function SuggestionPanel({
                   ))}
                 </ul>
               ) : (
-                <p className="text-[13px] text-muted">찾은 후보가 없습니다. “주장 연결”에서 직접 검색할 수 있습니다.</p>
+                <p className="text-[13px] text-muted">찾은 후보가 없습니다. “사실 연결”에서 직접 검색할 수 있습니다.</p>
               )}
               {res.judge ? (
                 <p className="text-[13px] text-muted">
@@ -561,14 +562,14 @@ function TimezoneLine() {
   const zones = Array.from(new Set([q.data.timezone, browser, ...COMMON_ZONES].filter(Boolean)));
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
-      <span className="tabular-nums">
-        복습 마감: {q.data.timezone} 기준 오늘({q.data.today}) 끝{q.data.is_default ? " (기본값)" : ""} · 공간 표시
-        시간대(설정)와 같은 값
+      <span>
+        오늘 복습은 오늘 밤 자정까지입니다.
+        {q.data.timezone !== browser ? " 이 기기와 다른 시간대를 씁니다." : ""}
       </span>
       {editing ? (
         <Select
-          aria-label="표시 시간대"
-          className="h-8 w-auto text-[13px]"
+          aria-label="시간대"
+          className="w-auto text-[13px]"
           value={q.data.timezone}
           disabled={save.isPending}
           onChange={(e) => save.mutate(e.target.value)}
@@ -601,19 +602,12 @@ function ItemsTab({ onCoverage }: { onCoverage: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Select
-          aria-label="상태"
+        <FilterChips<StudyItemStatus | "">
+          label="상태"
           value={status}
-          onChange={(e) => setStatus(e.target.value as StudyItemStatus | "")}
-          className="w-auto"
-        >
-          <option value="">전체</option>
-          {ITEM_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {ITEM_STATUS[s].label}
-            </option>
-          ))}
-        </Select>
+          onChange={setStatus}
+          items={[{ value: "", label: "전체" }, ...ITEM_STATUSES.map((s) => ({ value: s, label: ITEM_STATUS[s].label }))]}
+        />
         <Button size="sm" variant="primary" className={cn(TAP, "ml-auto")} onClick={() => setCreating(true)}>
           <Plus size={14} /> 학습 항목
         </Button>
@@ -627,7 +621,7 @@ function ItemsTab({ onCoverage }: { onCoverage: () => void }) {
                   <Link to="/study/items/$itemId" params={{ itemId: it.id }} className={ROW}>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{it.title}</div>
-                      <div className="truncate text-[13px] text-muted tabular-nums">
+                      <div className="line-clamp-2 text-[13px] text-muted tabular-nums">
                         {[
                           ITEM_KIND[it.kind],
                           it.requirement?.posting_title,
@@ -749,7 +743,7 @@ function AssessmentsTab() {
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">{a.title}</div>
-                        <div className="truncate text-[13px] text-muted tabular-nums">
+                        <div className="line-clamp-2 text-[13px] text-muted tabular-nums">
                           {[
                             ASSESSMENT_KIND[a.kind],
                             a.scheduled_at ? formatDateTime(a.scheduled_at) : null,
@@ -972,16 +966,16 @@ function MistakesTab() {
   const q = useQuery({ queryKey: ["mistakes", status], queryFn: () => api.mistakes(status || undefined) });
   return (
     <div className="space-y-4">
-      <Select
-        aria-label="상태"
+      <FilterChips<"open" | "resolved" | "">
+        label="상태"
         value={status}
-        onChange={(e) => setStatus(e.target.value as typeof status)}
-        className="w-auto"
-      >
-        <option value="open">복습 중</option>
-        <option value="resolved">다 익힘</option>
-        <option value="">전체</option>
-      </Select>
+        onChange={setStatus}
+        items={[
+          { value: "open", label: "복습 중" },
+          { value: "resolved", label: "다 익힘" },
+          { value: "", label: "전체" },
+        ]}
+      />
       <Loaded query={q}>
         {(rows) =>
           rows.length ? (

@@ -1,8 +1,8 @@
 import type { ActivityItem, ApplicationStage, ApplicationSummary, PostingSummary } from "@career-brain/client";
 import { cn, Spinner } from "@career-brain/ui";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { useMemo, useState, type ReactNode } from "react";
+import { getRouteApi, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ApprovalRequestsCard } from "../components/ApprovalRequestsCard";
 import { ErrorText, PageHeader } from "../components/common";
 import { TokenExpiryNotice } from "../components/TokenExpiryNotice";
@@ -24,6 +24,7 @@ const SAVED_KINDS = new Set([
 ]);
 const WEEKDAY = ["일", "월", "화", "수", "목", "금", "토"];
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const route = getRouteApi("/");
 
 export function TodayPage() {
   const postings = useQuery({ queryKey: ["postings"], queryFn: api.postings });
@@ -83,7 +84,12 @@ export function TodayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [postings.data, apps.data, tests.data, expiring.data, stagesKey],
   );
-  const [selected, setSelected] = useState<string | null>(null);
+  // ?day= 로 들어오면 그날을 골라 둔다 (명령 팔레트의 "오늘 마감 보기")
+  const { day } = route.useSearch();
+  const [selected, setSelected] = useState<string | null>(day ?? null);
+  useEffect(() => {
+    if (day) setSelected(day);
+  }, [day]);
 
   const appById = new Map(appList.map((a) => [a.id, a]));
   const appByPosting = new Map<string, ApplicationSummary>();
@@ -192,7 +198,7 @@ export function TodayPage() {
                 <button
                   type="button"
                   onClick={() => setSelected(null)}
-                  className="text-[13px] text-muted hover:text-fg"
+                  className="inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg sm:min-h-6"
                 >
                   2주 보기
                 </button>
@@ -212,7 +218,7 @@ export function TodayPage() {
 
           <div className="lg:hidden">{todoBlock}</div>
 
-          <Block title="진행 중인 지원" action={<More to="/applications">지원 현황</More>}>
+          <Block title="진행 중인 지원" action={<More to="/applications">모두 보기</More>}>
             {active.length ? (
               <Rows>
                 {active.map((a) => (
@@ -232,7 +238,7 @@ export function TodayPage() {
           </Block>
 
           {notApplied.length ? (
-            <Block title="아직 지원 전인 공고" action={<More to="/postings">공고</More>}>
+            <Block title="아직 지원 전인 공고" action={<More to="/postings">모두 보기</More>}>
               <Rows>
                 {notApplied.slice(0, 5).map((p) => (
                   <PlainRow
@@ -344,7 +350,7 @@ function Quiet({ children }: { children: ReactNode }) {
 
 function More({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <Link to={to} className="text-[13px] text-muted hover:text-fg">
+    <Link to={to} className="inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg sm:min-h-6">
       {children}
     </Link>
   );
@@ -379,7 +385,7 @@ function PlainRow({
       >
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{title}</div>
-          {meta ? <div className="truncate text-[13px] text-muted">{meta}</div> : null}
+          {meta ? <div className="line-clamp-2 text-[13px] text-muted">{meta}</div> : null}
         </div>
         {right ? <div className="shrink-0 text-right">{right}</div> : null}
       </Link>
@@ -472,9 +478,9 @@ function Agenda({
               </div>
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{e.title}</div>
-                <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-muted">
-                  <KindMark kind={e.kind} />
-                  <span className="truncate">{[agendaWhat(e, app), time].filter(Boolean).join(" · ")}</span>
+                <div className="flex min-w-0 items-baseline gap-1.5 text-[13px] text-muted">
+                  <KindMark kind={e.kind} className="relative -top-px" />
+                  <span className="line-clamp-2">{[agendaWhat(e, app), time].filter(Boolean).join(" · ")}</span>
                 </div>
               </div>
               <span className={cn("text-[13px] tabular-nums", n <= 3 ? "font-semibold" : "text-muted")}>

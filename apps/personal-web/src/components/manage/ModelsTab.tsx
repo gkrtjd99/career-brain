@@ -613,7 +613,7 @@ function KeyField({
         onChange={(e) => set({ apiKey: e.target.value })}
       />
       {editing && editing.key === "set" ? (
-        <label className="mt-1.5 flex min-h-9 items-center gap-2 text-[13px] sm:min-h-0">
+        <label className="mt-1.5 flex min-h-9 items-center gap-2 text-[13px] sm:min-h-6">
           <input
             type="checkbox"
             checked={d.clearKey}

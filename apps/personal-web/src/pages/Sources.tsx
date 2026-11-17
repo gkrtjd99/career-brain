@@ -1,5 +1,5 @@
 import type { SourceListItem, SourcePurpose } from "@career-brain/client";
-import { Button, cn, Label, Select, type BadgeTone } from "@career-brain/ui";
+import { Button, cn, FilterChips, Label, Select, type BadgeTone } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
@@ -19,10 +19,7 @@ import {
 } from "../lib/labels";
 
 const ROW = "-mx-2 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const TEXT_LINK = "text-fg underline underline-offset-2";
-const CHIP =
-  "inline-flex h-9 items-center rounded-full px-3.5 text-[13px] tabular-nums transition-colors duration-150 " +
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
+const TEXT_LINK = "inline-flex min-h-9 items-center text-fg underline underline-offset-2 sm:min-h-6";
 
 /** 배지 대신 글자로: 실패만 빨강, 손이 가야 하는 상태는 진하게, 나머지는 회색. */
 export const TONE_TEXT: Record<BadgeTone, string> = {
@@ -44,12 +41,13 @@ export function fileSize(n: number | null) {
 const pending = (rows: SourceListItem[] | undefined) =>
   rows?.some((s) => s.parse_status === "pending" || s.extraction_status === "pending") ? 4000 : false;
 
+/** 날짜를 앞에 둔다: 좁은 화면에서 긴 파일 이름이 잘려도 언제 넣은 자료인지 보이게 */
 function sourceMeta(src: SourceListItem, withPurpose = true) {
   return [
-    withPurpose ? PURPOSE_LABEL[src.purpose] : null,
-    src.original_filename !== src.title ? src.original_filename : null,
-    fileSize(src.size_bytes),
     formatDate(src.created_at),
+    withPurpose ? PURPOSE_LABEL[src.purpose] : null,
+    fileSize(src.size_bytes),
+    src.original_filename !== src.title ? src.original_filename : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -57,7 +55,7 @@ function sourceMeta(src: SourceListItem, withPurpose = true) {
 
 /**
  * 브레인 색인의 받은 자료함: 손이 가야 하는 자료만 (읽기·추출 실패, 처리 중, 일부만, 확인할 후보, 추출 전).
- * 다 처리된 자료는 기록(경험·주장의 원문 근거)에서 찾아 들어간다. 파일 목록이 중심 화면이 되지 않게 (plan §20).
+ * 다 처리된 자료는 기록(경험·사실의 원문 근거)에서 찾아 들어간다. 파일 목록이 중심 화면이 되지 않게 (plan §20).
  */
 export function SourceInbox() {
   const qc = useQueryClient();
@@ -80,9 +78,9 @@ export function SourceInbox() {
         </h2>
         <Link
           to="/brain/sources"
-          className="inline-flex min-h-9 shrink-0 items-center text-[13px] text-muted hover:text-fg"
+          className="inline-flex min-h-9 shrink-0 items-center text-[13px] text-muted hover:text-fg sm:min-h-7"
         >
-          모든 자료 <ChevronRight size={14} />
+          모두 보기 <ChevronRight size={14} />
         </Link>
       </div>
       <p className="mt-0.5 text-[13px] text-muted">처리가 끝나지 않았거나 확인할 것이 남은 자료입니다.</p>
@@ -99,7 +97,7 @@ export function SourceInbox() {
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{src.title}</div>
-                  <div className="truncate text-[13px] text-muted tabular-nums">{sourceMeta(src)}</div>
+                  <div className="line-clamp-2 text-[13px] text-muted tabular-nums">{sourceMeta(src)}</div>
                 </div>
                 {why ? (
                   <span className={cn("shrink-0 text-[13px] tabular-nums", TONE_TEXT[why.tone])}>
@@ -129,7 +127,7 @@ export function SourceInbox() {
   );
 }
 
-// ---------------------------------------------------------------- 모든 자료
+// ---------------------------------------------------------------- 받은 자료 (받은 자료함의 전체 목록)
 
 const sourcesRoute = getRouteApi("/brain/sources");
 
@@ -146,26 +144,17 @@ export function SourcesPage() {
   return (
     <div>
       <PageHeader
-        title="올린 자료"
+        title="받은 자료"
         back={{ to: "/brain", label: "브레인" }}
-        subtitle="경험을 뽑은 자료는 경험 화면의 원문 근거에서도 열 수 있습니다."
+        subtitle="브레인에 넣은 파일과 붙여넣은 글입니다. 경험을 뽑은 자료는 경험 화면의 원문 근거에서도 열 수 있습니다."
       />
-      <div className="mb-4 flex flex-wrap items-center gap-1" role="radiogroup" aria-label="용도 필터">
-        {[{ v: undefined as SourcePurpose | undefined, label: "전체" }, ...PURPOSE_OPTIONS.map((o) => ({ v: o.value, label: o.label }))].map(
-          (f) => (
-            <button
-              key={f.v ?? "all"}
-              type="button"
-              role="radio"
-              aria-checked={purpose === f.v}
-              onClick={() => setPurpose(f.v)}
-              className={cn(CHIP, purpose === f.v ? "bg-fg font-medium text-bg" : "text-muted hover:bg-subtle hover:text-fg")}
-            >
-              {f.label}
-            </button>
-          ),
-        )}
-      </div>
+      <FilterChips<SourcePurpose | undefined>
+        label="용도 필터"
+        value={purpose}
+        onChange={setPurpose}
+        items={[{ value: undefined, label: "전체" }, ...PURPOSE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))]}
+        className="mb-4"
+      />
       <Loaded query={q}>
         {(rows) =>
           rows.length ? (
@@ -179,7 +168,7 @@ export function SourcesPage() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{src.title}</div>
-                      <div className="truncate text-[13px] text-muted tabular-nums">{sourceMeta(src, !purpose)}</div>
+                      <div className="line-clamp-2 text-[13px] text-muted tabular-nums">{sourceMeta(src, !purpose)}</div>
                     </div>
                     <SourceState src={src} />
                   </Link>
@@ -188,13 +177,13 @@ export function SourcesPage() {
             </ul>
           ) : (
             <p className="border-t border-line pt-3 text-sm text-muted">
-              {purpose ? `${PURPOSE_LABEL[purpose]}가 없습니다.` : "아직 올린 자료가 없습니다."}{" "}
+              {purpose ? `${PURPOSE_LABEL[purpose]}가 없습니다.` : "아직 받은 자료가 없습니다."}{" "}
               {purpose ? (
                 <button type="button" onClick={() => setPurpose(undefined)} className={TEXT_LINK}>
                   필터 초기화
                 </button>
               ) : (
-                "브레인에서 자료 올리기로 시작합니다."
+                "브레인에서 자료 넣기로 시작합니다."
               )}
             </p>
           )
@@ -217,7 +206,7 @@ function SourceState({ src }: { src: SourceListItem }) {
   const done =
     src.purpose === "experience"
       ? src.claims_created
-        ? `주장 ${src.claims_created}`
+        ? `사실 ${src.claims_created}`
         : "추출함"
       : src.pages_total
         ? `${src.pages_total}쪽`
@@ -258,7 +247,7 @@ export function SourcePage() {
                     v ? fileSize(v.size_bytes) : null,
                     parse?.pages_total ? `${parse.pages_total}쪽` : null,
                     src.created_at ? formatDate(src.created_at) : null,
-                    `외부 전송: ${DATA_CLASS_LABEL[src.data_class] ?? src.data_class}`,
+                    DATA_CLASS_LABEL[src.data_class] ?? src.data_class,
                   ]
                     .filter(Boolean)
                     .join(" · ")}
@@ -278,7 +267,7 @@ export function SourcePage() {
                         {parse.error_code ? ` · ${parse.error_code}` : ""}
                       </span>
                     ) : (
-                      <span className="text-muted">작업 대기 (worker가 켜져 있어야 합니다)</span>
+                      <span className="text-muted">차례를 기다리는 중. 오래 걸리면 연결·관리 › 작업에서 상태를 보세요.</span>
                     )}
                   </Row>
                   {src.purpose === "experience" ? (
@@ -291,14 +280,14 @@ export function SourcePage() {
                     </Row>
                   )}
                   {src.pending_claims ? (
-                    <Row name="확인할 주장">
+                    <Row name="확인할 사실">
                       <Link to="/brain" search={{ review: true }} className={cn(TEXT_LINK, "font-semibold tabular-nums")}>
                         {src.pending_claims}개 확인하기
                       </Link>
                     </Row>
                   ) : null}
                   {src.confirmed_claims ? (
-                    <Row name="확인한 주장">
+                    <Row name="확인한 사실">
                       <span className="tabular-nums">{src.confirmed_claims}개가 이 자료를 근거로 씁니다</span>
                     </Row>
                   ) : null}
@@ -337,7 +326,7 @@ function ExtractionState({
       {ext ? (
         <span className={TONE_TEXT[EXTRACTION_STATUS[ext.status]?.tone ?? "none"]}>
           {EXTRACTION_STATUS[ext.status]?.label ?? ext.status}
-          {ext.status !== "pending" && ext.status !== "failed" ? ` · 주장 ${ext.claims_created}` : ""}
+          {ext.status !== "pending" && ext.status !== "failed" ? ` · 사실 ${ext.claims_created}` : ""}
           {ext.error_code ? ` · ${ERROR_HINT[ext.error_code] ?? ext.error_code}` : ""}
         </span>
       ) : (
@@ -356,7 +345,7 @@ function ExtractionState({
 const ERROR_HINT: Record<string, string> = {
   purpose_changed: "용도를 바꿔 멈춤",
   source_not_experience: "내 경험 자료가 아님",
-  egress_denied: "이 등급은 외부 모델로 보내지 않음",
+  egress_denied: "이 기기 밖으로 보내지 않는 자료",
 };
 
 function PurposeSection({
@@ -391,13 +380,13 @@ function PurposeSection({
 
   let consequence: string | null = null;
   if (blocked)
-    consequence = `확인한 주장 ${src.confirmed_claims}개가 이 자료를 근거로 써서 용도를 바꿀 수 없습니다. 그 주장을 먼저 보관하세요.`;
+    consequence = `확인한 사실 ${src.confirmed_claims}개가 이 자료를 근거로 써서 용도를 바꿀 수 없습니다. 그 사실을 먼저 보관하세요.`;
   else if (purpose !== src.purpose && src.purpose === "experience" && src.pending_claims)
-    consequence = `저장하면 이 자료에서 뽑은 확인 전 주장 ${src.pending_claims}개를 닫습니다.`;
+    consequence = `저장하면 이 자료에서 뽑은 확인 전 사실 ${src.pending_claims}개를 닫습니다.`;
   else if (purpose === "experience" && src.purpose !== "experience")
     consequence = parseDone
       ? dataClass === "restricted"
-        ? "저장하면 경험 추출을 요청합니다. 제한 등급이면 외부 모델로 보내지 않아 로컬 모델이 없으면 실패합니다."
+        ? "저장하면 경험 추출을 요청합니다. 이 기기 밖으로 보내지 않는 자료라 이 기기의 모델이 없으면 추출하지 못합니다."
         : "저장하면 경험 추출을 요청합니다. 모델 비용이 듭니다."
       : "저장하면 읽기가 끝난 뒤 경험 추출을 요청할 수 있습니다.";
 
@@ -414,10 +403,10 @@ function PurposeSection({
       />
       {purpose !== "proof" ? (
         <div className="max-w-sm">
-          <Label htmlFor="src-class">외부 전송 등급</Label>
+          <Label htmlFor="src-class">보내는 범위</Label>
           <Select id="src-class" value={dataClass} onChange={(e) => setDataClass(e.target.value)}>
-            <option value="private">비공개 — 허용한 제공자에만 보냄</option>
-            <option value="restricted">제한 — 외부 모델·OCR로 보내지 않음</option>
+            <option value="private">내 연결에만 보냄</option>
+            <option value="restricted">이 기기 밖으로 보내지 않음</option>
             <option value="public">공개 자료</option>
           </Select>
         </div>
@@ -446,7 +435,7 @@ function PurposeSection({
       ) : result?.changed ? (
         <p className="text-[13px] text-muted" role="status">
           {PURPOSE_LABEL[result.purpose]}로 저장했습니다.
-          {result.discarded_claims ? ` 확인 전 주장 ${result.discarded_claims}개를 닫았습니다.` : ""}
+          {result.discarded_claims ? ` 확인 전 사실 ${result.discarded_claims}개를 닫았습니다.` : ""}
           {result.extraction_run_id ? " 경험 추출을 요청했습니다." : ""}
         </p>
       ) : null}

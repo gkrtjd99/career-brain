@@ -3,14 +3,13 @@ import { Button, cn } from "@career-brain/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Download, Upload } from "lucide-react";
-import { useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import {
   canExtract,
   useExtractCredentials,
   useOriginalDownload,
 } from "../components/credentials/ProofPanel";
-import { UploadSheet } from "../components/UploadSheet";
+import { useIngest } from "../components/GlobalActions";
 import { api } from "../lib/api";
 import { CREDENTIAL_STATUS_LABEL, extractResultText } from "../lib/credentials";
 import { formatDate } from "../lib/dates";
@@ -21,7 +20,7 @@ const BUSY = new Set(["pending", "waiting_provider"]);
 
 /** 브레인 › 나 › 증빙 서류: 사본 파일 보관함. 원본 다운로드, 이어진 기록, 민감 정보 표시, 항목 뽑기. */
 export function ProofsPage() {
-  const [uploading, setUploading] = useState(false);
+  const ingest = useIngest();
   const q = useQuery({
     queryKey: ["sources", "proofs"],
     queryFn: () => api.proofs(),
@@ -37,8 +36,8 @@ export function ProofsPage() {
         title="증빙 서류"
         subtitle="자격증·성적표·증명서 사본입니다. 원본을 그대로 보관하고 외부 모델에 보내지 않습니다."
         actions={
-          <Button variant="primary" onClick={() => setUploading(true)}>
-            <Upload size={15} /> 증빙 올리기
+          <Button variant="primary" onClick={() => ingest.open("proof")}>
+            <Upload size={15} /> 증빙 넣기
           </Button>
         }
       />
@@ -69,15 +68,18 @@ export function ProofsPage() {
             </ul>
           ) : (
             <p className="border-t border-line pt-3 text-sm text-muted">
-              증빙 서류가 없습니다. 자격증·성적표·증명서 사본을 올리면 항목을 뽑아 자격·이수 기록 후보로 만듭니다.{" "}
-              <button type="button" onClick={() => setUploading(true)} className="text-fg underline underline-offset-2">
-                증빙 올리기
+              증빙 서류가 없습니다. 자격증·성적표·증명서 사본을 넣으면 항목을 뽑아 자격·이수 기록 후보로 만듭니다.{" "}
+              <button
+                type="button"
+                onClick={() => ingest.open("proof")}
+                className="inline-flex min-h-9 items-center text-fg underline underline-offset-2 sm:min-h-6"
+              >
+                증빙 넣기
               </button>
             </p>
           )
         }
       </Loaded>
-      <UploadSheet open={uploading} onClose={() => setUploading(false)} purpose="proof" />
     </div>
   );
 }
@@ -97,10 +99,11 @@ function ProofRow({
   const linked = p.credentials.map((c) =>
     c.status === "extracted" ? `${c.name} (${CREDENTIAL_STATUS_LABEL[c.status]})` : c.name,
   );
+  // 날짜를 앞에: 좁은 화면에서 긴 파일 이름이 잘려도 날짜는 보이게
   const meta = [
-    p.original_filename !== p.title ? p.original_filename : null,
-    fileSize(p.size_bytes),
     formatDate(p.created_at),
+    fileSize(p.size_bytes),
+    p.original_filename !== p.title ? p.original_filename : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -108,7 +111,7 @@ function ProofRow({
     <li className="flex items-center gap-2">
       <Link to="/brain/sources/$sourceId" params={{ sourceId: p.id }} className={cn(ROW, "min-w-0 flex-1")}>
         <div className="truncate text-sm font-medium">{p.title}</div>
-        <div className="truncate text-[13px] text-muted tabular-nums">{meta}</div>
+        <div className="line-clamp-2 text-[13px] text-muted tabular-nums">{meta}</div>
         <div className="truncate text-[13px]">
           {p.resident_number ? <span className="font-semibold">주민등록번호가 보입니다 · </span> : null}
           <span className={p.candidates ? "font-semibold" : "text-muted"}>

@@ -15,3 +15,7 @@ export type { HighlightProps } from "./Highlight";
 export { EvidenceCard, StatusBadge, STATUS_LABEL } from "./EvidenceCard";
 export type { EvidenceCardProps, VerificationStatus } from "./EvidenceCard";
 export { MarkdownView } from "./Markdown";
+export { Chip, FilterChips, ViewTabs } from "./Filters";
+export type { ChipProps, FilterChipItem, FilterChipsProps, ViewTabsProps } from "./Filters";
+export { CommandDialog, CommandDialogClose } from "./CommandDialog";
+export type { CommandDialogProps } from "./CommandDialog";

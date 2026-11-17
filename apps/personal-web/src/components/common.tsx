@@ -1,4 +1,4 @@
-import { cn, Spinner } from "@career-brain/ui";
+import { cn, Spinner, ViewTabs } from "@career-brain/ui";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft } from "lucide-react";
@@ -62,7 +62,7 @@ export function PageHeader({
         <Link
           to={back.to}
           search={back.search}
-          className="-ml-1 inline-flex items-center gap-0.5 text-[13px] text-muted hover:text-fg"
+          className="-ml-1 inline-flex min-h-9 items-center gap-0.5 rounded-md pr-2 text-[13px] text-muted hover:text-fg sm:min-h-7"
         >
           <ChevronLeft size={16} />
           {back.label}
@@ -79,38 +79,19 @@ export function PageHeader({
   );
 }
 
+/** 보기 바꾸기 밑줄 탭. 모양은 packages/ui 의 ViewTabs 하나로 맞춘다. */
 export function Tabs<T extends string>({
   value,
   onChange,
   items,
+  label,
 }: {
   value: T;
   onChange: (v: T) => void;
   items: { value: T; label: ReactNode }[];
+  label?: string;
 }) {
-  return (
-    <div
-      role="tablist"
-      className="mb-4 flex gap-0.5 overflow-x-auto sm:gap-1 overflow-y-hidden border-b border-line [scrollbar-width:none]"
-    >
-      {items.map((it) => (
-        <button
-          key={it.value}
-          role="tab"
-          aria-selected={value === it.value}
-          onClick={() => onChange(it.value)}
-          className={cn(
-            "-mb-px border-b-2 px-2 py-2 text-sm whitespace-nowrap sm:px-3",
-            value === it.value
-              ? "border-fg font-medium text-fg"
-              : "border-transparent text-muted transition-colors duration-150 hover:text-fg",
-          )}
-        >
-          {it.label}
-        </button>
-      ))}
-    </div>
-  );
+  return <ViewTabs value={value} onChange={onChange} items={items} label={label} className="mb-4" />;
 }
 
 /** 목록: 상자 없이 위 선과 행 사이 얇은 선으로만 나눈다. */

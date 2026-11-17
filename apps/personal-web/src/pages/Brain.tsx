@@ -1,14 +1,13 @@
 import type { BrainOverview, ExperienceKind, ExperienceSummary } from "@career-brain/client";
-import { Button, cn, Input, Select, Sheet } from "@career-brain/ui";
+import { Button, Chip, cn, FilterChips, Input, Select, ViewTabs } from "@career-brain/ui";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Plus, Search as SearchIcon, Upload } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { BrainIndex } from "../components/brain/BrainIndex";
-import { CreateExperienceForm, EMPTY_EXPERIENCE } from "../components/ExperienceForm";
 import { InterviewBatchButton } from "../components/runs/InterviewBatchSheet";
-import { UploadSheet } from "../components/UploadSheet";
+import { useIngest } from "../components/GlobalActions";
 import { api } from "../lib/api";
 import {
   confirmedCount,
@@ -25,25 +24,19 @@ import { SourceInbox } from "./Sources";
 
 const route = getRouteApi("/brain");
 
-/** 한 번에 받는 경험 수 (서버 상한). 넘으면 거름을 좁히라고 알린다. */
+/** 한 번에 받는 경험 수 (서버 상한). 넘으면 필터를 좁히라고 알린다. */
 const LIST_LIMIT = 1000;
-/** 거름 줄에 보이는 태그 수 (자주 쓴 것부터) */
+/** 필터 줄에 보이는 태그 수 (자주 쓴 것부터) */
 const TAG_CHIPS = 12;
 const TAG_CHIPS_MOBILE = 6;
 
-const CHIP =
-  "inline-flex h-9 items-center rounded-full px-3.5 text-[13px] tabular-nums transition-colors duration-150 " +
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-const CHIP_ON = "bg-fg font-medium text-bg";
-const CHIP_OFF = "text-muted hover:bg-subtle hover:text-fg";
 const ROW = "-mx-2 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60";
-const TEXT_LINK = "text-fg underline underline-offset-2";
+const TEXT_LINK = "inline-flex min-h-9 items-center text-fg underline underline-offset-2 sm:min-h-6";
 
 export function BrainPage() {
   const search = route.useSearch();
   const navigate = useNavigate();
-  const [creating, setCreating] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const ingest = useIngest();
   const setSearch = (patch: Partial<BrainSearch>) =>
     navigate({
       to: "/brain",
@@ -52,7 +45,7 @@ export function BrainPage() {
     });
 
   const overview = useQuery({ queryKey: ["experiences", "overview"], queryFn: api.brainOverview });
-  // 일괄 인터뷰는 거름과 무관하게 모든 경험에서 고른다 (오늘 화면과 같은 캐시)
+  // 질문 받으며 채우기는 필터와 무관하게 모든 경험에서 고른다 (오늘 화면과 같은 캐시)
   const all = useQuery({ queryKey: ["experiences"], queryFn: () => api.experiences() });
 
   const o = overview.data;
@@ -60,14 +53,14 @@ export function BrainPage() {
     <div>
       <PageHeader
         title="브레인"
-        subtitle="내 기록과 참고 지식을 나눠 둡니다. 확인한 주장만 문서와 검색 근거로 씁니다."
+        subtitle="내 기록과 참고 지식을 나눠 둡니다. 확인한 사실만 문서와 검색 근거로 씁니다."
         actions={
           <>
             <InterviewBatchButton experiences={all.data ?? []} />
-            <Button onClick={() => setUploading(true)}>
-              <Upload size={15} /> 자료 올리기
+            <Button onClick={() => ingest.open()}>
+              <Upload size={15} /> 자료 넣기
             </Button>
-            <Button variant="primary" onClick={() => setCreating(true)}>
+            <Button variant="primary" onClick={() => ingest.openExperience()}>
               <Plus size={15} /> 경험 추가
             </Button>
           </>
@@ -95,12 +88,12 @@ export function BrainPage() {
       <ErrorText error={overview.error} className="mb-3" />
       {o && o.experiences === 0 ? (
         <Quiet>
-          아직 경험이 없습니다. 자료를 올리거나 경험을 직접 추가하세요.{" "}
-          <button type="button" onClick={() => setUploading(true)} className={TEXT_LINK}>
-            자료 올리기
+          아직 경험이 없습니다. 이력서나 경력기술서를 넣거나 경험을 직접 추가하세요.{" "}
+          <button type="button" onClick={() => ingest.open()} className={TEXT_LINK}>
+            자료 넣기
           </button>{" "}
           ·{" "}
-          <button type="button" onClick={() => setCreating(true)} className={TEXT_LINK}>
+          <button type="button" onClick={() => ingest.openExperience()} className={TEXT_LINK}>
             경험 추가
           </button>
         </Quiet>
@@ -110,9 +103,6 @@ export function BrainPage() {
           <ExperienceResults search={search} setSearch={setSearch} />
         </>
       ) : null}
-
-      <CreateExperienceSheet open={creating} onClose={() => setCreating(false)} />
-      <UploadSheet open={uploading} onClose={() => setUploading(false)} />
     </div>
   );
 }
@@ -134,7 +124,7 @@ function filtersActive(s: BrainSearch) {
   return !!(s.q || s.kind || s.tag?.length || s.year || s.review);
 }
 
-/** 브레인 안 찾기: 경험의 제목·조직·역할·태그. 주장·원문 문단은 검색 화면으로. */
+/** 브레인 안 찾기: 경험의 제목·조직·역할·태그. 확인한 사실·원문 문단은 근거 검색으로. */
 function BrainSearchBox({ q, onChange }: { q: string; onChange: (q: string) => void }) {
   const [draft, setDraft] = useState(q);
   useEffect(() => setDraft(q), [q]);
@@ -170,15 +160,15 @@ function BrainSearchBox({ q, onChange }: { q: string; onChange: (q: string) => v
       <Link
         to="/search"
         search={draft.trim() ? { q: draft.trim() } : {}}
-        className="mt-1.5 inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg"
+        className="mt-1.5 inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg sm:min-h-7"
       >
-        주장·문단까지 검색 <ChevronRight size={14} />
+        근거 전체 검색 <ChevronRight size={14} />
       </Link>
     </div>
   );
 }
 
-/** 맨 위 "확인할 것": AI가 뽑은 주장 후보가 있는 경험. */
+/** 맨 위 "확인할 것": AI가 뽑은 사실 후보가 있는 경험. */
 function ReviewBlock({ overview, onShowAll }: { overview: BrainOverview; onShowAll: () => void }) {
   const q = useQuery({
     queryKey: ["experiences", "review-top"],
@@ -189,7 +179,7 @@ function ReviewBlock({ overview, onShowAll }: { overview: BrainOverview; onShowA
       <h2 className="text-[15px] font-semibold">
         확인할 것 <span className="font-normal text-muted tabular-nums">{overview.pending_claims}</span>
       </h2>
-      <p className="mt-0.5 text-[13px] text-muted">AI가 원문에서 뽑은 주장 후보입니다. 확인하기 전에는 근거로 쓰지 않습니다.</p>
+      <p className="mt-0.5 text-[13px] text-muted">AI가 원문에서 뽑은 사실 후보입니다. 확인하기 전에는 근거로 쓰지 않습니다.</p>
       <ul className="mt-3 divide-y divide-line border-t border-line">
         {(q.data ?? []).map((e) => (
           <li key={e.id}>
@@ -208,7 +198,7 @@ function ReviewBlock({ overview, onShowAll }: { overview: BrainOverview; onShowA
             <button
               type="button"
               onClick={onShowAll}
-              className="inline-flex min-h-9 items-center py-2 text-[13px] text-muted hover:text-fg"
+              className="inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg"
             >
               확인할 경험 {overview.needs_review}개 모두 보기 <ChevronRight size={14} />
             </button>
@@ -244,41 +234,27 @@ function Filters({
 
   return (
     <div className="mb-6 space-y-2">
-      <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="종류">
-        {[{ k: undefined as ExperienceKind | undefined, label: "전체", n: overview.experiences }, ...kinds.map((k) => ({ k, label: EXPERIENCE_KIND_LABEL[k], n: overview.kinds[k] }))].map(
-          (f) => (
-            <button
-              key={f.k ?? "all"}
-              type="button"
-              role="radio"
-              aria-checked={search.kind === f.k}
-              onClick={() => setSearch({ kind: f.k })}
-              className={cn(CHIP, search.kind === f.k ? CHIP_ON : CHIP_OFF)}
-            >
-              {f.label}
-              <span className={cn("ml-1.5", search.kind === f.k ? "text-bg/70" : "text-muted")}>{f.n}</span>
-            </button>
-          ),
-        )}
-      </div>
+      <FilterChips<ExperienceKind | undefined>
+        label="종류"
+        value={search.kind}
+        onChange={(kind) => setSearch({ kind })}
+        items={[
+          { value: undefined, label: "전체", count: overview.experiences },
+          ...kinds.map((k) => ({ value: k, label: EXPERIENCE_KIND_LABEL[k], count: overview.kinds[k] })),
+        ]}
+      />
       {tagChips.length ? (
-        <div className="flex flex-wrap items-center gap-1" aria-label="태그">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="태그">
           {tagChips.map((t, i) => (
-            <button
+            <Chip
               key={t}
-              type="button"
-              aria-pressed={isOn(t)}
+              pressed={isOn(t)}
               onClick={() => toggleTag(t)}
-              className={cn(
-                CHIP,
-                "border",
-                isOn(t) ? "border-fg " + CHIP_ON : "border-line " + CHIP_OFF,
-                // 좁은 화면에서는 자주 쓴 6개만 (고른 태그는 늘 보인다)
-                i >= TAG_CHIPS_MOBILE && !isOn(t) && "max-sm:hidden",
-              )}
+              // 좁은 화면에서는 자주 쓴 6개만 (고른 태그는 늘 보인다)
+              className={cn(i >= TAG_CHIPS_MOBILE && !isOn(t) && "max-sm:hidden")}
             >
               {t}
-            </button>
+            </Chip>
           ))}
         </div>
       ) : null}
@@ -298,40 +274,32 @@ function Filters({
             ))}
           </Select>
         ) : null}
-        <button
-          type="button"
-          aria-pressed={!!search.review}
+        <Chip
+          pressed={!!search.review}
           onClick={() => setSearch({ review: search.review ? undefined : true })}
-          className={cn(CHIP, search.review ? CHIP_ON : CHIP_OFF)}
+          count={overview.needs_review || null}
         >
-          확인 필요만{overview.needs_review ? <span className="ml-1.5 tabular-nums">{overview.needs_review}</span> : null}
-        </button>
+          확인 필요만
+        </Chip>
         {filtersActive(search) ? (
           <button
             type="button"
             onClick={() => setSearch({ q: undefined, kind: undefined, tag: undefined, year: undefined, review: undefined })}
-            className="inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg"
+            className="inline-flex min-h-9 items-center text-[13px] text-muted underline underline-offset-2 hover:text-fg sm:min-h-7"
           >
             필터 초기화
           </button>
         ) : null}
-        <div className="ml-auto flex items-center gap-1" role="radiogroup" aria-label="보기">
-          {[
-            { v: undefined, label: "타임라인" },
-            { v: "table" as const, label: "표" },
-          ].map((f) => (
-            <button
-              key={f.label}
-              type="button"
-              role="radio"
-              aria-checked={search.view === f.v}
-              onClick={() => setSearch({ view: f.v })}
-              className={cn(CHIP, search.view === f.v ? CHIP_ON : CHIP_OFF)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <ViewTabs<"timeline" | "table">
+          label="보기"
+          value={search.view === "table" ? "table" : "timeline"}
+          onChange={(v) => setSearch({ view: v === "table" ? "table" : undefined })}
+          items={[
+            { value: "timeline", label: "타임라인" },
+            { value: "table", label: "표" },
+          ]}
+          className="ml-auto border-b-0"
+        />
       </div>
     </div>
   );
@@ -351,7 +319,7 @@ function ExperienceResults({
     tags: search.tag,
     year: search.year,
     status: search.review ? ("needs_review" as const) : undefined,
-    // 연표는 시작 달 순서, 표는 고른 정렬
+    // 타임라인은 시작 달 순서, 표는 고른 정렬
     sort: table ? (search.sort ?? "start") : ("start" as const),
     limit: LIST_LIMIT,
   };
@@ -367,7 +335,7 @@ function ExperienceResults({
         if (!items.length)
           return (
             <Quiet>
-              {search.review ? "확인할 주장이 있는 경험이 없습니다." : "조건에 맞는 경험이 없습니다."}{" "}
+              {search.review ? "확인할 사실이 있는 경험이 없습니다." : "조건에 맞는 경험이 없습니다."}{" "}
               <Link to="/brain" search={{}} className={TEXT_LINK}>
                 필터 초기화
               </Link>
@@ -423,7 +391,7 @@ function meta(e: ExperienceSummary, { withKind = true, withParent = false } = {}
     .join(" · ");
 }
 
-/** 연표: 시작 연도별 (최근 먼저), 시작 달이 없는 경험은 맨 끝. 경력 아래 프로젝트는 접어 둔다. */
+/** 타임라인: 시작 연도별 (최근 먼저), 시작 달이 없는 경험은 맨 끝. 경력 아래 프로젝트는 접어 둔다. */
 function Timeline({ nodes, expandAll }: { nodes: ExperienceNode[]; expandAll: boolean }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (id: string) =>
@@ -500,7 +468,7 @@ function ExperienceRow({
     >
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{e.title}</div>
-        <div className="truncate text-[13px] text-muted tabular-nums">{meta(e, { withParent })}</div>
+        <div className="line-clamp-2 text-[13px] text-muted tabular-nums">{meta(e, { withParent })}</div>
         {e.tags.length ? (
           <div className="truncate text-[13px] text-muted">{e.tags.slice(0, 6).join(" · ")}</div>
         ) : null}
@@ -520,7 +488,7 @@ function ExperienceTable({
   nodes: ExperienceNode[];
   sort: BrainSearch["sort"];
   onSort: (sort: BrainSearch["sort"]) => void;
-  /** 거름을 걸었을 때만 */
+  /** 필터를 걸었을 때만 */
   count: number | null;
 }) {
   const rows = nodes.flatMap(({ item, children }) => [
@@ -600,19 +568,11 @@ function ClaimState({ e, inline = false }: { e: ExperienceSummary; inline?: bool
     >
       {e.needs_review ? <div className="font-semibold">확인 필요 {e.needs_review}</div> : null}
       {confirmed ? <div className="text-muted">확인됨 {confirmed}</div> : null}
-      {!e.needs_review && !confirmed ? <div className="text-muted">주장 없음</div> : null}
+      {!e.needs_review && !confirmed ? <div className="text-muted">사실 없음</div> : null}
     </div>
   );
 }
 
 function Quiet({ children }: { children: ReactNode }) {
   return <p className="border-t border-line pt-3 text-sm text-muted">{children}</p>;
-}
-
-function CreateExperienceSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Sheet open={open} onOpenChange={(o) => !o && onClose()} title="경험 추가">
-      {open ? <CreateExperienceForm initial={EMPTY_EXPERIENCE} onDone={onClose} /> : null}
-    </Sheet>
-  );
 }

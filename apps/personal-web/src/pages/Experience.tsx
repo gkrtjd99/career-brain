@@ -65,7 +65,7 @@ export function ExperiencePage() {
                   value: "claims",
                   label: (
                     <span>
-                      주장
+                      사실
                       {pending ? (
                         <span className="ml-1.5 font-semibold tabular-nums">
                           <span className="sr-only">확인 필요 </span>
@@ -217,11 +217,11 @@ function ClaimsTab({ exp }: { exp: Experience }) {
   const groups: { title: string; hint?: string; claims: Claim[] }[] = [
     {
       title: "확인 대기",
-      hint: "AI가 원문에서 뽑은 후보입니다. 사실이면 확인, 다르면 고치거나 ‘사실과 달라요’.",
+      hint: "AI가 원문에서 뽑은 후보입니다. 맞으면 확인, 다르면 수정하거나 ‘사실과 달라요’를 누르세요.",
       claims: exp.claims.filter((c) => c.status === "extracted"),
     },
     {
-      title: "확인한 주장",
+      title: "확인한 사실",
       claims: exp.claims.filter((c) => c.status === "self_confirmed" || c.status === "evidence_supported"),
     },
     { title: "이견 있음", claims: exp.claims.filter((c) => c.status === "disputed") },
@@ -231,7 +231,7 @@ function ClaimsTab({ exp }: { exp: Experience }) {
   return (
     <div className="space-y-10">
       {exp.claims.length === 0 ? (
-        <p className="text-sm text-muted">아직 주장이 없습니다. 아래에서 직접 추가하거나 인터뷰 탭에서 정리하세요.</p>
+        <p className="text-sm text-muted">아직 확인한 사실이 없습니다. 아래에서 직접 추가하거나 인터뷰 탭에서 질문에 답하세요.</p>
       ) : null}
       {groups.map((g) =>
         g.claims.length ? (
@@ -252,7 +252,7 @@ function ClaimsTab({ exp }: { exp: Experience }) {
             onClick={() => setShowArchived((v) => !v)}
             className="inline-flex min-h-9 items-center text-[13px] text-muted hover:text-fg"
           >
-            보관한 주장 {retired.length}개 {showArchived ? "숨기기" : "보기"}
+            보관한 사실 {retired.length}개 {showArchived ? "숨기기" : "보기"}
           </button>
           {showArchived ? (
             <ClaimList claims={retired} experienceId={exp.id} onOpenSpan={setSpanId} className="opacity-70" />
@@ -305,12 +305,12 @@ function AddClaim({ experienceId }: { experienceId: string }) {
   if (!open)
     return (
       <Button onClick={() => setOpen(true)}>
-        <Plus size={15} /> 주장 직접 추가
+        <Plus size={15} /> 사실 직접 추가
       </Button>
     );
   return (
     <section>
-      <h2 className="mb-3 text-[15px] font-semibold">주장 직접 추가</h2>
+      <h2 className="mb-3 text-[15px] font-semibold">사실 직접 추가</h2>
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -323,7 +323,7 @@ function AddClaim({ experienceId }: { experienceId: string }) {
           onChange={(e) => setStatement(e.target.value)}
           placeholder="예: 배송 상태 조회 API의 응답 시간을 줄이기 위해 캐시를 도입했다."
           maxLength={4000}
-          aria-label="주장 문장"
+          aria-label="사실 문장"
           autoFocus
         />
         <div className="grid grid-cols-2 gap-2">
@@ -359,7 +359,7 @@ function AddClaim({ experienceId }: { experienceId: string }) {
             취소
           </Button>
         </div>
-        <p className="text-[13px] text-muted">직접 쓴 주장은 원문 근거가 없으면 “근거 없음”으로 표시됩니다.</p>
+        <p className="text-[13px] text-muted">직접 쓴 사실은 원문 근거가 없으면 “근거 없음”으로 표시됩니다.</p>
       </form>
     </section>
   );
@@ -376,7 +376,7 @@ function WikiTab({ experienceId, title }: { experienceId: string; title: string 
       {(md) => (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[13px] text-muted">확인한 주장만 모은 정리본입니다.</p>
+            <p className="text-[13px] text-muted">확인한 사실만 모은 정리본입니다.</p>
             <div className="flex gap-1.5">
               <Button
                 size="sm"
