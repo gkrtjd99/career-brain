@@ -96,6 +96,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0040 | `schema_step` | 새 표 `education` (옛 묶음엔 빈 표). 합치기는 same_except |
 | c0041 | `schema_step` | `profiles`에 병역·보훈·장애·희망 조건 칸 (옛 묶음엔 빈 값: 목록 칸은 빈 배열, 나머지는 NULL). restricted 칸이라 묶음은 지금처럼 사용자만 연다 |
 | c0042 | `schema_step` | 새 표 `answer_assets`·`answer_asset_claims`·`answer_asset_uses` (옛 묶음엔 빈 표). 쓴 곳 기록은 내용만 합친다(겹침을 찾지 않는다) |
+| c0043 | `schema_step` | `sources.origin_url = null` (옛 원본은 파일로 올렸다). 공고 버전 `method`에 `browser_capture`가 더해졌을 뿐 옛 버전은 그대로 |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.
 - 순서: 묶음 확인(받은 그대로의 해시) → 형식 변환(`UPGRADES`) → head 변환(`SCHEMA_STEPS`) → 표 sha256·행 수 다시 계산 → 대상 DB와 표 구성 비교. 단계가 만들거나 고친 표는 manifest의 칸 목록이 옛 것이므로 대신 **모든 행의 칸 이름이 대상 표의 칸과 정확히 같은지** 본다 (`schema_mismatch: <표> row N after conversion: missing […], unexpected […]`). 손대지 않은 표는 칸 이름·타입을 그대로 비교한다 (단계 없이 칸이 바뀐 표를 잡는다).

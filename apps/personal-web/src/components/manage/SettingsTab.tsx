@@ -3,12 +3,13 @@ import { Button, cn, Label, Section, Textarea } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ErrorText } from "../common";
+import { CaptureSection } from "./CaptureSection";
 import { WorkspaceSettingsSection } from "../settings/WorkspaceSettingsSection";
 import { JudgeCacheSection } from "../settings/JudgeCacheSection";
 import { api } from "../../lib/api";
 import { useTheme, type ThemePref } from "../../lib/theme";
 
-/** 설정 탭: 테마, 문서 검사, 작업 공간(표시 시간대·기술명 별칭), 판정 캐시 */
+/** 설정 탭: 테마, 브라우저에서 보내기(북마크), 문서 검사, 작업 공간(표시 시간대·기술명 별칭), 판정 캐시 */
 export function SettingsTab({ scopes }: { scopes: string[] }) {
   const [theme, setTheme] = useTheme();
   return (
@@ -38,6 +39,7 @@ export function SettingsTab({ scopes }: { scopes: string[] }) {
           ))}
         </div>
       </Section>
+      <CaptureSection />
       <WorkspaceSettingsSection />
       <DocumentSettingsSection />
       {scopes.includes("egress") ? <JudgeCacheSection /> : null}

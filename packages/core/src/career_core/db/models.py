@@ -78,6 +78,8 @@ class Source(Base):
     # c0039: 넣을 때 용도를 확신하지 못해 사람의 확인을 기다림 (그동안 등급은 restricted), 제안의 이유
     purpose_pending: Mapped[bool] = mapped_column(Boolean, default=False)
     purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
+    # c0043: 브라우저에서 보낸 글의 원래 주소 (파일로 올린 원본은 null)
+    origin_url: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class SourceVersion(Base):
@@ -383,7 +385,9 @@ class JobPostingVersion(Base):
     version_no: Mapped[int] = mapped_column(Integer)
     final_url: Mapped[str] = mapped_column(Text)
     http_status: Mapped[int | None] = mapped_column(Integer, default=None)
-    method: Mapped[str] = mapped_column(Text)
+    method: Mapped[str] = mapped_column(
+        Text
+    )  # http | browser | manual_text | browser_capture (c0043)
     adapter: Mapped[str] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)

@@ -169,6 +169,8 @@ export function createClient({
       if (opts.textLayer) form.set("text_layer", JSON.stringify(opts.textLayer));
       return json<T.UploadOut>("POST", "/core/sources", { form });
     },
+    /** c0043 보고 있는 페이지 보내기: 페이지 글을 Markdown 원본으로 (참고 자료 기본) */
+    captureSource: (body: T.CaptureSourceIn) => post<T.UploadOut>("/core/sources/capture", body),
     /** c0039 브레인에 넣기: 무엇인지 고르기 (모델 없이 서버 규칙) */
     classifyIngest: (items: T.IngestClassifyItem[]) =>
       post<T.IngestGuess[]>("/core/ingest/classify", { items }),
@@ -297,6 +299,9 @@ export function createClient({
       post<T.StatusOut>(`/core/job-postings/${id(postingId)}/fetch-runs/${id(runId)}/confirm`),
     declineFetchCost: (postingId: string, runId: string) =>
       post<T.StatusOut>(`/core/job-postings/${id(postingId)}/fetch-runs/${id(runId)}/decline`),
+    /** c0043 보고 있는 페이지 보내기: 받은 HTML·글로 추출 (서버는 가져오지 않는다). 503 model_unavailable */
+    capturePosting: (body: T.CapturePostingIn) =>
+      post<T.CapturePostingOut>("/core/job-postings/capture", body),
     manualPostingText: (postingId: string, text: string) =>
       post<T.StatusOut>(`/core/job-postings/${id(postingId)}/manual-text`, { text }),
     confirmPosting: (postingId: string, body: T.ConfirmPostingIn) =>

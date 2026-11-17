@@ -612,3 +612,14 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 지난 제출본 `GET /core/submitted-documents`(`applications.read`): `application_submissions.documents`의 고정본만 (새 표 없음). `…/{submission_id}/{document_id}`는 글·블록·근거 복사본·회사 이름·여기서 시작한 답변. `…/to-answer`는 새 공통 답변(지금도 확인한 근거만), `…/use`는 작성 중인 지원 문서로 복사(블록 출처 유지, 같은 409·경고 규칙).
 - 내보내기: 세 표는 카탈로그로 자동 포함, `@schema_step("c0042")`. 합치기 키: 답변 same_except(제목·본문이 정체), 근거는 DB UNIQUE, 쓴 곳은 `CONTENT_ONLY_TABLES`.
 - 시험: `packages/core/tests/test_brain_me.py` (학력 CRUD·규칙·DB CHECK, 옛 학력 옮기기, 프로필 더하기 규칙과 MCP·모델 경로 0건, 기술 모으기·합치기·나누기, 공통 답변 근거·넣기·409·dry_run·쓴 곳, 다른 회사 경고, 지난 제출본, 다른 공간 0건, 내보내기·복원 왕복, MCP 도구, 블라인드 칸).
+
+## 내 브라우저에서 보내기 (c0043)
+
+`c0043` (`down_revision = c0042`). 보고 있는 페이지 보내기 (plan §8 "내 브라우저에서 보내기").
+
+- `core.job_posting_versions.method` CHECK에 `browser_capture`를 더한다: 사용자가 자기 브라우저에서 보낸 HTML·글로 만든 버전 (서버는 그 주소를 가져오지 않았다). 표는 그대로 SELECT/INSERT만.
+- `core.sources.origin_url` (text, null): 브라우저에서 보낸 글의 원래 주소. CHECK 2,000자 이하·`^https?://`. 파일로 올린 원본은 null. 새 표 없음 — RLS·권한은 그대로.
+- 되돌리기(downgrade)는 `browser_capture` 버전을 `manual_text`로 바꾸고 CHECK를 되돌린다 (관리자 연결).
+- 내보내기: `@schema_step("c0043")`가 옛 묶음의 원본 행에 `origin_url = null`을 넣는다. 합치기 키는 그대로(원본은 버전의 sha256).
+- 시험: `packages/core/tests/test_browser_capture.py`.
+

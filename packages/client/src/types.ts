@@ -114,6 +114,8 @@ export interface Source {
   /** c0039 */
   purpose_pending?: boolean;
   purpose_hint?: string | null;
+  /** c0043: 브라우저에서 보낸 글의 원래 주소 (파일로 올린 원본은 null) */
+  origin_url?: string | null;
 }
 
 export interface SourceListItem {
@@ -593,6 +595,34 @@ export type FieldEvidence =
 export interface ExtractedField {
   value: PostingValue;
   evidence: FieldEvidence;
+}
+
+/** c0043 보고 있는 페이지 보내기: 내 브라우저에서 보낸 공고 페이지. html·text 중 하나는 있어야 한다 */
+export interface CapturePostingIn {
+  url: string;
+  title?: string;
+  /** 페이지 HTML (서버는 렌더링하지 않고 글·구조화 데이터만 고른다). 2,000,000자까지 */
+  html?: string;
+  /** 선택한 부분·공유한 글. 60,000자까지 */
+  text?: string;
+}
+
+export interface CapturePostingOut {
+  posting_id: Uuid;
+  fetch_run_id: Uuid;
+  status: "done" | "listing" | "failed";
+  created: boolean;
+  unchanged: boolean;
+  version_id: Uuid | null;
+  error_code: string | null;
+}
+
+/** c0043: 브라우저에서 보낸 페이지 글 (Markdown). 증빙은 받지 않는다 (422 capture_proof_not_allowed) */
+export interface CaptureSourceIn {
+  url: string;
+  title?: string;
+  markdown: string;
+  purpose?: "reference" | "experience";
 }
 
 export interface SaveUrlResult {

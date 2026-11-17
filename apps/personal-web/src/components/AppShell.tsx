@@ -119,8 +119,8 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [connected]);
 
-  // 첫 연결 화면은 메뉴 없이 그 일만 보여 준다.
-  if (path === "/connect")
+  // 첫 연결 화면과 페이지 보내기 창(c0043)은 메뉴 없이 그 일만 보여 준다.
+  if (path === "/connect" || path === "/capture")
     return (
       <main className="min-h-dvh px-4 pb-12">
         <Outlet />

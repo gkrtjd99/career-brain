@@ -89,7 +89,7 @@ apps/personal-web/src/
 
 ## 의존성
 
-런타임: `@tanstack/react-query`, `@tanstack/react-router`, `@radix-ui/react-dialog`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 이 기기 글자 읽기(c0039): `tesseract.js` 7.0.0(+ `tesseract.js-core`), `@tesseract.js-data/kor`·`@tesseract.js-data/eng` 1.0.0 — 처음 사진을 읽을 때만 불러온다(아래 "브레인에 넣기"). 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
+런타임: `@tanstack/react-query`, `@tanstack/react-router`, `@radix-ui/react-dialog`, `lucide-react`, `clsx`, `tailwind-merge`, `pretendard`. 이 기기 글자 읽기(c0039): `tesseract.js` 7.0.0(+ `tesseract.js-core`), `@tesseract.js-data/kor`·`@tesseract.js-data/eng` 1.0.0 — 처음 사진을 읽을 때만 불러온다(아래 "브레인에 넣기"). 보고 있는 페이지 보내기(c0043): `defuddle` 0.19.6·`turndown` 7.2.5(MIT) — `/capture`에서만 불러온다. 빌드: `tailwindcss` v4 + `@tailwindcss/vite`.
 
 ### 문서 편집기: Tiptap 대신 문단별 textarea
 
@@ -228,6 +228,27 @@ c0032 (원본 용도, `database.md` "원본 용도"): `POST /core/sources` 폼 `
 - 받은 자료함(`SourceInbox`): `attention = purpose_unconfirmed` 줄은 제안 이유 한 줄과 용도 칩 — 칩 하나를 누르면 그 용도로 확인된다(증빙은 `restricted`, 아니면 `private`). 자료 화면의 용도 구역에는 "확인 필요." + "이대로 확인".
 - 빠진 것: DOCX "숨김 서식 글은 빼고 읽기"와 등급 고르기는 이 창에 없다(자료 화면에서 바꾼다). 스캔 PDF는 브라우저에서 쪽을 그리지 않는다(pdf.js 미도입) — "쪽 사진으로 넣어 주세요"라고 알린다.
 - 확인: 버려도 되는 DB·다른 포트에서 실제 백엔드로, 390px 폭에서 브레인 화면 놓기(안내 덮개)·파일 셋 한꺼번에(합성 자격증 canvas PNG → 이 기기에서 읽어 증빙·자격 항목 "정보처리기사", 주민등록번호 가려짐·위치 저장 / 1인칭 회고 → 경험 / 짧은 메모 → 확인 필요)·주소 둘(공고 저장, 회사 이름 받아 만들고 가져오기)·받은 자료함 한 번 눌러 확인을 보았다. 데스크톱 폭은 보지 못했다.
+
+## 보고 있는 페이지 보내기 (`/capture`, c0043)
+
+로그인해야 보이는 공고·읽고 있는 글을 사용자 브라우저에서 보낸다 (plan §8 "내 브라우저에서 보내기", 서버 쪽 규칙은 [postings.md](postings.md#내-브라우저에서-보내기-c0043)). obsidian-clipper에서 가져온 생각이지만 신뢰 모델은 이 앱의 것이다: 받은 페이지는 데이터이고, 저장은 사람이 누를 때만, 참고 자료는 근거가 아니고, 증빙으로는 받지 않는다.
+
+- 북마크: 연결·관리 › 설정 "브라우저에서 보내기"의 "브레인으로 보내기"를 북마크 막대로 끈다 (`components/manage/CaptureSection.tsx`, 주소는 `lib/capture.ts::bookmarkletHref(window.location.origin)`). React가 `javascript:` 주소를 막아 그린 뒤 `setAttribute`로 붙인다. 누르면 끌라고 알리고, 끌 수 없는 브라우저를 위해 주소 복사가 있다.
+- 화면: `pages/Capture.tsx` (메뉴 없는 화면, 토큰이 없으면 `/connect?next=/capture`를 거쳐 돌아온다 — 북마크는 10분 동안 준비됨을 기다린다). 제목(고칠 수 있음)·사이트·글자 수·앞부분 몇 줄, "선택한 부분만 보내기"(선택했을 때, 기본 켬), 넣을 곳 하나(공고 / 참고 자료 / 내 경험 자료) — 주소가 공고로 확실하면(`POST /core/ingest/classify`) 공고, 아니면 참고 자료가 먼저 골라져 있다. 버튼 하나("공고로 저장" / "브레인에 넣기"). 저장 뒤 "공고 열기"·"자료 열기"(북마크 창에서는 새 탭)와 "창 닫기".
+- 휴대폰: `public/manifest.webmanifest`의 `share_target` (GET `/capture?title=&text=&url=`). 안드로이드 Chrome에서 홈 화면에 추가하면 공유 메뉴에 나온다 (iOS Safari는 Web Share Target이 없다). 주소만(+ 짧은 제목) 공유하면 공고 저장(`POST /core/job-postings`, 서버가 가져옴), 글을 공유하면 브레인에 넣기 — 주소가 함께 오면 `POST /core/sources/capture`, 없으면 붙여넣은 글처럼 `POST /core/sources`(Markdown). 아이콘은 `public/icon.svg` 하나.
+
+### 보안 메모 (북마크·postMessage·받은 HTML)
+
+- 그 사이트 쪽(북마크 코드)에는 토큰·쿠키·API 주소가 없다. 하는 일은 셋: `window.open(<이 앱>/capture)` → 그 창에서 `{type: "career-brain:ready"}`가 오면(`e.source === 연 창`, `e.origin === 이 앱`) → `{type: "career-brain:capture", v: 1, url, title, selection, html}`을 `postMessage(…, <이 앱 출처>)`로 **한 번** 보낸다. targetOrigin을 이 앱으로 정해 두어 창이 다른 곳으로 넘어가면 받지 못한다. API는 다른 출처에 열지 않는다(CORS 없음) — 저장은 `/capture` 창이 자기 토큰으로 같은 출처에 한다.
+- `/capture` 창: 준비됨은 내용 없이 `"*"`로 보낸다(연 창의 출처를 모른다). 준비됨을 보낸 뒤 `e.source === window.opener`인 메시지만, `type`·`v`·글자열 칸·길이 상한(HTML 2,000,000자, 선택 60,000자, 제목 300자)이 맞고 **페이지 주소의 출처가 보낸 창의 출처와 같을 때만** 받는다 (`parseCaptureMessage`). 한 건을 받으면 듣기를 멈추고 `window.opener = null`. 창 하나에 한 건.
+- 받은 HTML은 그리지 않는다: `DOMParser`로 만든 문서는 화면에 붙지 않아 스크립트가 돌지 않고 그림·글꼴·스타일을 받지 않는다. 그 문서에서 Defuddle(핵심 묶음, `parse()`만, `useAsync: false`, `fetch`는 거절하는 함수)로 본문을 고르고 Turndown으로 Markdown을 만든다 (Turndown도 문자열을 `DOMParser`로 읽는다). 그림은 설명 글(`[그림: …]`)만 남기고 주소는 버린다 — 나중에 글을 열 때 그 사이트로 요청이 가지 않게. 미리 보기는 React 글자 노드로만 그린다(`MarkdownView`도 쓰지 않는다).
+- 공고로 저장할 때 서버로 가는 것은 원래 HTML이다 (채용 시스템 페이지 어댑터·JSON-LD를 쓰려고). 서버도 그리지 않고 표준 라이브러리 파서로 글만 고르며 HTML을 저장하지 않는다.
+- 휴대폰 공유는 글이 쿼리로 온다. 화면은 읽자마자 `/capture`로 바꿔 기록·새로 고침에 남기지 않고, `personal-api serve`는 접속 기록에서 `/capture`의 쿼리를 지운다 (`personal_api.serve.DropCaptureQuery`). 앞에 다른 프록시를 두면 그 접속 기록은 따로 본다.
+- 앞에 둔 프록시가 이 앱에 `Cross-Origin-Opener-Policy: same-origin`을 붙이면 `/capture` 창의 `window.opener`가 사라져 북마크가 동작하지 않는다 (붙이려면 `/capture`는 빼거나 `unsafe-none`). 그 사이트가 COOP를 쓰는 경우도 같다 — 창이 "받는 중"에 머물면 본문을 복사해 브레인에 넣기에 붙여넣는다.
+- 그 사이트의 스크립트는 북마크가 읽는 값을 바꿀 수 있다 (북마크는 그 페이지 안에서 돈다). 그래서 받은 값은 처음부터 끝까지 남의 글로 다룬다: 모델 지시 무시 문구·인용 확인·사람 확인(공고), 참고 자료는 근거 아님.
+- 크기(빌드 결과, 압축 전 / gzip): `Capture` 조각 9.4 kB / 3.9 kB, Defuddle 311 kB / 87 kB, Turndown 10.8 kB / 4.1 kB. 셋 다 `/capture`에서만 받는다 (첫 화면 크기에 들어가지 않는다). 실행 중에 CDN에서 받지 않는다.
+- 나중 선택지: 브라우저 확장(새 창 없이 보내기). 같은 API를 쓰고 사이트에 토큰을 두지 않는다.
+- 화면 확인(합성 페이지·버리는 DB): 본문만 골라짐(머리글의 이름 줄은 빠짐), 받은 문서에서 그림 요청 0건·페이지 스크립트 실행 안 됨, 공고 저장 뒤 JSON-LD 항목과 "내 브라우저에서 가져옴", 공유한 글은 참고 자료로 들어가 "가져온 곳"이 보임, 접속 기록에 쿼리 없음, 390px에서 가로 넘침 없음. 미리 보기 창은 실제 새 창을 열지 않아 주고받기는 같은 창에 만든 메시지로 확인했다(다른 출처·다른 버전·두 번째 메시지는 받지 않음).
 
 ## 알려진 한계
 

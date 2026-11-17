@@ -9,6 +9,7 @@ import { ProofPanel } from "../components/credentials/ProofPanel";
 import { PurposeChoice } from "../components/sources/PurposeChoice";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
+import { hostOf } from "../lib/format";
 import { parseFailNote, reasonText } from "../lib/ingest";
 import {
   ATTENTION_LABEL,
@@ -314,6 +315,19 @@ export function SourcePage() {
               {src.purpose === "proof" ? <ProofPanel sourceId={src.id} /> : null}
               <Block title="처리">
                 <dl className="divide-y divide-line border-y border-line text-[13px]">
+                  {src.origin_url ? (
+                    <Row name="가져온 곳">
+                      <a
+                        href={src.origin_url}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="break-all underline-offset-2 hover:underline"
+                      >
+                        {hostOf(src.origin_url)}
+                      </a>
+                      <span className="text-muted"> · 내 브라우저에서 보냄</span>
+                    </Row>
+                  ) : null}
                   <Row name="읽기">
                     {parse ? (
                       <span className={TONE_TEXT[PARSE_STATUS[parse.status]?.tone ?? "none"]}>

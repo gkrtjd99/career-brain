@@ -411,6 +411,15 @@ const photoToolRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/PhotoTool"), "PhotoToolPage"),
 });
 
+// 보고 있는 페이지 보내기 (c0043): 북마크가 연 창·휴대폰 공유. 메뉴 없이 그 일만 보여 준다.
+// 공유한 글은 쿼리로 오고, 화면이 곧바로 주소창에서 지운다 (그래서 validateSearch로 받지 않는다)
+const captureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/capture",
+  beforeLoad: requireToken,
+  component: lazyRouteComponent(() => import("./pages/Capture"), "CapturePage"),
+});
+
 const routeTree = rootRoute.addChildren([
   todayRoute,
   brainRoute,
@@ -447,6 +456,7 @@ const routeTree = rootRoute.addChildren([
   systemRoute,
   photoToolRoute,
   hiddenTextToolRoute,
+  captureRoute,
 ]);
 
 export const router = createRouter({

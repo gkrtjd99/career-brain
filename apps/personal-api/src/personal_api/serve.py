@@ -37,6 +37,28 @@ from personal_api.settings import Settings
 
 log = logging.getLogger("uvicorn.error")
 
+# 휴대폰 공유(Web Share Target)는 공유한 글·주소를 ``/capture?text=…`` 쿼리로 연다. 접속 기록에 그 글이
+# 남지 않게 이 경로의 쿼리는 지운다 (웹 앱이 곧바로 주소창에서도 지운다).
+_QUIET_QUERY_PATHS = ("/capture",)
+
+
+class DropCaptureQuery(logging.Filter):
+    """uvicorn 접속 기록 한 줄의 경로에서 ``/capture``의 쿼리를 뺀다."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            path, _, query = args[2].partition("?")
+            if query and path in _QUIET_QUERY_PATHS:
+                record.args = (*args[:2], path, *args[3:])
+        return True
+
+
+def quiet_capture_queries() -> None:
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, DropCaptureQuery) for f in access.filters):
+        access.addFilter(DropCaptureQuery())
+
 
 def env_flag(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -85,6 +107,7 @@ def serve(
             maintenance_seconds=maintenance_interval_seconds(),
         )
         attach_worker(app, BackgroundWorker(steps, poll_seconds=worker_poll_seconds(listen)))
+    quiet_capture_queries()
     uvicorn.run(
         app,
         host=host or os.environ.get("CAREER_HOST", "127.0.0.1"),
