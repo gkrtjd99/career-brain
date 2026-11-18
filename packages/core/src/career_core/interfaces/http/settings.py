@@ -1,4 +1,4 @@
-"""공간 공용 설정 경로 (c0021): 표시 시간대·기술명 별칭.
+"""공간 공용 설정 경로 (c0021): 표시 시간대·기술명 별칭. c0052: 넣은 자료 바로 정리(``auto_extract``).
 
 NOTE: `from __future__ import annotations`를 쓰지 않는다 (FastAPI 런타임 타입 해석).
 """
@@ -23,6 +23,8 @@ class WorkspaceSettingsIn(BaseModel):
     # 빠진 칸은 그대로 둔다. timezone: null → 기본값(Asia/Seoul)으로, tech_aliases: [] → 사용자 별칭 비우기
     timezone: str | None = Field(default=None, max_length=64)
     tech_aliases: list[AliasEntryIO] | None = Field(default=None, max_length=MAX_ALIAS_ENTRIES)
+    # c0052: 넣은 내 경험 자료를 바로 AI로 정리 (null은 바꾸지 않음)
+    auto_extract: bool | None = None
 
 
 class WorkspaceSettingsOut(BaseModel):
@@ -32,6 +34,7 @@ class WorkspaceSettingsOut(BaseModel):
     day_ends_at: datetime
     tech_aliases: list[AliasEntryIO]
     builtin_aliases: list[AliasEntryIO]
+    auto_extract: bool
 
 
 def add_settings_routes(router: APIRouter, deps, authorize) -> None:
@@ -55,6 +58,8 @@ def add_settings_routes(router: APIRouter, deps, authorize) -> None:
             changes["timezone"] = body.timezone
         if "tech_aliases" in sent:
             changes["tech_aliases"] = [e.model_dump() for e in body.tech_aliases or []]
+        if "auto_extract" in sent and body.auto_extract is not None:
+            changes["auto_extract"] = body.auto_extract
         try:
             view = await uc.update_settings(deps.db, actor, **changes)
         except uc.SettingsError as exc:

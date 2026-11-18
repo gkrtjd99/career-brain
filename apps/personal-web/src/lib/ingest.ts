@@ -5,10 +5,13 @@
 //   사진을 읽을 수 있으면 서버가 모델로 읽는다.
 // - 확신하지 못하면 "확인 필요"로 받은 자료함에 둔다 (서버가 restricted로 보관). 사람이 한 번 누르면 간다.
 // - 주소: 공고는 공고 저장 경로로, 회사 페이지는 회사 조사 경로로.
+// - 정리(c0052): 내 경험 자료는 서버가 읽기를 끝내면 스스로 경험 후보를 뽑는다(공간 설정·AI 연결이 맞을 때).
+//   화면은 누르지 않고 결과만 기다려 한 줄로 모은다 (organizeSummary).
 //
 // 큐는 화면 밖에 둔다 (창을 닫아도 계속 처리하고, 다시 열면 그대로 보인다).
 
 import type {
+  AutoExtractState,
   ExtractionRun,
   IngestCapabilities,
   IngestGuess,
@@ -54,6 +57,8 @@ export interface IngestItem {
   companyHint?: string | null;
   host?: string | null;
   residentNumber?: boolean;
+  /** 정리(경험 추출) 결과. 넣은 것 전체의 "정리 결과" 한 줄에 더한다 */
+  result?: ExtractionRun;
 }
 
 export const FILE_KINDS: SourcePurpose[] = ["experience", "proof", "reference"];
@@ -81,7 +86,6 @@ const EXTRACT_DONE = new Set(["complete", "partial", "failed"]);
 const POLL_MS = 2000;
 const POLL_LIMIT_MS = 10 * 60_000;
 const PARALLEL = 3;
-const EXTRACT_KEY = "career-brain:ingest-extract";
 
 // ---------------------------------------------------------------- 상태
 
@@ -112,39 +116,6 @@ export function useIngestQueue(): IngestItem[] {
     () => items,
     () => items,
   );
-}
-
-let extractPref: boolean = (() => {
-  try {
-    return localStorage.getItem(EXTRACT_KEY) !== "off";
-  } catch {
-    return true;
-  }
-})();
-const prefListeners = new Set<() => void>();
-
-/** 내 경험 자료는 읽은 뒤 바로 경험 후보를 뽑는다 (모델 비용). 이 브라우저에만 기억한다 */
-export function useAutoExtract(): [boolean, (v: boolean) => void] {
-  const v = useSyncExternalStore(
-    (cb) => {
-      prefListeners.add(cb);
-      return () => prefListeners.delete(cb);
-    },
-    () => extractPref,
-    () => extractPref,
-  );
-  return [
-    v,
-    (next) => {
-      extractPref = next;
-      try {
-        localStorage.setItem(EXTRACT_KEY, next ? "on" : "off");
-      } catch {
-        // 저장소를 못 쓰면 이 탭에서만
-      }
-      prefListeners.forEach((l) => l());
-    },
-  ];
 }
 
 // ---------------------------------------------------------------- 넣기
@@ -233,7 +204,9 @@ function pump() {
 
 let capsPromise: Promise<IngestCapabilities> | null = null;
 function caps(): Promise<IngestCapabilities> {
-  capsPromise ??= api.ingestCapabilities().catch(() => ({ model_ocr_classes: [], model_ocr_route: null }));
+  capsPromise ??= api
+    .ingestCapabilities()
+    .catch(() => ({ model_ocr_classes: [], model_ocr_route: null, auto_extract: "off" as const }));
   return capsPromise;
 }
 
@@ -400,21 +373,29 @@ async function route(id: string, purpose: SourcePurpose) {
   await finish(id, src);
 }
 
-/** 추출 결과 한 줄: 새로 만든 것과 이미 있던 경험·사실에 붙인 것을 나눠 말한다. */
+/** 정리 결과 한 줄: 새로 만든 것과 이미 있던 경험·사실에 붙인 것을 나눠 말한다. */
 export function extractNote(run: ExtractionRun): string {
-  const parts = [
-    run.experiences_created ? `새 경험 ${run.experiences_created}개` : null,
-    run.experiences_matched ? `있던 경험에 더함 ${run.experiences_matched}개` : null,
-    run.claims_created ? `확인할 사실 ${run.claims_created}개` : null,
-    run.claims_attached ? `있던 사실에 근거로 붙임 ${run.claims_attached}개` : null,
-  ].filter(Boolean);
   const sugg = run.suggestions;
-  const more = [
-    sugg?.credentials_created ? `자격 후보 ${sugg.credentials_created}개` : null,
-    sugg?.education?.length ? `학력 제안 ${sugg.education.length}개` : null,
-    sugg?.skills?.length ? `기술 제안 ${sugg.skills.length}개` : null,
+  const parts = [
+    run.experiences_created ? `새 경험 ${run.experiences_created}` : null,
+    run.experiences_matched ? `합친 경험 ${run.experiences_matched}` : null,
+    run.claims_created ? `확인할 사실 ${run.claims_created}` : null,
+    run.claims_attached ? `근거 더함 ${run.claims_attached}` : null,
+    sugg?.credentials_created ? `자격 후보 ${sugg.credentials_created}` : null,
+    sugg?.education?.length ? `학력 제안 ${sugg.education.length}` : null,
+    sugg?.skills?.length ? `기술 제안 ${sugg.skills.length}` : null,
   ].filter(Boolean);
-  return [...parts, ...more].join(" · ") || "새로 뽑은 경험·사실이 없습니다";
+  return parts.join(" · ") || "새로 뽑은 경험·사실이 없습니다";
+}
+
+/** 서버가 읽기 직후 건 정리(추출)를 잠깐 기다린다. 걸지 않았으면 null */
+async function serverExtraction(sourceId: string): Promise<Source["extraction"]> {
+  for (let i = 0; i < 4; i++) {
+    const src = await api.source(sourceId);
+    if (src.extraction) return src.extraction;
+    await sleep(POLL_MS / 2);
+  }
+  return null;
 }
 
 async function finish(id: string, src: Source) {
@@ -423,12 +404,15 @@ async function finish(id: string, src: Source) {
   const parse = src.versions.at(-1)?.parse;
   if (src.purpose === "experience") {
     let ext = src.extraction;
-    if (!ext && extractPref && parse && ["complete", "partial"].includes(parse.status)) {
-      try {
-        const r = await api.requestExtraction(parse.run_id);
-        ext = { id: r.id, status: "pending", error_code: null, claims_created: 0 };
-      } catch (err) {
-        patch(id, { stage: "saved", note: `경험 후보는 아직 뽑지 않았습니다 · ${failNote(err)}` });
+    if (!ext && parse && ["complete", "partial"].includes(parse.status)) {
+      const state = (await caps()).auto_extract ?? "off";
+      if (state !== "on") {
+        patch(id, { stage: "saved", note: notOrganizedNote(state) });
+        return;
+      }
+      ext = await serverExtraction(src.id);
+      if (!ext) {
+        patch(id, { stage: "saved", note: "보관했습니다 · 자료 화면에서 경험을 뽑을 수 있습니다" });
         return;
       }
     }
@@ -442,8 +426,11 @@ async function finish(id: string, src: Source) {
       }
       void queryClient.invalidateQueries({ queryKey: ["experiences"] });
       void queryClient.invalidateQueries({ queryKey: ["sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["organize"] });
+      void queryClient.invalidateQueries({ queryKey: ["profile-suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: ["credentials"] });
       if (run.status === "failed") {
-        // 자료는 저장됐다. 뽑기만 못 했으니 "실패"로 보이지 않는다
+        // 자료는 저장됐다. 정리만 못 했으니 "실패"로 보이지 않는다
         patch(id, { stage: "saved", note: `${extractFailNote(run.error_code)} · 자료 화면에서 다시 뽑을 수 있습니다` });
         return;
       }
@@ -454,20 +441,50 @@ async function finish(id: string, src: Source) {
       const cover = looksLikeCoverLetter(src.title, src.versions.at(-1)?.original_filename);
       patch(id, {
         stage: "saved",
+        result: run,
         note: extractNote(run) + (cover ? " · 자료 화면에서 공통 답변으로 옮길 수 있습니다" : ""),
       });
       return;
     }
-    patch(id, { stage: "saved", note: "경험 후보는 자료 화면에서 뽑을 수 있습니다" });
+    patch(id, { stage: "saved", note: "보관했습니다 · 자료 화면에서 경험을 뽑을 수 있습니다" });
     return;
   }
   if (src.purpose === "proof") {
     void queryClient.invalidateQueries({ queryKey: ["credentials"] });
     void queryClient.invalidateQueries({ queryKey: ["proofs"] });
+    void queryClient.invalidateQueries({ queryKey: ["organize"] });
     patch(id, { stage: "saved", note: "원본을 보관하고 자격·이수 항목을 뽑았습니다" });
     return;
   }
   patch(id, { stage: "saved", note: "참고 자료로 보관했습니다" });
+}
+
+/** 서버가 정리하지 않은 이유 한 줄 (자료는 보관됐다) */
+export function notOrganizedNote(state: AutoExtractState): string {
+  const why: Record<AutoExtractState, string> = {
+    on: "보관했습니다",
+    off: "자동 정리를 꺼 두어 보관만 했습니다",
+    no_permission: "이 토큰은 AI로 보낼 수 없어 보관만 했습니다",
+    no_model: "AI 연결이 없어 보관만 했습니다",
+    egress_denied: "연결된 AI가 이 자료를 받지 않아 보관만 했습니다",
+    api_key_missing: "AI 연결의 키가 없어 보관만 했습니다",
+  };
+  return why[state];
+}
+
+/** 넣은 것 전체의 정리 결과: 새 경험 · 합친 경험 · 확인할 사실 · 근거로 붙인 사실 */
+export function organizeSummary(list: IngestItem[]) {
+  const sum = { created: 0, matched: 0, claims: 0, attached: 0, sources: 0 };
+  for (const it of list) {
+    const r = it.result;
+    if (!r) continue;
+    sum.sources += 1;
+    sum.created += r.experiences_created ?? 0;
+    sum.matched += r.experiences_matched ?? 0;
+    sum.claims += r.claims_created ?? 0;
+    sum.attached += r.claims_attached ?? 0;
+  }
+  return sum;
 }
 
 // ---------------------------------------------------------------- 주소

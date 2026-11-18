@@ -709,3 +709,17 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 합치기(`usecases/experience_merge.py::merge_experiences`, approve 필요, 20개까지): 대상 칸이 이긴다(빈 칸만 채움, 태그는 합침). 주장·하위 경험·자격·학력·포트폴리오 항목·면접 세션을 대상으로 옮기고, 대상에 같은 문장이 있는 추출 후보는 근거를 옮긴 뒤 은퇴(`claims_folded`). 지원 준비의 고른 경험·문항·요건과 면접 준비 질문의 경험 ID를 바꿔 쓴다. 이력서 revision은 바꾸지 않는다(덧붙이기만 하는 기록) — 읽을 때 `merged_into_id`를 따라 대상 값으로 읽고, 한 번에 채우기는 대상을 다시 넣지 않는다. 합친 경험은 `retired` + `merged_into_id`로 남는다(기록).
 - 지우기(`delete_experience`): **거부가 기본**. 하위 경험·포트폴리오·면접 세션·쓰인 사실(문서·이력서 줄·포트폴리오 줄·공통 답변·학습)·이력서 최신 revision·지원 준비가 가리키면 409 `experience_in_use`(+ 쓰는 곳 수), 확인한 사실이 있으면 `include_confirmed=true`와 approve가 있어야 한다. 지우면 사실·근거는 cascade, 자격·학력은 연결만 끊고, 은퇴한 하위 경험은 위를 비운다. 이 경험을 가리키던 `possible_duplicate_of`·`merged_into_id`는 FK가 비운다.
 - 내보내기: `@schema_step("c0050")`, 합치기 키는 [backup.md](../operations/backup.md). 시험: `packages/core/tests/test_audit_fixes.py`.
+
+## 알아서 정리 (c0052)
+
+`c0052` (`down_revision = c0050`, 병합 때 앞 revision으로 다시 잇는다). "브레인에 다 때려박아두고 알아서 정리" (2026-11-18 사용 점검).
+
+| 테이블 | 바뀐 칸 |
+|---|---|
+| `workspace_settings` | `auto_extract`(boolean, 기본 `true`): 읽기가 끝난 내 경험 자료를 바로 AI로 정리 |
+| `parse_runs` | `auto_extract`(boolean, 기본 `false`): 넣은 사람이 경험 뽑기 권한(`brain.extract` = `egress`)을 가졌다. worker는 넣은 사람의 권한을 모르므로 넣을 때 정한다 |
+
+- 읽기가 끝나면(`usecases/parsing.py::after_read` → `usecases/extraction.py::auto_extract`) 서버가 추출을 큐에 넣는다. 모두 맞을 때만: 읽기 완료·일부 완료, `parse_runs.auto_extract`, 용도 `experience`이고 확인 대기 아님(증빙·참고·확인 전 자료는 절대 아님), 이 읽기에 추출이 아직 없음(실패해도 다시 걸지 않음), 공간 설정 켜짐, AI 연결이 `private`을 받음(`extract_blocker`: 라우트·egress·키). 예산·장부는 수동 추출과 같은 게이트웨이 길.
+- 같은 파일을 다시 넣거나 끝난 읽기에 이 기기의 글을 붙여도 같은 검사로 건다. 확인 대기 자료를 내 경험으로 정하면 권한·설정·연결이 맞을 때만 건다.
+- `GET /core/brain/organize`: 정리 상태 한 줄 (읽는 중·정리 중, 용도 확인 필요, 실패, 확인할 사실, 같은 경험일 수 있음, 프로필에 넣을 값, 학력·기술 제안, 자격 후보, 곧 만료, 지난 하루의 정리 결과, `auto_extract` 상태). 세기만 한다.
+- 내보내기: `@schema_step("c0052")`(옛 묶음: 설정 켜짐, 옛 읽기는 자동으로 뽑지 않음). 시험: `packages/core/tests/test_auto_extract.py`.

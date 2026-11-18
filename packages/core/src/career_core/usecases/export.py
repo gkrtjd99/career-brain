@@ -1618,6 +1618,18 @@ def _c0050_experience_merge(arc) -> None:
         )
 
 
+@schema_step(
+    "c0052",
+    "알아서 정리: workspace_settings.auto_extract(true: 기본 켜짐), parse_runs.auto_extract(false: 옛 읽기는 "
+    "복원 뒤 자동으로 뽑지 않는다)",
+)
+def _c0052_auto_extract(arc) -> None:
+    if arc.has("core.workspace_settings"):
+        arc.add_columns("core.workspace_settings", auto_extract=True)
+    if arc.has("core.parse_runs"):
+        arc.add_columns("core.parse_runs", auto_extract=False)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

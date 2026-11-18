@@ -1,7 +1,8 @@
 """브레인에 넣기 (c0039, plan §9·§20).
 
 - ``POST /ingest/classify``: 파일·글·주소마다 무엇인지 (모델 없음, 넣은 것을 밖으로 보내지 않는다).
-- ``GET /ingest/capabilities``: 사진을 연결된 모델로 읽을 수 있는 자료 등급.
+- ``GET /ingest/capabilities``: 사진을 연결된 모델로 읽을 수 있는 자료 등급. c0052: 넣으면 바로 정리하는지
+  (``auto_extract``: on · off · no_permission · no_model · egress_denied · api_key_missing).
 - ``PUT /sources/{id}/text-layer``: 이 기기(브라우저)에서 읽은 글을 원본에 붙인다.
 """
 
@@ -58,6 +59,7 @@ class CapabilitiesOut(BaseModel):
     # 사진을 연결된 모델로 읽을 수 있는 자료 등급 (증빙은 늘 이 기기에서)
     model_ocr_classes: list[str]
     model_ocr_route: str | None
+    auto_extract: str = "off"
 
 
 class LayerBlockIn(BaseModel):
@@ -116,9 +118,19 @@ def add_ingest_routes(router: APIRouter, deps, authorize) -> None:
 
     @router.get("/ingest/capabilities", response_model=CapabilitiesOut)
     async def caps(actor: reader) -> CapabilitiesOut:
+        from career_core.usecases.extraction import auto_extract_state
+
         got = await ingest_uc.capabilities(deps.models, actor)
+        state = await auto_extract_state(
+            deps.db,
+            deps.models,
+            actor,
+            can_extract=deps.permissions.allows(actor, "brain.extract"),
+        )
         return CapabilitiesOut(
-            model_ocr_classes=list(got.model_ocr_classes), model_ocr_route=got.model_ocr_route
+            model_ocr_classes=list(got.model_ocr_classes),
+            model_ocr_route=got.model_ocr_route,
+            auto_extract=state,
         )
 
     @router.put("/sources/{source_id}/text-layer", response_model=TextLayerOut)
@@ -134,6 +146,14 @@ def add_ingest_routes(router: APIRouter, deps, authorize) -> None:
                 status_code=_STATUS.get(exc.code, status.HTTP_422_UNPROCESSABLE_CONTENT),
                 detail=exc.code,
             ) from exc
+        if got.parse_status in ("complete", "partial"):
+            # 끝난 읽기에 글을 붙였다 → 내 경험 자료면 바로 정리 (c0052)
+            from career_core.usecases.parsing import after_read
+
+            can = deps.permissions.allows(actor, "brain.extract")
+            await after_read(
+                deps.db, deps.models, actor.workspace_id, got.parse_run_id, allowed=can or None
+            )
         return TextLayerOut.model_validate(got, from_attributes=True)
 
 
