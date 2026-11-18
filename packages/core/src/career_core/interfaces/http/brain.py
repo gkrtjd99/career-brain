@@ -306,6 +306,13 @@ class SuggestionsOut(BaseModel):
     skills: list[str]
 
 
+class DismissSuggestionIn(BaseModel):
+    """지울 제안: 기술명(대소문자 무시) 또는 학력의 학교 이름(법인 표시·공백·문장 부호 무시)."""
+
+    kind: Literal["skill", "education"]
+    value: str = Field(min_length=1, max_length=300)
+
+
 class InterviewIn(BaseModel):
     experience_id: UUID | None = None
 
@@ -554,6 +561,12 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
         """추출이 경험으로 만들지 않은 줄: 학력 제안(아직 학력에 없는 학교), 경험에 옮기지 못한 기술명."""
         view = await extraction.list_suggestions(db, actor)
         return SuggestionsOut.model_validate(view)
+
+    @router.post("/extraction-suggestions/dismiss", status_code=204)
+    async def dismiss_extraction_suggestion(actor: writer, body: DismissSuggestionIn) -> Response:
+        """제안 하나를 지운다 (공간의 모든 추출 실행에서). 없는 값이어도 204."""
+        await extraction.dismiss_suggestion(db, actor, body.kind, body.value)
+        return Response(status_code=204)
 
     @router.get("/claims", response_model=list[ClaimBriefOut])
     async def claims_by_ids(

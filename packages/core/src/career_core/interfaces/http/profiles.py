@@ -141,6 +141,22 @@ class ProfileDetailsOut(BaseModel):
     employment_types: list[str]
 
 
+class ProfileSuggestionOut(BaseModel):
+    field: Literal["name", "email", "phone", "link"]
+    value: str
+    # 링크만: GitHub | LinkedIn | 블로그 | 포트폴리오 | 링크
+    label: str | None
+    source_id: UUID
+    source_title: str
+    quote: str
+
+
+class ProfileSuggestionsOut(BaseModel):
+    """내 경험 자료(이력서 등)에서 규칙으로 찾은 프로필 칸 후보. 이미 프로필에 있는 값은 없다."""
+
+    suggestions: list[ProfileSuggestionOut]
+
+
 class PhotoPatch(BaseModel):
     is_default: Literal[True] | None = None
     spec: PhotoSpec | None = None
@@ -195,6 +211,16 @@ def add_profile_routes(router: APIRouter, deps, authorize) -> None:
         except ProfileRuleError as exc:
             raise _rule(exc) from exc
         return _profile_out(view)
+
+    @router.get("/profile/suggestions", response_model=ProfileSuggestionsOut)
+    async def profile_suggestions(actor: reader) -> ProfileSuggestionsOut:
+        """채울 값 제안 (저장하지 않는다). 증빙·참고 원본은 보지 않는다."""
+        found = await uc.profile_suggestions(deps.db, actor)
+        return ProfileSuggestionsOut(
+            suggestions=[
+                ProfileSuggestionOut.model_validate(x, from_attributes=True) for x in found
+            ]
+        )
 
     @router.get("/profile/details", response_model=ProfileDetailsOut)
     async def get_details(actor: reader) -> ProfileDetailsOut:

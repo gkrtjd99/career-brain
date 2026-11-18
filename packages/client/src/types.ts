@@ -426,6 +426,13 @@ export interface ExtractionSuggestions {
   skills: string[];
 }
 
+/** POST /core/extraction-suggestions/dismiss: 제안 하나 지우기 (204, 없는 값이어도 204).
+ * skill은 대소문자 무시, education은 학교 이름(법인 표시·공백·문장 부호 무시)으로 맞춘다 */
+export interface DismissExtractionSuggestionIn {
+  kind: "skill" | "education";
+  value: string;
+}
+
 export interface ClaimBrief {
   id: Uuid;
   statement: string;
