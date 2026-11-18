@@ -10,6 +10,7 @@ import httpx
 import pytest
 from career_core.adapters.web_fetch import HttpFetcher
 from career_core.db import Job, JobPosting, JobPostingVersion
+from career_core.db.base import utcnow
 from career_core.db.models import Company, CompanyFact, CompanyPage
 from career_core.domain.companies import name_key
 from career_core.domain.company_research import (
@@ -226,6 +227,7 @@ class Site:
     def __init__(self):
         self.requests: list[str] = []
         self.wikidata = True
+        self.pages: dict[str, str] = {}  # career.gasang.example 경로 → HTML
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         host = request.headers.get("host")
@@ -238,6 +240,8 @@ class Site:
             return httpx.Response(
                 200, json=SEARCH if q["action"] == "wbsearchentities" else ENTITIES
             )
+        if host == "career.gasang.example" and path in self.pages:
+            return httpx.Response(200, html=self.pages[path])
         if host == "ko.wikipedia.org":
             return httpx.Response(200, html=WIKI_HTML)
         if host == "www.gasang.example":
@@ -504,3 +508,58 @@ def test_elementor_page_text_is_not_noise():
     text = extract_page(html, "https://www.gasang.example/kr/").main_text
     assert "산업용 센서" in text
     assert "다른 글 목록" not in text  # Elementor가 아닌 widget은 여전히 곁가지
+
+
+SECTIONED = (
+    "3. [신입공채] SW 개발 부문 (합성)\n"
+    "[지원자격 및 우대사항]\n"
+    "학력 및 전공 무관\n"
+    "[공통 사항]\n"
+    "고용형태 : 정규직\n"
+    "  처우 : 회사 내규에 따름\n"
+    "[채용 절차]\n"
+    "서류전형 > 면접\n"
+    "[가상전자가 함께 일하고 싶은 사람]\n"
+    "실패를 두려워하지 않고 도전하는 사람,\n"
+    "동료와 함께 더 큰 성과를 만드는 사람,\n"
+    "[회사소개 영상]\n"
+    "영상 보기\n"
+)
+
+
+def test_lists_from_text_reads_new_sections():
+    got = posting_uc.lists_from_text(SECTIONED)
+    assert got[FieldName.TALENT]["value"] == [
+        "실패를 두려워하지 않고 도전하는 사람,",
+        "동료와 함께 더 큰 성과를 만드는 사람,",
+    ]
+    assert got[FieldName.CONDITIONS]["value"] == ["고용형태 : 정규직", "처우 : 회사 내규에 따름"]
+    assert FieldName.BENEFITS not in got
+    for entry in got.values():  # 근거는 본문 그대로의 위치
+        for ref in entry["evidence"]["ref"]:
+            assert SECTIONED[ref["start"] : ref["end"]] == ref["ref"]
+    # "[회사소개 영상]" 같은 다른 제목에서 섹션이 끝난다
+    assert "영상 보기" not in got[FieldName.TALENT]["value"]
+
+
+async def test_old_saved_posting_gets_lists_on_refetch(db, env):
+    """c0053 전에 저장한 공고: 본문이 같아 다시 읽지 않지만, 다시 가져오면 목록을 채우고 회사에 잇는다."""
+    owner, deps = env["owner"], env["deps"]
+    url = "https://career.gasang.example/job/old"
+    env["site"].pages = {
+        "/job/old": f"<html><body><main><pre>{SECTIONED}</pre></main></body></html>"
+    }
+    [r] = await posting_uc.save_urls(db, owner, [url])
+    await run_until_idle(db, posting_handlers(deps))
+    view = await posting_uc.get_posting(db, owner, r.posting_id)
+    # 옛 공고처럼: 확정 값에 새 목록 없음, 회사 없음
+    async with db.workspace_session(owner.workspace_id) as s:
+        p = await s.get(JobPosting, r.posting_id)
+        p.status, p.fields, p.evidence = "saved", {"title": "SW 개발", "company": "가상전자"}, {}
+        p.confirmed_version_id = view.latest.id
+        p.saved_by, p.saved_at = owner.subject_id, utcnow()
+    await posting_uc.refetch(db, owner, r.posting_id)
+    await run_until_idle(db, posting_handlers(deps))
+    after = await posting_uc.get_posting(db, owner, r.posting_id)
+    assert after.fields["talent"][0].startswith("실패를 두려워하지 않고")
+    assert after.company_id is not None
