@@ -826,10 +826,63 @@ monthly_usd = 1000
         ("personal", ["주문 서비스 개발 담당"], "personal"),
         ("personal", ["I rebuilt the billing job"], "personal"),
         ("team", ["팀에서 결제 시스템을 이전했다"], "team"),
-        ("unknown", ["혼자 만들었다"], "unknown"),
+        # 글에 본인 표시가 있으면 모델이 "모름"이라 해도 "본인"
+        ("unknown", ["혼자 만들었다"], "personal"),
+        ("unknown", ["팀원들과 결제 시스템을 이전했다"], "team"),
+        # 낱말 안의 글자는 표시가 아니다: "문제가"의 "제가", "담당자"의 "담당"
+        ("personal", ["배포 문제가 생겨 담당자와 원인을 찾았다"], "unknown"),
     ],
 )
 def test_extracted_contribution_needs_self_marker(model_says, texts, kept):
     from career_core.usecases.extraction import checked_contribution
 
     assert checked_contribution(model_says, texts) == kept
+
+
+# 자기소개서처럼 1인칭으로 쓴 글: 문단을 "저는"으로 열고 다음 문장부터 주어를 뺀다 (합성)
+ESSAY = (
+    "저는 물류 회사에서 배송 경로 계산을 다시 짰습니다. 기존 계산은 하루 한 번 돌았습니다. "
+    "경로 캐시를 지역별로 나누고 계산 시간을 40분에서 6분으로 줄였습니다."
+)
+TEAM_PARA = "저희 팀은 주문 서버를 새 클러스터로 옮겼습니다. 석 달 동안 트래픽을 조금씩 넘겼습니다."
+MIXED = "저는 일정 관리와 API 설계를, 팀원들은 화면과 데이터 수집을 맡았습니다."
+
+
+@pytest.mark.parametrize(
+    ("model_says", "block", "quote", "narrative", "kept"),
+    [
+        # 앞 문장의 "저는"을 잇는다
+        ("unknown", ESSAY, "경로 캐시를 지역별로 나누고", False, "personal"),
+        ("personal", ESSAY, "계산 시간을 40분에서 6분으로 줄였습니다", False, "personal"),
+        # 앞 문장의 "저희 팀은"을 잇는다
+        ("unknown", TEAM_PARA, "석 달 동안 트래픽을 조금씩 넘겼습니다", False, "team"),
+        ("personal", TEAM_PARA, "석 달 동안 트래픽을 조금씩 넘겼습니다", False, "team"),
+        # 한 문장에 둘 다 있으면 모델이 읽고 정한 값
+        ("personal", MIXED, "일정 관리와 API 설계", False, "personal"),
+        ("team", MIXED, "화면과 데이터 수집을 맡았습니다", False, "team"),
+        ("unknown", MIXED, "화면과 데이터 수집을 맡았습니다", False, "unknown"),
+        # 문단에 주어가 없어도 1인칭 글의 문장이면 "본인"
+        ("unknown", "정산 배치를 하루 두 번으로 늘렸습니다.", "정산 배치를", True, "personal"),
+        # 이력서 항목(명사형 한 줄)은 1인칭 글 안에 있어도 그대로 "모름"
+        ("unknown", "정산 배치 개선", "정산 배치 개선", True, "unknown"),
+        ("personal", "정산 배치 개선", "정산 배치 개선", True, "unknown"),
+        # 1인칭 글이 아니면 문장이어도 "모름"
+        ("unknown", "정산 배치를 하루 두 번으로 늘렸습니다.", "정산 배치를", False, "unknown"),
+        # 모델이 "팀"이라 한 것은 그대로
+        ("team", ESSAY, "경로 캐시를 지역별로 나누고", False, "team"),
+    ],
+)
+def test_contribution_follows_paragraph_subject(model_says, block, quote, narrative, kept):
+    from career_core.usecases.extraction import checked_contribution
+
+    start = block.index(quote)
+    got = checked_contribution(model_says, [quote], context=[(block, start)], narrative=narrative)
+    assert got == kept
+
+
+def test_first_person_narrative():
+    from career_core.usecases.extraction import first_person_narrative
+
+    assert first_person_narrative([ESSAY, "제가 맡은 일은 정산이었습니다.", "결과"])
+    assert not first_person_narrative([ESSAY, "결제 API 구축", "정산 배치 개선"])
+    assert not first_person_narrative(["결제 API 구축", "문제가 생겼다", "빛나는 성과"])
