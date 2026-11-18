@@ -8,6 +8,7 @@
 // - 보내기 전에 주민등록번호 모양을 가린다 (서버도 한 번 더 가린다). 원본 그림은 그대로 올린다.
 
 import type { TextLayerBlock, TextLayerIn } from "@career-brain/client";
+import { tidyOcrLines } from "./ocrTidy";
 
 const BASE = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/ocr`;
 /** 큰 사진은 이 길이(긴 변, px)로 줄여 읽는다. 위치는 원본 크기로 되돌린다 */
@@ -135,7 +136,8 @@ export function recognizeImage(file: Blob, onProgress?: (p: number) => void): Pr
           }
         }
       }
-      return { lines, text: lines.map((l) => l.text).join("\n"), masked, width, height };
+      const tidy = tidyOcrLines(lines);
+      return { lines: tidy, text: tidy.map((l) => l.text).join("\n"), masked, width, height };
     } finally {
       progressListener = null;
       scheduleIdle();

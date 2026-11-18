@@ -1,6 +1,6 @@
 import type { Education, EducationSuggestion } from "@career-brain/client";
 import { Button, cn } from "@career-brain/ui";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { useState } from "react";
@@ -17,6 +17,10 @@ export function EducationPage() {
   const q = useQuery({ queryKey: ["education"], queryFn: api.education });
   const [sheet, setSheet] = useState<{ education: Education | null; suggestion?: EducationSuggestion } | null>(null);
   const suggestions = useQuery({ queryKey: ["extraction-suggestions"], queryFn: api.extractionSuggestions });
+  const hide = useMutation({
+    mutationFn: (school: string) => api.dismissExtractionSuggestion({ kind: "education", value: school }),
+    onSuccess: () => void suggestions.refetch(),
+  });
   return (
     <div>
       <PageHeader
@@ -76,6 +80,15 @@ export function EducationPage() {
                 </div>
                 <Button size="sm" className="shrink-0 max-sm:h-9" onClick={() => setSheet({ education: null, suggestion: sg })}>
                   <Plus size={14} /> 추가
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0 max-sm:h-9"
+                  disabled={hide.isPending && hide.variables === sg.school}
+                  onClick={() => hide.mutate(sg.school)}
+                >
+                  숨기기
                 </Button>
               </li>
             ))}

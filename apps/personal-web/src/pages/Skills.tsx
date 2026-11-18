@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronDown } from "lucide-react";
 import { useMemo, useState } from "react";
 import { errorText, Loaded, PageHeader } from "../components/common";
+import { SkillSuggestions } from "../components/skills/SkillSuggestions";
 import { api } from "../lib/api";
 import { meErrorText } from "../lib/brainMe";
 
@@ -52,6 +53,7 @@ export function SkillsPage() {
           />
         )}
       </Loaded>
+      <SkillSuggestions />
     </div>
   );
 }

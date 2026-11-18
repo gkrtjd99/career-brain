@@ -1,4 +1,4 @@
-import { PHOTO_SPECS, type Profile, type ProfileIn, type ProfilePhoto } from "@career-brain/client";
+import { PHOTO_SPECS, type Profile, type ProfileIn, type ProfilePhoto, type ProfileSuggestion } from "@career-brain/client";
 import { Button, cn, ConfirmDialog, DateField, IconButton, Input, Label, Section, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
@@ -90,6 +90,7 @@ function ProfileForm({ initial }: { initial: Profile }) {
     mutationFn: () => api.saveProfile(toBody(v)),
     onSuccess: (p) => {
       qc.setQueryData(["profile"], p);
+      void qc.invalidateQueries({ queryKey: ["profile-suggestions"] });
       setV(toValues(p)); // 서버가 다듬은 값 (공백·https:// 붙이기)
       toast("저장했습니다.");
     },
@@ -122,6 +123,16 @@ function ProfileForm({ initial }: { initial: Profile }) {
         if (dirty) save.mutate();
       }}
     >
+      <FromResume
+        v={v}
+        onFill={(sg) => {
+          if (sg.field === "link") {
+            if (v.links.length < 10)
+              set("links", [...v.links, { key: ++linkKey, label: sg.label ?? "링크", url: sg.value }]);
+          } else set(sg.field, sg.value);
+        }}
+      />
+
       <Section title="기본 정보">
         <div className="grid gap-3 sm:grid-cols-2">
           {field("name", "이름", { maxLength: 100, autoComplete: "name" })}
@@ -388,5 +399,48 @@ function PhotoThumb({ photo }: { photo: ProfilePhoto }) {
         />
       ) : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- 이력서에서 찾은 값
+
+const FIELD_LABEL: Record<ProfileSuggestion["field"], string> = {
+  name: "이름",
+  email: "이메일",
+  phone: "전화",
+  link: "링크",
+};
+
+/** 내 경험 자료(이력서 등)에 적힌 이름·연락처·링크. 누르면 칸에 넣기만 하고, 저장은 사람이 누른다. */
+function FromResume({ v, onFill }: { v: Values; onFill: (sg: ProfileSuggestion) => void }) {
+  const q = useQuery({ queryKey: ["profile-suggestions"], queryFn: api.profileSuggestions });
+  const shown = (q.data?.suggestions ?? []).filter((sg) =>
+    sg.field === "link" ? !v.links.some((l) => l.url.trim() === sg.value) : v[sg.field].trim() !== sg.value,
+  );
+  if (!shown.length) return null;
+  return (
+    <section aria-label="자료에서 찾은 정보" className="space-y-2">
+      <h2 className="text-[15px] font-semibold">자료에서 찾은 정보</h2>
+      <p className="text-[13px] text-muted">
+        내 경험 자료에 적힌 값입니다. 넣은 뒤 저장을 눌러야 프로필에 남습니다.
+      </p>
+      <ul className="divide-y divide-line border-y border-line">
+        {shown.map((sg) => {
+          const filled = sg.field !== "link" && v[sg.field].trim();
+          return (
+            <li key={`${sg.field}-${sg.value}`} className="flex min-h-11 items-center gap-3 py-2">
+              <span className="w-12 shrink-0 text-[13px] text-muted">{sg.field === "link" ? (sg.label ?? "링크") : FIELD_LABEL[sg.field]}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm">{sg.value}</span>
+                <span className="block truncate text-xs text-muted">원본 {sg.source_title}</span>
+              </span>
+              <Button size="sm" className="shrink-0 max-sm:h-9" onClick={() => onFill(sg)}>
+                {filled ? "바꾸기" : "넣기"}
+              </Button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

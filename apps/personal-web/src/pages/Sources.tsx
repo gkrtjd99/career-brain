@@ -4,8 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { ConfirmAllButton } from "../components/brain/ExperienceActions";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { ProofPanel } from "../components/credentials/ProofPanel";
+import { CoverLetterAnswers, looksLikeCoverLetter } from "../components/sources/CoverLetterAnswers";
 import { PurposeChoice } from "../components/sources/PurposeChoice";
 import { api } from "../lib/api";
 import { formatDate } from "../lib/dates";
@@ -354,6 +356,9 @@ export function SourcePage() {
                       <Link to="/brain" search={{ review: true }} className={cn(TEXT_LINK, "font-semibold tabular-nums")}>
                         {src.pending_claims}개 확인하기
                       </Link>
+                      {src.pending_claims > 1 ? (
+                        <ConfirmAllButton sourceId={src.id} count={src.pending_claims} />
+                      ) : null}
                     </Row>
                   ) : null}
                   {src.confirmed_claims ? (
@@ -363,6 +368,12 @@ export function SourcePage() {
                   ) : null}
                 </dl>
               </Block>
+              {src.purpose === "experience" &&
+              parse &&
+              ["complete", "partial"].includes(parse.status) &&
+              looksLikeCoverLetter(src.title, v?.original_filename) ? (
+                <CoverLetterAnswers parseRunId={parse.run_id} sourceTitle={src.title} />
+              ) : null}
               {parse && ["complete", "partial"].includes(parse.status) ? <BlocksSection parseRunId={parse.run_id} /> : null}
             </div>
           </div>
