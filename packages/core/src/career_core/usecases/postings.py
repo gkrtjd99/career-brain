@@ -1505,13 +1505,10 @@ async def _upgrade_saved(db: Database, actor: ActorContext, posting_id: UUID, ve
         if fill_new_lists(fields, evidence, version.text):
             posting.fields, posting.evidence = fields, evidence
             posting.updated_at = utcnow()
-        linked = posting.company_id is not None
-    if not linked:
-        from career_core.usecases.company_research import link_posting_company
+    # 회사가 없으면 잇고, 이미 이어진 회사라도 찾은 적이 없으면 찾기를 건다
+    from career_core.usecases.company_research import link_posting_company
 
-        await link_posting_company(
-            db, ActorContext(actor.subject_id, actor.workspace_id), posting_id
-        )
+    await link_posting_company(db, ActorContext(actor.subject_id, actor.workspace_id), posting_id)
 
 
 async def _store_version(
