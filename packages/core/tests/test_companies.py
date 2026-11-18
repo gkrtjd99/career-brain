@@ -418,6 +418,15 @@ async def test_posting_link_suggestions_need_a_person(db, env):
     p2 = await make_posting(db, owner, "https://jobs.example.test/c/2", "GASANG ELECTRONICS")
     p3 = await make_posting(db, owner, "https://jobs.example.test/c/3", "다른회사")
     foreign = await make_posting(db, other, "https://jobs.example.test/c/9", "가상전자")
+    # 저장하면 이름이 같은 회사에 저절로 이어진다 (c0053). p3은 새 회사가 생긴다
+    assert {(await posting_uc.get_posting(db, owner, p)).company_id for p in (p1, p2)} == {cid}
+    auto = (await posting_uc.get_posting(db, owner, p3)).company_id
+    assert auto not in (None, cid)
+    # c0053 전에 저장한 공고처럼 연결을 비우면, 제안만 하고 사람이 고른다
+    async with db.workspace_session(owner.workspace_id) as s:
+        await s.execute(
+            update(JobPosting).where(JobPosting.id.in_([p1, p2, p3])).values(company_id=None)
+        )
     sugg = await uc.link_suggestions(db, owner, cid)
     assert {s.posting_id for s in sugg} == {p1, p2}
     assert {s.matched for s in sugg} == {"가상전자", "Gasang Electronics"}
@@ -437,8 +446,8 @@ async def test_posting_link_suggestions_need_a_person(db, env):
     assert summary.postings == 1
     assert await uc.unlink_postings(db, owner, cid, [p1, p3]) == 1
 
-    # 다른 공간: 목록 0건, 조회·쓰기는 없음
-    assert await uc.list_companies(db, other) == []
+    # 다른 공간: 이 회사는 목록에 없고(그 공간 공고로 생긴 같은 이름 회사만), 조회·쓰기는 없음
+    assert cid not in {c.id for c in await uc.list_companies(db, other)}
     for call in (
         uc.get_company(db, other, cid),
         uc.link_suggestions(db, other, cid),

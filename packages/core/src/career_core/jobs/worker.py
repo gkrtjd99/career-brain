@@ -240,6 +240,11 @@ def posting_handlers(deps) -> dict[str, JobHandler]:
         give_up_company_fetch,
         process_company_fetch,
     )
+    from career_core.usecases.company_research import (
+        RESEARCH_JOB,
+        give_up_research,
+        process_research,
+    )
     from career_core.usecases.postings import FETCH_JOB, give_up_fetch, process_fetch
 
     return {
@@ -250,6 +255,10 @@ def posting_handlers(deps) -> dict[str, JobHandler]:
         COMPANY_FETCH_JOB: JobHandler(
             run=lambda ws, target: process_company_fetch(deps, ws, target),
             give_up=lambda ws, target: give_up_company_fetch(deps, ws, target),
+        ),
+        RESEARCH_JOB: JobHandler(
+            run=lambda ws, target: process_research(deps, ws, target),
+            give_up=lambda ws, target: give_up_research(deps, ws, target),
         ),
     }
 

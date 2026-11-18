@@ -320,7 +320,7 @@ async def test_model_picks_inside_candidates_only(db, env):
         env={"CLIPROXY_API_KEY": "k"},
     )
     # 회사 항목(확인한 것만)이 있으면 함께 보낸다
-    cid = await company_uc.create_company(db, owner, name="가상회사")
+    cid = await company_uc.find_or_create_company(db, owner, name="가상회사")
     page = await company_uc.import_paste(
         db, None, owner, cid, "가상회사의 인재상은 끝까지 파고드는 사람입니다.", title="채용 페이지"
     )

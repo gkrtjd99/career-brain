@@ -256,7 +256,9 @@ function PostingRead({ p }: { p: Posting }) {
   const deadline = value("deadline") as string | undefined;
   const opens = value("opens_at") as string | undefined;
   const questions = (value("questions") as EssayQuestion[] | undefined) ?? [];
-  const lists = (["responsibilities", "requirements", "preferred", "process"] as PostingField[])
+  const lists = (
+    ["responsibilities", "requirements", "preferred", "talent", "process", "conditions", "benefits"] as PostingField[]
+  )
     .map((f) => ({ f, items: (value(f) as string[] | undefined) ?? [] }))
     .filter((x) => x.items.length);
   return (

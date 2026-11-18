@@ -172,7 +172,7 @@ async def env(db, tmp_path):
     other_exp = await brain.create_experience(db, other, title="B 공간 Python SQL 경험")
     await sourced_claim(db, blobs, other, other_exp, "B 공간에서 Python과 SQL로 배치를 만들었다")
     # 회사 (확인한 인재상)와 같은 회사의 참고 면접 후기 (확인한 구조 메모)
-    cid = await company_uc.create_company(db, owner, name="가상회사")
+    cid = await company_uc.find_or_create_company(db, owner, name="가상회사")
     page = await company_uc.import_paste(
         db, None, owner, cid, "가상회사의 인재상은 끝까지 파고드는 사람입니다.", title="채용"
     )

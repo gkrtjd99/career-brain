@@ -2,13 +2,20 @@ import type { Company, CompanyFact, CompanyPage as CompanySourcePage } from "@ca
 import { Button, cn, ConfirmDialog, IconButton, Input, Label, Section, Sheet, Spinner, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
 import { CompanyForm, companyValues, toCompanyBody } from "../components/companies/CompanyForm";
 import { EMPTY_FACT, FactForm, type FactFormValues } from "../components/companies/FactForm";
 import { ErrorText, Loaded, PageHeader, Tabs } from "../components/common";
 import { api } from "../lib/api";
-import { asOfLabel, FACT_KIND_LABEL, FACT_KIND_ORDER, pageName, pageStatusLabel } from "../lib/companies";
+import {
+  asOfLabel,
+  FACT_KIND_LABEL,
+  FACT_KIND_ORDER,
+  pageName,
+  pageStatusLabel,
+  researchLine,
+} from "../lib/companies";
 import { formatDate, formatDeadline } from "../lib/dates";
 import { hostOf } from "../lib/format";
 import { APP_STATUS, POSTING_STATUS } from "../lib/labels";
@@ -21,7 +28,10 @@ export function CompanyPage() {
   const q = useQuery({
     queryKey: ["company", companyId],
     queryFn: () => api.company(companyId),
-    refetchInterval: (query) => (query.state.data?.pages.some((p) => p.status === "pending") ? 2500 : false),
+    refetchInterval: (query) =>
+      query.state.data?.research_status === "pending" || query.state.data?.pages.some((p) => p.status === "pending")
+        ? 2500
+        : false,
   });
   return <Loaded query={q}>{(c) => <CompanyView c={c} />}</Loaded>;
 }
@@ -41,6 +51,10 @@ function CompanyView({ c }: { c: Company }) {
   const candidates = c.facts.filter((f) => f.status === "candidate");
   const confirmed = c.facts.filter((f) => f.status === "confirmed");
   const sub = [c.aliases.join(", ")].filter(Boolean);
+  const invalidate = useInvalidate(c.id);
+  const research = useMutation({ mutationFn: () => api.researchCompany(c.id), onSuccess: invalidate });
+  const researching = c.research_status === "pending" || research.isPending;
+  const researchText = researchLine(c);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -81,7 +95,14 @@ function CompanyView({ c }: { c: Company }) {
 
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-14">
         <div className="min-w-0 space-y-10">
-          {c.facts.length === 0 ? (
+          {researchText ? (
+            <p className="flex items-center gap-2 text-[13px] text-muted" aria-live="polite">
+              {researching ? <Spinner /> : null}
+              <span>{researchText}</span>
+            </p>
+          ) : null}
+          {research.error ? <ErrorText error={research.error} /> : null}
+          {c.facts.length === 0 && !researching ? (
             <p className="border-t border-line pt-3 text-sm text-muted">
               {c.pages.length
                 ? "아직 항목이 없습니다. 오른쪽 원문을 열어 인용할 글을 고르면 항목으로 추가됩니다."
@@ -121,9 +142,20 @@ function CompanyView({ c }: { c: Company }) {
           <Section
             title="원문"
             action={
-              <Button size="sm" variant="ghost" onClick={() => setAdding(true)} aria-label="원문 추가">
-                <Plus size={14} /> 추가
-              </Button>
+              <span className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => research.mutate()}
+                  disabled={researching}
+                  title="이 회사 공고의 글, 홈페이지의 소개·인재상 쪽, 위키백과를 다시 찾아봅니다"
+                >
+                  <RefreshCw size={14} /> 다시 찾기
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setAdding(true)} aria-label="원문 추가">
+                  <Plus size={14} /> 추가
+                </Button>
+              </span>
             }
           >
             <Pages c={c} onOpen={setPageId} />

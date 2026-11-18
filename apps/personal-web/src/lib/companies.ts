@@ -1,5 +1,5 @@
 // 회사 조사 (O13) 화면 문구. 회사 항목은 참고 지식이다: 내 경험·근거와 말을 섞지 않는다.
-import type { CompanyFactKind, CompanyPage } from "@career-brain/client";
+import type { Company, CompanyFactKind, CompanyPage } from "@career-brain/client";
 import { formatDate } from "./dates";
 import { hostOf } from "./format";
 import { FETCH_ERROR, noteLabel } from "./labels";
@@ -41,7 +41,21 @@ export function asOfLabel(asOf: string | null): string | null {
 /** 원문 한 건의 이름: 붙여넣은 글은 제목(없으면 "붙여넣은 글"), 가져온 페이지는 제목이나 주소의 호스트 */
 export function pageName(p: Pick<CompanyPage, "origin" | "title" | "url" | "final_url">): string {
   if (p.origin === "paste") return p.title || "붙여넣은 글";
+  if (p.origin === "posting") return `공고 · ${p.title || hostOf(p.url ?? "")}`;
   return p.title || hostOf(p.final_url ?? p.url ?? "");
+}
+
+/** 회사 정보 찾기 한 줄: 찾는 중 · 마지막으로 찾은 날 · 홈페이지를 못 찾았는지 */
+export function researchLine(c: Pick<Company, "research_status" | "researched_at" | "research_notes">): string | null {
+  if (c.research_status === "pending") return "회사 정보를 찾는 중입니다.";
+  if (c.research_status === "failed") return "회사 정보를 찾지 못했습니다. 다시 찾거나 원문을 직접 넣어 주세요.";
+  if (c.research_status !== "done") return null;
+  const when = c.researched_at ? `${formatDate(c.researched_at)}에 찾음` : "찾음";
+  const notes = c.research_notes;
+  if (notes.includes("homepage:none"))
+    return `${when} · 홈페이지를 찾지 못했습니다. 수정에서 홈페이지를 넣고 다시 찾으면 소개·인재상 쪽을 가져옵니다.`;
+  if (notes.some((n) => n.startsWith("homepage_failed:"))) return `${when} · 홈페이지를 열지 못했습니다.`;
+  return when;
 }
 
 /** 원문 상태 한 줄 (가져오는 중·실패 이유·모델 메모) */

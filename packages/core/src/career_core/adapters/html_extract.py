@@ -175,6 +175,9 @@ def _noisy(attrs: dict[str, str]) -> bool:
     if attrs.get("role") in ("navigation", "banner", "contentinfo", "complementary"):
         return True
     tokens = set(re.split(r"[\s_\-]+", f"{attrs.get('id', '')} {attrs.get('class', '')}".lower()))
+    if "elementor" in tokens:
+        # Elementor(워드프레스 페이지 빌더)는 본문 글까지 모두 "elementor-widget"으로 감싼다
+        tokens.discard("widget")
     return bool(tokens & NOISE_TOKENS)
 
 

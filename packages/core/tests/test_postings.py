@@ -346,6 +346,7 @@ async def test_refetch_unchanged_and_changed(db, env):
     [r] = await uc.save_urls(db, owner, ["https://jobs.example.test/b/1"])
     await work(env)
     assert await uc.confirm_posting(db, owner, r.posting_id) == "saved"
+    await work(env)  # 저장이 건 회사 정보 찾기 (c0053)
     calls = env["llm"].calls
     for _ in range(3):
         await uc.refetch(db, owner, r.posting_id)

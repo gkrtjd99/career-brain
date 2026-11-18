@@ -202,6 +202,9 @@ Fields (omit when not in the text):
   states the start of the application period. Never use the posting date or today instead
 - posted_at: "YYYY-MM-DD"
 - responsibilities, requirements, preferred, process: lists; each item is a quote of one line/bullet
+- talent: who the company wants to work with (인재상, 함께 일하고 싶은 사람, 핵심 가치) — not the
+  job's requirements; benefits: 혜택·복지; conditions: working conditions such as hours, pay
+  policy (처우), probation, work location details, training. Lists of quotes like the above
 - questions: application essay questions (자기소개서 문항) with char_limit if written, else null
 Also say page_type: "posting" (one job posting), "listing" (a list of many postings), "other".
 
@@ -324,6 +327,9 @@ _LIST_ORDER = (
     FieldName.REQUIREMENTS,
     FieldName.PREFERRED,
     FieldName.PROCESS,
+    FieldName.TALENT,
+    FieldName.BENEFITS,
+    FieldName.CONDITIONS,
 )
 _PREFERRED_WORDS = ("우대", "preferred", "nice to have", "a plus", "is a plus", "bonus")
 
@@ -396,6 +402,60 @@ def dedupe_list_fields(out: dict, text: str) -> int:
         elif len(values) != len(entry["value"]):
             out[name] = {"value": values, "evidence": {**entry["evidence"], "ref": kept_refs}}
     return removed
+
+
+NEW_LISTS = (FieldName.TALENT, FieldName.BENEFITS, FieldName.CONDITIONS)
+MAX_TEXT_LIST_ITEMS = 20
+
+
+def lists_from_text(text: str, names=NEW_LISTS) -> dict:
+    """본문에서 섹션 제목(인재상·혜택·근무 조건) 아래 줄을 목록으로 (모델 없이). 근거는 줄마다 본문 인용.
+
+    c0053 전에 가져온 공고(같은 본문이라 다시 읽지 않는다)와 모델이 놓친 목록을 채운다."""
+    out: dict = {}
+    current: FieldName | None = None
+    pos = 0
+    for raw in (text or "").split("\n"):
+        start = text.index(raw, pos) if raw else pos
+        pos = start + len(raw)
+        line = raw.strip()
+        if not line:
+            continue
+        name = classify_heading(line)
+        if name is None and (
+            is_heading_line(line) or (line.endswith((":", "：")) and len(line) <= 40)
+        ):
+            name = classify_heading(line, certain=True)
+            if name is None:
+                current = None
+                continue
+        if name is not None:
+            current = name if name in names else None
+            continue
+        if current is None:
+            continue
+        entry = out.setdefault(current, {"value": [], "evidence": {"kind": "quotes", "ref": []}})
+        item = clean_list_item(line)
+        if not item or item in entry["value"] or len(entry["value"]) >= MAX_TEXT_LIST_ITEMS:
+            continue
+        lead = raw.index(line)
+        entry["value"].append(item)
+        entry["evidence"]["ref"].append(
+            {"kind": "quote", "ref": line, "start": start + lead, "end": start + lead + len(line)}
+        )
+    return out
+
+
+def fill_new_lists(fields: dict, evidence: dict, text: str) -> list[str]:
+    """``fields``·``evidence``(공고 확정 값 꼴)에 없는 새 목록을 본문에서 채운다. 채운 항목 이름."""
+    missing = [n for n in NEW_LISTS if n.value not in fields]
+    if not missing or not text:
+        return []
+    found = lists_from_text(text, missing)
+    for name, entry in found.items():
+        fields[name.value] = entry["value"]
+        evidence[name.value] = entry["evidence"]
+    return [n.value for n in found]
 
 
 _TITLE_SPLIT = re.compile(r"\s*(?:[｜|]|\s[-–—]\s|::)\s*")
@@ -600,6 +660,8 @@ async def extract_fields(
                     notes.append(f"llm_dropped:{dropped}")
                 if deduped:
                     notes.append(f"llm_deduped:{deduped}")
+    for name, entry in lists_from_text(text, [n for n in NEW_LISTS if n not in fields]).items():
+        fields[name] = entry  # 모델이 없거나 놓친 인재상·혜택·근무 조건
     return fields, call_id, notes, page_type
 
 
@@ -1433,6 +1495,25 @@ async def _process_image(
     )
 
 
+async def _upgrade_saved(db: Database, actor: ActorContext, posting_id: UUID, version_id: UUID):
+    async with db.workspace_session(actor.workspace_id) as s:
+        posting = await s.get(JobPosting, posting_id)
+        version = await s.get(JobPostingVersion, version_id)
+        if posting is None or version is None or posting.status != PostingStatus.SAVED:
+            return
+        fields, evidence = dict(posting.fields or {}), dict(posting.evidence or {})
+        if fill_new_lists(fields, evidence, version.text):
+            posting.fields, posting.evidence = fields, evidence
+            posting.updated_at = utcnow()
+        linked = posting.company_id is not None
+    if not linked:
+        from career_core.usecases.company_research import link_posting_company
+
+        await link_posting_company(
+            db, ActorContext(actor.subject_id, actor.workspace_id), posting_id
+        )
+
+
 async def _store_version(
     deps: PostingDeps,
     actor: ActorContext,
@@ -1457,7 +1538,9 @@ async def _store_version(
     digest = digest or content_hash(text)
     same = await _same_version(db, ws, posting_id, digest)
     if same:
-        # 내용이 같으면 버전을 늘리지 않는다 (모델도 다시 부르지 않는다).
+        # 내용이 같으면 버전을 늘리지 않는다 (모델도 다시 부르지 않는다). c0053 전에 저장한 공고는
+        # 본문에서 인재상·혜택·근무 조건을 채우고 회사에 잇는다
+        await _upgrade_saved(db, actor, posting_id, same)
         return await _finish_run(
             db,
             ws,
@@ -1822,6 +1905,8 @@ async def confirm_posting(
             raise PostingRuleError("nothing_to_confirm")
         fields = {k: v["value"] for k, v in (version.extracted if version else {}).items()}
         evidence = {k: v["evidence"] for k, v in (version.extracted if version else {}).items()}
+        if version is not None:
+            fill_new_lists(fields, evidence, version.text)  # c0053 전에 가져온 버전
         for name, value in overrides.items():
             fields[name] = _validate_value(name, value)
             evidence[name] = {"kind": "user", "ref": actor.subject_id.hex}
@@ -1837,7 +1922,12 @@ async def confirm_posting(
         posting.status = PostingStatus.SAVED.value
         posting.saved_by = actor.subject_id
         posting.saved_at = utcnow()
-        return posting.status
+        status = posting.status
+    # 회사에 잇고 회사 정보 찾기를 건다 (c0053). 같은 이름의 회사가 없으면 만든다
+    from career_core.usecases.company_research import link_posting_company
+
+    await link_posting_company(db, actor, posting_id)
+    return status
 
 
 async def archive_posting(db: Database, actor: ActorContext, posting_id: UUID) -> str:
