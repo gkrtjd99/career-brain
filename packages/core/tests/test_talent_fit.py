@@ -71,23 +71,25 @@ async def env(db):
 
 
 class FakeJev:
-    """trait 글을 보고 정해진 점수로 답하는 가짜 판정 모델. 요청을 모두 기록한다."""
+    """질문 이름(s{줄}_{문단} · c{줄} · o{문단})과 state를 보고 Noul로 답하는 가짜 판정 모델. 요청을 기록한다."""
 
     def __init__(self):
         self.requests = []
 
     async def judge(self, model, state, questions):
         self.requests.append((model, state, questions))
+        paras = state["essay"]["paragraphs"]
         answers = {}
         for name, q in questions.items():
-            trait = q["instructions"]["trait"]
-            if "도전" in trait and "다시 시도" in state["essay"]:
-                score, conf = 1.8, 0.8
-            elif "소통" in trait:
-                score, conf = 1.0, 0.2
+            trait = q["instructions"].get("trait", "")
+            if name.startswith("s"):
+                j = int(name.split("_")[1])
+                p = 0.9 if "도전" in trait and "다시 시도" in paras[j] else 0.05
+            elif name.startswith("c"):
+                p = 0.85 if "소통" in trait and any("소통" in x for x in paras) else 0.1
             else:
-                score, conf = 0.1, 0.9
-            answers[name] = {"type": "score", "score": score, "confidence": conf}
+                p = 0.9
+            answers[name] = {"type": "noul", "noul": p}
         answers["junk"] = "not a dict"
         return JudgmentCompletion(
             answers={k: v for k, v in answers.items() if isinstance(v, dict)},
@@ -142,31 +144,65 @@ def test_trait_cleaning_and_levels():
     assert not uc.is_trait_line("우리는 새로운 기술과 시장에 끊임없이 도전하는 혁신기업 입니다")
     assert not uc.is_trait_line("그런 분들과 함께 미래를 만들어가고 싶습니다")
     assert not uc.is_trait_line("함께 미래를 만들어가고 싶습니다")
-    assert [uc.level_of(x) for x in (0.0, 0.59, 0.6, 1.39, 1.4, 2.0)] == [
-        "absent",
-        "absent",
-        "claimed",
-        "claimed",
-        "shown",
-        "shown",
-    ]
+    assert uc.is_headline("[세 번 실패한 배포, 네 번째에 성공시켰습니다]")
+    assert not uc.is_headline("배포가 세 번 실패했습니다 [참고]")
+
+
+def test_levels_from_noul_probabilities():
+    # 경계: 0.7 이상 예, 0.3 아래 아니오, 그 사이는 갈림
+    assert uc.level_of(0.7, 0.9) == "shown"  # 한 일로 보이면 말로 내세운 것보다 앞선다
+    assert uc.level_of(0.69, 0.7) == "claimed"
+    assert uc.level_of(0.5, 0.1) == "unclear"
+    assert uc.level_of(0.1, 0.4) == "unclear"
+    assert uc.level_of(0.29, 0.29) == "absent"
+    assert uc.level_of(0.1, None) == "absent"
+
+    traits = [uc.Trait("도전", "posting", True), uc.Trait("책임", "posting", True)]
+    q = uc.build_questions(traits, 3)
+    assert sorted(q) == sorted(
+        [f"s{i}_{j}" for i in range(2) for j in range(3)] + ["c0", "c1", "o0", "o1", "o2"]
+    )
+    assert all(v["type"] == "noul" for v in q.values())
+    assert "`essay.paragraphs[2]`" in q["s1_2"]["instructions"]["question"]
+    assert q["s1_2"]["instructions"]["trait"] == "책임"
+    assert set(q["s0_0"]["criteria"]) == {"true", "false"}
+
     doc = uuid4()
-    fit = uc.read_fit({"type": "score", "score": 2.7, "confidence": 0.5}, doc)
-    assert (fit.level, fit.score, fit.confidence) == ("shown", 2.0, 0.5)
-    # 확률이 있으면 가장 그럴듯한 단계, 양쪽으로 갈리면 unclear (평균 1.08을 "말로만"으로 읽지 않는다)
-    split = {"score": 1.08, "confidence": 0.0, "probabilities": {"0": 0.31, "1": 0.29, "2": 0.4}}
-    assert uc.read_fit(split, doc).level == "unclear"
-    lean = {"score": 1.54, "confidence": 0.31, "probabilities": {"0": 0.17, "1": 0.12, "2": 0.71}}
-    assert uc.read_fit(lean, doc).level == "shown"
-    said = {"score": 1.0, "confidence": 1.0, "probabilities": {"0": 0.0, "1": 1.0, "2": 0.0}}
-    assert uc.read_fit(said, doc).level == "claimed"
-    assert uc.level_from({"0": "x"}, 1.5) == "shown"  # 모양이 다르면 점수로
-    assert uc.read_fit({"score": True}, doc) is None
-    assert uc.read_fit({"score": "1"}, doc) is None
-    assert uc.read_fit(None, doc) is None
-    q = uc.build_questions([uc.Trait("도전", "posting", True)])
-    assert q["t0"]["type"] == "score" and len(q["t0"]["criteria"]) == 3
-    assert q["t0"]["instructions"]["trait"] == "도전"
+    ids = ["h", "a", "b"]
+
+    def n(p):
+        return {"type": "noul", "noul": p}
+
+    answers = {
+        # 도전: 제목 줄(h)이 가장 높아도 본문 문단(a)이 먼저, 경계 아래(b)는 근거가 아니다
+        "s0_0": n(0.95),
+        "s0_1": n(0.8),
+        "s0_2": n(0.5),
+        "c0": n(0.2),
+        # 책임: b가 "보여 준다"고 해도 남이 한 일(o2 낮음)이면 그만큼만 센다
+        "s1_0": n(0.1),
+        "s1_1": n(0.2),
+        "s1_2": n(0.9),
+        "c1": n(0.8),
+        "o0": n(0.9),
+        "o1": n(0.9),
+        "o2": n(0.04),
+    }
+    shown, claimed = uc.read_fits(answers, traits, ids, doc, headlines=frozenset({"h"}))
+    assert (shown.level, shown.shown, shown.said) == ("shown", 0.9, 0.2)  # o0 0.9로 깎임
+    assert shown.evidence == ["a", "h"]
+    assert (claimed.level, claimed.shown, claimed.evidence) == ("claimed", 0.2, [])
+    # 답이 없거나 모양이 다르면 그 줄은 판정 없음
+    bad = {"s0_0": {"noul": True}, "s0_1": {"noul": "0.9"}, "s0_2": None}
+    assert uc.read_fits(bad, traits[:1], ids, doc) == [None]
+    # 확률은 0~1로 자른다, own이 없으면 깎지 않는다
+    [fit] = uc.read_fits({"s0_0": n(1.4)}, traits[:1], ["a"], doc)
+    assert (fit.level, fit.shown, fit.said, fit.evidence) == ("shown", 1.0, None, ["a"])
+
+    # 문단이 많으면 이웃 문단을 묶는다 (근거는 묶음 첫 블록)
+    blocks = [(str(k), f"문단{k}") for k in range(5)]
+    assert uc.group_paragraphs(blocks, 5) == blocks
+    assert uc.group_paragraphs(blocks, 2) == [("0", "문단0\n문단1\n문단2"), ("3", "문단3\n문단4")]
 
 
 def test_typesafe_routes_only_judgment_and_back():
@@ -332,14 +368,18 @@ async def test_talent_fit_judges_each_trait_and_is_advisory(db, env):
     assert res.judge.status == "ok" and res.judge.calls == 1 and res.basis == "judge_advisory"
     assert res.judge.model == "jev-1.14.0"
     assert res.judge.cost_usd == f"{2000 * 0.042 / 1_000_000:.6f}"
-    levels = {t.text: (t.best, t.fits[0].confidence) for t in res.traits}
-    assert levels["실패를 두려워하지 않고 도전하는 사람"] == ("shown", 0.8)
-    assert levels["소통하는 사람"] == ("claimed", 0.2)  # 말로만
-    assert levels["주인의식"][0] == "absent"
+    by = {t.text: t for t in res.traits}
+    challenge = by["실패를 두려워하지 않고 도전하는 사람"]
+    assert challenge.best == "shown" and challenge.fits[0].shown == 0.9
     [(model, state, questions)] = client.requests
-    assert model == "jev-1.14.0" and state["essay"] == ESSAY
+    paras = state["essay"]["paragraphs"]
+    assert model == "jev-1.14.0" and "\n\n".join(paras).replace("\n\n", " ") == ESSAY
+    # 근거는 "다시 시도"가 있는 문단 (블록 ID), 화면에서 그 문단으로 이동한다
+    assert len(challenge.fits[0].evidence) == 1
+    assert by["소통하는 사람"].best == "claimed"  # 말로만
+    assert by["주인의식"].best == "absent"
     assert state["company"] == "가상테크" and state["question"].startswith("지원 동기")
-    assert len(questions) == 4
+    assert len(questions) == 4 * len(paras) + 4 + len(paras)
     async with db.workspace_session(owner.workspace_id) as s:
         calls = (await s.execute(select(ModelCall.purpose, ModelCall.status))).all()
     assert calls == [("talent_fit", "ok")]  # 키·범위가 없을 때는 부르기 전에 멈춘다
@@ -361,7 +401,9 @@ async def test_talent_fit_judges_each_trait_and_is_advisory(db, env):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["judge"]["status"] == "ok" and body["basis"] == "judge_advisory"
-        assert body["traits"][0]["fits"][0]["level"] == "shown"
+        fit = body["traits"][0]["fits"][0]
+        assert fit["level"] == "shown" and fit["shown"] == 0.9 and len(fit["evidence"]) == 1
+        assert fit["said"] == 0.1
         r = await c.post(f"/core/applications/{uuid4()}/talent-fit", headers=auth("owner"))
         assert r.status_code == 404
 

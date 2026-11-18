@@ -1,6 +1,7 @@
 // 인재상 맞춤 확인 (참고 의견, POST /core/applications/{id}/talent-fit).
-// 공고·회사 인재상 줄마다 "이 글이 글쓴이가 한 일로 그 모습을 보여 주는가"를 판정 모델(TypeSafe Jev)에 묻는다.
-// 말로 내세우는 것("저는 도전적인 사람입니다")은 드러난 것으로 치지 않는다. 결과는 저장하지 않는다.
+// 공고·회사 인재상 줄마다 "이 글의 어느 문단이 글쓴이가 한 일로 그 모습을 보여 주는가"를 판정 모델(TypeSafe Jev)에
+// 묻는다. 말로 내세우는 것("저는 도전적인 사람입니다")은 드러난 것으로 치지 않는다. 근거 문단으로 이동할 수 있다.
+// 결과는 저장하지 않는다.
 import type { TalentFit, TalentLevel } from "@career-brain/client";
 import { Button, cn, Disclosure, type BadgeTone } from "@career-brain/ui";
 import { useMutation } from "@tanstack/react-query";
@@ -37,7 +38,32 @@ const NOTE: Record<string, string> = {
   rate_limited: "요청이 잦아 잠시 막혔습니다. 조금 뒤 다시 확인합니다.",
 };
 
-export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: string; dirty: boolean }) {
+interface SavedBlock {
+  id: string | null;
+  text: string;
+}
+
+function excerpt(text: string, max = 90) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+export function TalentFitPanel({
+  appId,
+  docId,
+  dirty,
+  blocks,
+  onJump,
+  blockNo,
+}: {
+  appId: string;
+  docId: string;
+  dirty: boolean;
+  blocks: SavedBlock[];
+  onJump: (blockId: string) => void;
+  blockNo: (blockId: string) => number | null;
+}) {
+  const textOf = (id: string) => blocks.find((b) => b.id === id)?.text ?? null;
   const run = useMutation({ mutationFn: () => api.talentFit(appId, docId) });
   const res: TalentFit | undefined = run.data;
   const rows = (res?.traits ?? []).map((t) => ({ trait: t, fit: t.fits.find((f) => f.document_id === docId) ?? null }));
@@ -52,8 +78,8 @@ export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: 
       </Button>
       <Disclosure title="무엇을 보내나요" className="text-xs text-muted">
         <p className="mt-1 leading-5">
-          저장한 글과 공고·회사 정보의 인재상 줄을 판정 모델(TypeSafe Jev)에 보내, 줄마다 “글쓴이가 한 일로 이 모습이
-          드러나는가”를 묻습니다. “저는 도전적인 사람입니다”처럼 말로만 내세운 것은 드러난 것으로 치지 않습니다. 참고
+          저장한 글과 공고·회사 정보의 인재상 줄을 판정 모델(TypeSafe Jev)에 보내, 줄마다 “어느 문단이 글쓴이가 한
+          일로 이 모습을 보여 주는가”를 묻습니다. 남이 한 일, 앞으로의 계획, 이력·직함만 적은 문단은 근거로 치지 않습니다. “저는 도전적인 사람입니다”처럼 말로만 내세운 것은 드러난 것으로 치지 않습니다. 참고
           의견일 뿐 저장하지 않습니다. 이 기기 밖으로 보내지 않는 근거가 연결된 문단은 보내지 않습니다.
           {dirty ? " 저장하지 않은 편집은 보내지 않습니다." : ""}
         </p>
@@ -76,7 +102,7 @@ export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: 
               {rows.map(({ trait, fit }, i) => (
                 <li key={`${trait.text}-${i}`} className="py-2.5 text-[13px]">
                   <p className="font-medium">{trait.text}</p>
-                  <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-muted">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
                     {fit ? (
                       <span className={cn(toneText(LEVEL[fit.level].tone))}>{LEVEL[fit.level].label}</span>
                     ) : null}
@@ -84,7 +110,23 @@ export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: 
                       {fit ? "· " : ""}
                       {trait.source === "posting" ? "공고" : trait.confirmed ? "회사 정보" : "회사 정보 (확인 전)"}
                     </span>
+                    {(fit?.evidence ?? []).map((id) => {
+                      const no = blockNo(id);
+                      return no === null ? null : (
+                        <button
+                          key={id}
+                          type="button"
+                          className="min-h-9 px-1 text-muted underline underline-offset-2 hover:text-fg"
+                          onClick={() => onJump(id)}
+                        >
+                          문단 {no + 1}
+                        </button>
+                      );
+                    })}
                   </p>
+                  {fit?.evidence[0] && textOf(fit.evidence[0]) ? (
+                    <p className="mt-1 text-xs leading-5 text-muted">“{excerpt(textOf(fit.evidence[0]) ?? "")}”</p>
+                  ) : null}
                 </li>
               ))}
             </ul>
