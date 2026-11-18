@@ -66,6 +66,7 @@ export const RUN_CODE: Record<string, string> = {
   application_locked: "제출본을 고정한 지원",
   target_not_found: "대상이 없어짐",
   nothing_to_suggest: "수정안을 받을 문단이 없음",
+  nothing_to_draft: "초안을 쓸 빈 문항이 없음",
   unknown_block: "없는 문단",
   forbidden: "권한 없음",
   // 모델 호출 전·중 실패 (ModelDenied·ModelCallError 코드)

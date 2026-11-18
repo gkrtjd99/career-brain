@@ -132,6 +132,7 @@ async def upload_source(
     purpose_hint: str | None = None,
     text_layer=None,
     origin_url: str | None = None,
+    auto_extract: bool = False,
 ) -> UploadResult:
     """``hidden_text``: ``exclude``면 숨김 서식 글을 원본 블록에서 뺀다 (DOCX만, 다른 형식은 ``keep``).
     같은 파일을 다시 올리면 처음 파싱의 값을 그대로 돌려준다 (다시 파싱하지 않는다).
@@ -141,7 +142,10 @@ async def upload_source(
 
     c0039: ``purpose_pending``이면 받은 자료함에서 사람의 확인을 기다리고 등급은 ``restricted``다.
     ``text_layer``(``domain.ingest.TextLayer``)는 이 기기에서 읽은 글: 사진·스캔 PDF에만, 같은 트랜잭션에서
-    붙인다 (worker가 읽기를 끝낼 때 그 쪽을 못 읽은 쪽으로 보지 않는다). 같은 파일이면 ``ingest.attach_text_layer``."""
+    붙인다 (worker가 읽기를 끝낼 때 그 쪽을 못 읽은 쪽으로 보지 않는다). 같은 파일이면 ``ingest.attach_text_layer``.
+
+    c0052 ``auto_extract``: 넣은 사람이 경험 뽑기 권한(``brain.extract``)을 가졌다 (부르는 쪽이 판단). 읽기가
+    끝나면 worker가 ``extraction.auto_extract``로 경험 후보 뽑기를 건다 (공간 설정·AI 연결·등급을 그때 본다)."""
     if not data:
         raise UploadRejected("empty", 400)
     if len(data) > max_bytes:
@@ -210,6 +214,7 @@ async def upload_source(
         status=ParseStatus.PENDING,
         requested_by=actor.subject_id,
         hidden_text=hidden_text,
+        auto_extract=bool(auto_extract),
     )
     try:
         async with db.workspace_session(ws) as s:
@@ -267,6 +272,7 @@ async def capture_text_source(
     markdown: str,
     purpose: str = SourcePurpose.REFERENCE,
     max_bytes: int,
+    auto_extract: bool = False,
 ) -> UploadResult:
     """브라우저에서 보낸 페이지 글을 Markdown 원본으로 넣는다 (``text/markdown``, 원래 주소는 ``origin_url``).
 
@@ -309,6 +315,7 @@ async def capture_text_source(
         data_class=DataClass.PRIVATE,
         purpose=pp,
         origin_url=origin,
+        auto_extract=auto_extract,
     )
 
 

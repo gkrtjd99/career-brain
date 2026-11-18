@@ -617,7 +617,11 @@ async def test_classify_http_matches_company_in_this_workspace_only(db, blobs, p
         assert (got["3"]["kind"], got["3"]["confidence"]) == ("posting", "high")
         assert (got["4"]["kind"], got["4"]["confidence"]) == ("proof", "high")
         r = await c.get("/core/ingest/capabilities", headers=auth("t-a"))
-        assert r.json() == {"model_ocr_classes": [], "model_ocr_route": None}
+        assert r.json() == {
+            "model_ocr_classes": [],
+            "model_ocr_route": None,
+            "auto_extract": "no_model",  # c0052: AI 연결이 없으면 넣어도 보관만
+        }
 
 
 # ---------------------------------------------------------------- 내보내기·migration

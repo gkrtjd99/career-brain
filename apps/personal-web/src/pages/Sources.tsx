@@ -60,24 +60,20 @@ function sourceMeta(src: SourceListItem, withPurpose = true) {
  * 브레인 색인의 받은 자료함: 손이 가야 하는 자료만 (읽기·추출 실패, 처리 중, 일부만, 확인할 후보, 추출 전).
  * 다 처리된 자료는 기록(경험·사실의 원문 근거)에서 찾아 들어간다. 파일 목록이 중심 화면이 되지 않게 (plan §20).
  */
-export function SourceInbox() {
-  const qc = useQueryClient();
+export function SourceInbox({ only, title = "받은 자료함" }: { only?: string[]; title?: string } = {}) {
   const q = useQuery({
     queryKey: ["sources", "inbox"],
     queryFn: () => api.sources({ attention: true, limit: 50 }),
     refetchInterval: (query) => pending(query.state.data),
   });
-  const extract = useMutation({
-    mutationFn: (runId: string) => api.requestExtraction(runId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sources"] }),
-  });
-  const rows = q.data ?? [];
+  // c0052: 정리(경험 추출)는 서버가 알아서 한다. 여기서는 누를 단추 없이 상태만, 다시 뽑기는 자료 화면에서
+  const rows = (q.data ?? []).filter((s) => !only || (s.attention && only.includes(s.attention)));
   if (!rows.length && !q.isError) return null;
   return (
-    <section className="mb-8" aria-labelledby="inbox-title">
+    <section aria-labelledby="inbox-title">
       <div className="flex items-baseline justify-between gap-3">
         <h2 id="inbox-title" className="text-[15px] font-semibold">
-          받은 자료함 <span className="font-normal text-muted tabular-nums">{rows.length}</span>
+          {title} <span className="font-normal text-muted tabular-nums">{rows.length}</span>
         </h2>
         <Link
           to="/brain/sources"
@@ -86,17 +82,17 @@ export function SourceInbox() {
           모두 보기 <ChevronRight size={14} />
         </Link>
       </div>
-      <ErrorText error={q.error ?? extract.error} className="mt-2" />
+      <ErrorText error={q.error} className="mt-2" />
       <ul className="mt-3 divide-y divide-line border-y border-line">
         {rows.map((src) => {
           if (src.attention === "purpose_unconfirmed") return <ConfirmRow key={src.id} src={src} />;
           const why = src.attention ? ATTENTION_LABEL[src.attention] : null;
           return (
-            <li key={src.id} className="flex items-center gap-2">
+            <li key={src.id}>
               <Link
                 to="/brain/sources/$sourceId"
                 params={{ sourceId: src.id }}
-                className={cn(ROW, "flex min-w-0 flex-1 items-center gap-4")}
+                className={cn(ROW, "flex min-w-0 items-center gap-4")}
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{src.title}</div>
@@ -109,23 +105,10 @@ export function SourceInbox() {
                   </span>
                 ) : null}
               </Link>
-              {src.attention === "not_extracted" && src.parse_run_id ? (
-                <Button
-                  size="sm"
-                  className="shrink-0 max-sm:h-9"
-                  onClick={() => extract.mutate(src.parse_run_id!)}
-                  disabled={extract.isPending}
-                >
-                  경험 추출
-                </Button>
-              ) : null}
             </li>
           );
         })}
       </ul>
-      {rows.some((s) => s.attention === "not_extracted") ? (
-        <p className="mt-2 text-[13px] text-muted">경험 추출은 원문을 모델로 보내며 비용이 듭니다.</p>
-      ) : null}
     </section>
   );
 }
@@ -353,7 +336,7 @@ export function SourcePage() {
                   )}
                   {src.pending_claims ? (
                     <Row name="확인할 사실">
-                      <Link to="/brain" search={{ review: true }} className={cn(TEXT_LINK, "font-semibold tabular-nums")}>
+                      <Link to="/brain/experiences" search={{ review: true }} className={cn(TEXT_LINK, "font-semibold tabular-nums")}>
                         {src.pending_claims}개 확인하기
                       </Link>
                       {src.pending_claims > 1 ? (

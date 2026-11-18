@@ -127,8 +127,8 @@ export function TodayPage() {
         p.last_fetch_status === "needs_confirmation"),
   );
   const fetching = list.filter((p) => p.last_fetch_status === "pending");
-  const todoRows: { to: string; label: string; count: number }[] = [
-    { to: "/brain", label: "추출한 경험 확인", count: needsReview },
+  const todoRows: { to: string; label: string; count: number; search?: Record<string, string> }[] = [
+    { to: "/brain", label: "추출한 경험 확인", count: needsReview, search: { check: "true" } },
     { to: "/postings", label: "공고 초안 저장", count: postingDrafts.length },
     { to: "/postings", label: "바뀐 공고 확인", count: changed.length },
     { to: "/postings", label: "공고 직접 확인", count: failed.length },
@@ -161,7 +161,7 @@ export function TodayPage() {
       {todoRows.length || fetching.length ? (
         <Rows>
           {todoRows.map((r) => (
-            <PlainRow key={r.label} to={r.to} title={r.label} right={<Count n={r.count} />} />
+            <PlainRow key={r.label} to={r.to} search={r.search} title={r.label} right={<Count n={r.count} />} />
           ))}
           {fetching.length ? <PlainRow to="/postings" title="공고 가져오는 중" right={<Spinner />} /> : null}
         </Rows>

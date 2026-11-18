@@ -1,4 +1,4 @@
-"""공간 공용 설정 (c0021): 표시 시간대와 기술명 별칭.
+"""공간 공용 설정 (c0021): 표시 시간대와 기술명 별칭. c0052: 넣은 자료를 바로 AI로 정리할지(``auto_extract``).
 
 - 표시 시간대: 모든 화면의 날짜 표시, 학습 복습 마감(그 시간대의 하루 끝), 시험 D-day.
   저장하지 않았으면 기본 `Asia/Seoul`. 예전 학습 설정(`/core/study/settings`)도 이 값을 읽고 쓴다.
@@ -73,6 +73,12 @@ async def workspace_zone(s: AsyncSession, override: str | None = None) -> ZoneIn
     return zone(await workspace_timezone_name(s) or DEFAULT_TIMEZONE)
 
 
+async def workspace_auto_extract(s: AsyncSession) -> bool:
+    """읽기가 끝난 내 경험 자료를 바로 정리하나 (c0052). 행이 없으면 기본값 켜짐."""
+    value = await s.scalar(select(WorkspaceSettings.auto_extract))
+    return True if value is None else bool(value)
+
+
 async def workspace_aliases(s: AsyncSession) -> TechAliases:
     """기본 표 + 공간 사용자 별칭."""
     return merge_aliases(_entries(await _row(s)))
@@ -89,6 +95,7 @@ class WorkspaceSettingsView:
     day_ends_at: datetime  # 오늘 끝 (다음 날 0시, UTC)
     tech_aliases: list[dict[str, Any]]  # 사용자 항목 [{term, aliases}]
     builtin_aliases: list[dict[str, Any]]  # 기본 표 (읽기 전용)
+    auto_extract: bool = True  # c0052: 넣은 내 경험 자료를 바로 AI로 정리
 
 
 def _builtin() -> list[dict[str, Any]]:
@@ -105,6 +112,7 @@ def _view(row: WorkspaceSettings | None, now: datetime) -> WorkspaceSettingsView
         day_ends_at=day_end(now, tz),
         tech_aliases=[e.as_dict() for e in _entries(row)],
         builtin_aliases=_builtin(),
+        auto_extract=True if row is None else bool(row.auto_extract),
     )
 
 
@@ -122,10 +130,13 @@ async def update_settings(
     *,
     timezone: str | None = _UNSET,
     tech_aliases: list[dict[str, Any]] | None = _UNSET,
+    auto_extract: bool = _UNSET,
     now: datetime | None = None,
 ) -> WorkspaceSettingsView:
     """준 값만 바꾼다. `timezone=None`은 기본값으로 되돌리기, `tech_aliases=[]`는 사용자 별칭 비우기."""
     changes: dict[str, Any] = {}
+    if auto_extract is not _UNSET:
+        changes["auto_extract"] = bool(auto_extract)
     if timezone is not _UNSET:
         name = " ".join((timezone or "").split()) or None
         if name is not None:
@@ -148,6 +159,7 @@ async def update_settings(
                 workspace_id=actor.workspace_id,
                 timezone=None,
                 tech_aliases=[],
+                auto_extract=True,
                 updated_by=actor.subject_id,
             )
             s.add(row)
@@ -165,6 +177,7 @@ __all__ = [
     "get_settings",
     "update_settings",
     "workspace_aliases",
+    "workspace_auto_extract",
     "workspace_timezone_name",
     "workspace_zone",
 ]

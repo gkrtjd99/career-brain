@@ -2,7 +2,7 @@ import { PHOTO_SPECS, type Profile, type ProfileIn, type ProfilePhoto, type Prof
 import { Button, cn, ConfirmDialog, DateField, IconButton, Input, Label, Section, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, Plus, X } from "lucide-react";
+import { ChevronRight, ImageIcon, Plus, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { errorText, Loaded, PageHeader } from "../components/common";
 import { ProfileDetailsSection } from "../components/profile/ProfileDetailsSection";
@@ -11,7 +11,8 @@ import { formatKB } from "../lib/photo";
 import { PHOTO_SPEC_LABEL, profileErrorText } from "../lib/profile";
 
 /**
- * 브레인 › 나 › 프로필 (O21). 인적 사항·연락처·링크와 규격별 증명사진.
+ * 브레인 › 나 › 프로필 (O21). 이력서의 인적사항처럼: 사진 옆에 이름·생년월일·한 줄 소개·연락처, 그 아래 링크,
+ * 취업 우대·병역·희망 근무 조건, 규격별 증명사진.
  * 증명사진은 사진 변환(`/tools/photo`)의 "프로필에 저장"으로만 들어온다 (변환본만, 메타데이터 없음).
  */
 
@@ -31,7 +32,9 @@ export function ProfilePage() {
       <div className="space-y-12">
         <Loaded query={profile}>{(p) => <ProfileForm initial={p} />}</Loaded>
         <ProfileDetailsSection />
-        <PhotosSection />
+        <div id="photos" className="scroll-mt-6">
+          <PhotosSection />
+        </div>
       </div>
     </div>
   );
@@ -133,29 +136,31 @@ function ProfileForm({ initial }: { initial: Profile }) {
         }}
       />
 
-      <Section title="기본 정보">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {field("name", "이름", { maxLength: 100, autoComplete: "name" })}
-          {field("name_en", "영문 이름", { maxLength: 100, placeholder: "예: Gildong Hong" })}
-          <div>
-            <Label htmlFor="profile-birth">생년월일 (선택)</Label>
-            <DateField
-              id="profile-birth"
-              value={v.birth_date}
-              min="1900-01-01"
-              max={new Date().toISOString().slice(0, 10)}
-              onChange={(value) => set("birth_date", value)}
-              calendar={false}
-            />
+      <Section title="인적사항">
+        <div className="flex items-start gap-4 sm:gap-6">
+          <PhotoSlot />
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {field("name", "이름", { maxLength: 100, autoComplete: "name" })}
+              {field("name_en", "영문 이름", { maxLength: 100, placeholder: "예: Yesi Kim" })}
+            </div>
+            <div className="sm:max-w-[calc(50%-0.375rem)]">
+              <Label htmlFor="profile-birth">생년월일 (선택)</Label>
+              <DateField
+                id="profile-birth"
+                value={v.birth_date}
+                min="1900-01-01"
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(value) => set("birth_date", value)}
+                calendar={false}
+              />
+            </div>
           </div>
         </div>
         {field("headline", "한 줄 소개", {
           maxLength: 200,
           placeholder: "예: 데이터로 문제를 푸는 백엔드 개발자",
         })}
-      </Section>
-
-      <Section title="연락처">
         <div className="grid gap-3 sm:grid-cols-2">
           {field("email", "이메일", { type: "email", maxLength: 254, autoComplete: "email" })}
           {field("phone", "전화", { type: "tel", maxLength: 40, autoComplete: "tel" })}
@@ -242,6 +247,29 @@ function ProfileForm({ initial }: { initial: Profile }) {
 }
 
 // ---------------------------------------------------------------- 증명사진
+
+/** 인적사항 옆 사진 자리: 기본 증명사진, 없으면 사진 변환으로 가는 빈 칸 */
+function PhotoSlot() {
+  const profile = useQuery({ queryKey: ["profile"], queryFn: api.profile });
+  const photos = useQuery({ queryKey: ["profile", "photos"], queryFn: api.profilePhotos });
+  const photo =
+    photos.data?.find((x) => x.id === profile.data?.default_photo_id) ?? photos.data?.[0] ?? null;
+  if (photo)
+    return (
+      <a href="#photos" className="w-[4.5rem] shrink-0 sm:w-24" aria-label="증명사진 보기">
+        <PhotoThumb photo={photo} small />
+      </a>
+    );
+  return (
+    <Link
+      to="/tools/photo"
+      className="flex h-24 w-[4.5rem] shrink-0 flex-col items-center justify-center gap-1 rounded-sm border border-dashed border-line text-center text-xs text-muted transition-colors duration-150 hover:border-line-strong hover:text-fg sm:h-32 sm:w-24"
+    >
+      <ImageIcon size={18} aria-hidden />
+      사진 만들기
+    </Link>
+  );
+}
 
 function PhotosSection() {
   const photos = useQuery({ queryKey: ["profile", "photos"], queryFn: api.profilePhotos });
@@ -373,7 +401,7 @@ function PhotoItem({
 }
 
 /** 사진 파일은 토큰이 있어야 받으므로 바이트를 받아 object URL로 보여 준다. */
-function PhotoThumb({ photo }: { photo: ProfilePhoto }) {
+function PhotoThumb({ photo, small = false }: { photo: ProfilePhoto; small?: boolean }) {
   const file = useQuery({
     queryKey: ["profile-photo-file", photo.id],
     queryFn: () => api.profilePhotoFile(photo.id),
@@ -388,7 +416,10 @@ function PhotoThumb({ photo }: { photo: ProfilePhoto }) {
   }, [file.data]);
   return (
     <div
-      className="h-32 overflow-hidden rounded-sm bg-subtle shadow-[0_0_0_1px_var(--app-line)]"
+      className={cn(
+        "overflow-hidden rounded-sm bg-subtle shadow-[0_0_0_1px_var(--app-line)]",
+        small ? "h-24 sm:h-32" : "h-32",
+      )}
       style={{ aspectRatio: `${photo.width_px} / ${photo.height_px}`, maxWidth: "100%" }}
     >
       {url ? (

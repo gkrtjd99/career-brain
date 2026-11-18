@@ -57,6 +57,7 @@ const todayRoute = createRoute({
 });
 
 /** 브레인 색인의 거름·보기 (링크로 같은 보기를 다시 연다). review = 확인 필요만 */
+/** 브레인 › 경험 모두 보기 (타임라인·표·필터). 예전 /brain?… 주소는 이리로 보낸다 */
 export interface BrainSearch {
   q?: string;
   view?: "table";
@@ -70,27 +71,51 @@ export interface BrainSearch {
 }
 const BRAIN_KINDS: ExperienceKind[] = ["work", "project", "education", "activity", "other"];
 
+function brainSearch(s: Record<string, unknown>): BrainSearch {
+  const out: BrainSearch = {};
+  if (typeof s.q === "string" && s.q.trim()) out.q = s.q.slice(0, 200);
+  if (s.view === "table") out.view = "table";
+  if (BRAIN_KINDS.includes(s.kind as ExperienceKind)) out.kind = s.kind as ExperienceKind;
+  const tags = (Array.isArray(s.tag) ? s.tag : typeof s.tag === "string" ? [s.tag] : []).filter(
+    (t): t is string => typeof t === "string" && t.trim() !== "",
+  );
+  if (tags.length) out.tag = tags.slice(0, 30);
+  const year = Number(s.year);
+  if (Number.isInteger(year) && year >= 1900 && year <= 2200) out.year = year;
+  if (s.review === true || s.review === "true" || s.review === "1") out.review = true;
+  if (s.dup === true || s.dup === "true" || s.dup === "1") out.dup = true;
+  if (s.sort === "updated" || s.sort === "title") out.sort = s.sort;
+  return out;
+}
+
+/** 브레인 첫 화면 (이력서 꼴). check = 확인할 것 창을 연다 */
+export interface BrainHomeSearch {
+  check?: boolean;
+}
+
 const brainRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/brain",
-  beforeLoad: requireToken,
-  validateSearch: (s: Record<string, unknown>): BrainSearch => {
-    const out: BrainSearch = {};
-    if (typeof s.q === "string" && s.q.trim()) out.q = s.q.slice(0, 200);
-    if (s.view === "table") out.view = "table";
-    if (BRAIN_KINDS.includes(s.kind as ExperienceKind)) out.kind = s.kind as ExperienceKind;
-    const tags = (Array.isArray(s.tag) ? s.tag : typeof s.tag === "string" ? [s.tag] : []).filter(
-      (t): t is string => typeof t === "string" && t.trim() !== "",
-    );
-    if (tags.length) out.tag = tags.slice(0, 30);
-    const year = Number(s.year);
-    if (Number.isInteger(year) && year >= 1900 && year <= 2200) out.year = year;
-    if (s.review === true || s.review === "true" || s.review === "1") out.review = true;
-    if (s.dup === true || s.dup === "true" || s.dup === "1") out.dup = true;
-    if (s.sort === "updated" || s.sort === "title") out.sort = s.sort;
-    return out;
+  beforeLoad: (ctx) => {
+    requireToken(ctx);
+    // 예전 주소(/brain?review=1 …)는 경험 목록으로
+    const old = brainSearch(ctx.search as Record<string, unknown>);
+    if (Object.keys(old).length) throw redirect({ to: "/brain/experiences", search: old, replace: true });
   },
+  validateSearch: (s: Record<string, unknown>): BrainHomeSearch & BrainSearch => ({
+    ...brainSearch(s),
+    ...(s.check === true || s.check === "true" || s.check === "1" ? { check: true } : {}),
+  }),
   component: BrainPage,
+});
+
+/** 경험 모두 보기. 정적 경로라 /brain/$experienceId보다 먼저 맞는다. */
+export const experiencesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/brain/experiences",
+  beforeLoad: requireToken,
+  validateSearch: brainSearch,
+  component: lazyRouteComponent(() => import("./pages/BrainExperiences"), "BrainExperiencesPage"),
 });
 
 const PURPOSES: SourcePurpose[] = ["experience", "proof", "reference"];
@@ -373,6 +398,9 @@ export const applicationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications/$applicationId",
   beforeLoad: requireToken,
+  // draft = 막 만든 지원: 초안 쓰기 창을 바로 연다 (§22)
+  validateSearch: (s: Record<string, unknown>): { draft?: boolean } =>
+    s.draft === true || s.draft === "true" || s.draft === "1" ? { draft: true } : {},
   component: lazyRouteComponent(() => import("./pages/Workbench"), "ApplicationWorkbenchPage"),
 });
 
@@ -481,6 +509,7 @@ const captureRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   todayRoute,
   brainRoute,
+  experiencesRoute,
   sourcesRoute,
   sourceRoute,
   credentialsRoute,

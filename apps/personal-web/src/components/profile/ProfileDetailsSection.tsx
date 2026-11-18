@@ -23,11 +23,9 @@ export function ProfileDetailsSection() {
   return (
     <section aria-labelledby="pd-title">
       <h2 id="pd-title" className="text-[15px] font-semibold">
-        더 적어 둘 것 <span className="font-normal text-muted">선택</span>
+        취업 우대·희망 근무 조건 <span className="font-normal text-muted">선택</span>
       </h2>
-      <p className="mt-0.5 text-[13px] text-muted">
-        모델과 AI 에이전트에 보내지 않습니다.
-      </p>
+      <p className="mt-0.5 text-[13px] text-muted">AI와 연결한 에이전트에 보내지 않습니다.</p>
       <Loaded query={q}>{(d) => <DetailsForm initial={d} />}</Loaded>
     </section>
   );
@@ -246,7 +244,7 @@ function DetailsForm({ initial }: { initial: ProfileDetails }) {
           </div>
         </Group>
 
-        <Group title="희망 조건" summary={wishSummary}>
+        <Group title="희망 근무 조건" summary={wishSummary}>
           <div>
             <Label htmlFor="pd-roles">희망 직무</Label>
             <Input

@@ -172,4 +172,9 @@ from career_core.workflows.interviews import INTERVIEW_QUESTION_BATCH
 
 WORKFLOWS[INTERVIEW_QUESTION_BATCH.name] = INTERVIEW_QUESTION_BATCH
 
+# c0051 지원서 초안 (workflows/drafts.py, plan §22)
+from career_core.workflows.drafts import DRAFT_APPLICATION
+
+WORKFLOWS[DRAFT_APPLICATION.name] = DRAFT_APPLICATION
+
 __all__ = ["SAVE_JOB_URLS", "SUBMIT_APPLICATION", "WORKFLOWS"]

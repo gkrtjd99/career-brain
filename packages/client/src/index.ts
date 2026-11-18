@@ -12,6 +12,7 @@ import { brainMeEndpoints } from "./brainMe";
 import { portfolioEndpoints } from "./portfolio";
 import { resumeEndpoints } from "./resumes";
 import { interviewPrepEndpoints } from "./interviewPrep";
+import { draftEndpoints } from "./draft";
 import type * as T from "./types";
 
 export * from "./companies";
@@ -28,6 +29,7 @@ export * from "./brainMe";
 export * from "./resumes";
 export * from "./portfolio";
 export * from "./interviewPrep";
+export * from "./draft";
 export * from "./types";
 
 export interface ClientOptions {
@@ -219,6 +221,8 @@ export function createClient({
       return { items, total } satisfies T.ExperiencePage;
     },
     brainOverview: () => get<T.BrainOverview>("/core/brain/overview"),
+    /** c0052: 넣은 자료의 정리 상태 한 줄 (진행·확인할 것·지난 하루의 결과) */
+    organizeStatus: () => get<T.OrganizeStatus>("/core/brain/organize"),
     experience: (experienceId: string) =>
       get<T.Experience>(`/core/experiences/${id(experienceId)}`),
     createExperience: (body: T.ExperienceIn) => post<T.StatusOut>("/core/experiences", body),
@@ -661,6 +665,7 @@ export function createClient({
     ...resumeEndpoints({ request, get, post, patch }),
     ...portfolioEndpoints({ request, get, post, patch }),
     ...interviewPrepEndpoints({ request, get, post }),
+    ...draftEndpoints({ get, post }),
   };
 }
 

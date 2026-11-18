@@ -506,6 +506,7 @@ export const SUGGESTION_STATUS: Record<string, { label: string; tone: BadgeTone 
 export const REVISION_ORIGIN: Record<string, string> = {
   user: "직접 저장",
   ai_suggestion: "AI 수정안 적용",
+  ai_draft: "AI 초안",
 };
 
 export const STAGE_KIND: Record<StageKind, string> = {
@@ -624,13 +625,14 @@ export const PURPOSE_LABEL: Record<SourcePurpose, string> = {
 export const ATTENTION_LABEL: Record<SourceAttention, { label: string; tone: BadgeTone }> = {
   purpose_unconfirmed: { label: "확인 필요", tone: "warn" },
   parse_failed: { label: "읽기 실패", tone: "danger" },
-  extraction_failed: { label: "추출 실패", tone: "danger" },
+  extraction_failed: { label: "정리 실패", tone: "danger" },
   processing: { label: "읽는 중", tone: "neutral" },
-  extracting: { label: "추출 중", tone: "neutral" },
+  extracting: { label: "정리 중", tone: "neutral" },
   pending_claims: { label: "확인할 사실", tone: "warn" },
   parse_partial: { label: "일부만 읽음", tone: "warn" },
-  extraction_partial: { label: "일부만 추출", tone: "warn" },
-  not_extracted: { label: "추출 전", tone: "warn" },
+  extraction_partial: { label: "일부만 정리", tone: "warn" },
+  // c0052: 서버가 알아서 정리한다. 정리 전은 AI 연결이 없거나 자동 정리를 끈 자료 (손이 갈 일이 아니다)
+  not_extracted: { label: "정리 전", tone: "neutral" },
 };
 
 /** 자료를 어디까지 보내는지 (data_class). 화면에는 등급 이름 대신 이 문장으로 */
