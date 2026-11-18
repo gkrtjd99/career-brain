@@ -47,6 +47,22 @@ export interface ProfilePhotoUpload extends ProfilePhoto {
   removed_metadata: string[];
 }
 
+export type ProfileSuggestionField = "name" | "email" | "phone" | "link";
+export type ProfileLinkLabel = "GitHub" | "LinkedIn" | "블로그" | "포트폴리오" | "링크";
+
+/** 내 경험 자료(이력서 등)에서 규칙으로 찾은 프로필 칸 후보. 증빙·참고 원본은 보지 않는다 */
+export interface ProfileSuggestion {
+  field: ProfileSuggestionField;
+  /** 전화는 010-1234-5678 꼴, 링크는 https://로 시작 */
+  value: string;
+  /** 링크만 */
+  label: ProfileLinkLabel | null;
+  source_id: Uuid;
+  source_title: string;
+  /** 찾은 자리 둘레의 블록 글 (160자 이하) */
+  quote: string;
+}
+
 interface ProfileDeps {
   request: (method: string, path: string, opts?: { json?: unknown; form?: FormData }) => Promise<Response>;
   get: <R>(path: string) => Promise<R>;
@@ -60,6 +76,8 @@ export function profileEndpoints({ request, get, patch }: ProfileDeps) {
     profile: () => get<Profile>("/core/profile"),
     saveProfile: async (body: ProfileIn) =>
       (await (await request("PUT", "/core/profile", { json: body })).json()) as Profile,
+    /** 채울 값 제안 (저장하지 않는다). 프로필에 이미 있는 값은 없다. 이름 1·이메일 3·전화 3·링크 8개까지 */
+    profileSuggestions: () => get<{ suggestions: ProfileSuggestion[] }>("/core/profile/suggestions"),
     profilePhotos: () => get<ProfilePhoto[]>("/core/profile/photos"),
     /** 변환한 사진 한 장 (JPEG·PNG, 2MB까지). 413 too_large · 415 unsupported_type · 422 spec_mismatch */
     uploadProfilePhoto: async (file: Blob, spec: PhotoSpec, filename = "photo") => {

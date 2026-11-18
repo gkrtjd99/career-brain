@@ -237,6 +237,10 @@ export function createClient({
       await request("DELETE", `/core/experiences/${id(experienceId)}/duplicate-hint`);
     },
     extractionSuggestions: () => get<T.ExtractionSuggestions>("/core/extraction-suggestions"),
+    /** 학력·기술 제안 하나를 지운다 (공간의 모든 추출 실행에서). 없는 값이어도 성공 */
+    dismissExtractionSuggestion: async (body: T.DismissExtractionSuggestionIn) => {
+      await request("POST", "/core/extraction-suggestions/dismiss", { json: body });
+    },
     addClaim: (experienceId: string, body: T.ClaimIn) =>
       post<T.StatusOut>(`/core/experiences/${id(experienceId)}/claims`, body),
     /** 주장 여러 개의 짧은 보기 (문서 근거 표시용). 없는 ID는 빠진다. */

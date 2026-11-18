@@ -974,3 +974,53 @@ async def list_suggestions(db: Database, actor: ActorContext) -> dict[str, Any]:
                 tags.add(term.casefold())
                 skills.append(term)
     return {"education": education, "skills": skills}
+
+
+SUGGESTION_KINDS = ("skill", "education")
+
+
+async def dismiss_suggestion(db: Database, actor: ActorContext, kind: str, value: str) -> int:
+    """제안 하나 지우기 (사람이 "넣지 않음"을 골랐다). 공간의 모든 추출 실행의 ``suggestions``에서 뺀다.
+
+    기술(``skill``)은 대소문자를 무시하고 같은 낱말, 학력(``education``)은 ``norm_org(school)``이 같은 줄.
+    없는 값이어도 오류가 아니다 (같은 요청을 다시 보내도 같다). 돌려주는 값은 고친 실행 수.
+    다른 제안(같은 경험일 수 있음·걸러 낸 수 등)은 건드리지 않는다."""
+    if kind not in SUGGESTION_KINDS:
+        raise ValueError(kind)
+    list_key = "skills" if kind == "skill" else "education"
+    if kind == "skill":
+        wanted = " ".join((value or "").split()).casefold()
+
+        def same(item: Any) -> bool:
+            return isinstance(item, str) and item.casefold() == wanted
+
+    else:
+        wanted = norm_org(value)
+
+        def same(item: Any) -> bool:
+            return isinstance(item, dict) and norm_org(item.get("school")) == wanted
+
+    if not wanted:
+        return 0
+    changed = 0
+    async with db.workspace_session(actor.workspace_id) as s:
+        runs = (
+            await s.scalars(
+                select(ExtractionRun)
+                .where(ExtractionRun.suggestions.has_key(list_key))
+                .with_for_update()
+            )
+        ).all()
+        for run in runs:
+            sugg = dict(run.suggestions or {})
+            items = list(sugg.get(list_key) or [])
+            kept = [x for x in items if not same(x)]
+            if len(kept) == len(items):
+                continue
+            if kept:
+                sugg[list_key] = kept
+            else:
+                sugg.pop(list_key, None)
+            run.suggestions = sugg  # 새 dict를 넣어야 JSONB 변경이 저장된다
+            changed += 1
+    return changed

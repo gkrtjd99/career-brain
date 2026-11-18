@@ -8,6 +8,9 @@
   있으면 가장 최근 사진을 기본으로 보여 준다.
 - 자료 등급 restricted: 이 모듈의 값은 모델로 보내지 않는다. MCP에는 ``profile_summary``(이름·한 줄
   소개·링크)만 준다.
+- 채울 값 제안(``profile_suggestions``): 내 경험 자료(``purpose = experience``, 용도 확인 대기 제외)의 가장 최근
+  읽기 결과에서 규칙으로 이름·이메일·휴대전화·링크를 찾는다 (``domain.profile_suggest``, 모델 없음).
+  증빙은 보지 않고, 참고 원본은 남의 글이라 보지 않는다. 저장하지 않는다 — 사람이 골라 프로필에 저장한다.
 """
 
 from __future__ import annotations
@@ -22,8 +25,16 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from career_core.db.base import utcnow
-from career_core.db.models import Profile, ProfilePhoto
+from career_core.db.models import (
+    DocumentBlock,
+    ParseRun,
+    Profile,
+    ProfilePhoto,
+    Source,
+    SourceVersion,
+)
 from career_core.db.session import Database
+from career_core.domain import profile_suggest as ps
 from career_core.domain.profiles import (
     DETAIL_FIELDS,
     MAX_ADDRESS,
@@ -43,6 +54,7 @@ from career_core.domain.profiles import (
     settle_details,
     strip_metadata,
 )
+from career_core.domain.sources import ParseStatus, SourcePurpose
 from career_core.ports import ActorContext, BlobStore
 from career_core.usecases.brain import NotFound
 
@@ -231,6 +243,127 @@ async def profile_summary(db: Database, actor: ActorContext) -> dict:
     """MCP용: 이름·한 줄 소개·링크만. 생년월일·연락처·주소·사진은 넣지 않는다."""
     view = await get_profile(db, actor)
     return {f: getattr(view, f) for f in PROFILE_SUMMARY_FIELDS}
+
+
+# ---------------------------------------------------------------- 채울 값 제안
+
+SUGGEST_SOURCES = 20  # 가장 최근 내 경험 자료 몇 개를 보나
+SUGGEST_BLOCKS = 40  # 원본마다 앞 블록 몇 개를 보나
+NAME_GUESS_BLOCKS = 3  # 이력서로 보이는 원본에서 이름표 없는 이름을 찾는 앞 블록 수
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileSuggestion:
+    field: str  # name | email | phone | link
+    value: str
+    label: str | None  # 링크만: GitHub | LinkedIn | 블로그 | 포트폴리오 | 링크
+    source_id: UUID
+    source_title: str
+    quote: str  # 찾은 자리 둘레의 블록 글 (160자 이하)
+
+
+def _profile_keys(profile: Profile | None) -> dict[str, set[str]]:
+    if profile is None:
+        return {f: set() for f in ps.FIELDS}
+    return {
+        ps.FIELD_NAME: {
+            ps.value_key(ps.FIELD_NAME, v) for v in (profile.name, profile.name_en) if v
+        },
+        ps.FIELD_EMAIL: {ps.value_key(ps.FIELD_EMAIL, profile.email)} if profile.email else set(),
+        ps.FIELD_PHONE: {ps.value_key(ps.FIELD_PHONE, profile.phone)} if profile.phone else set(),
+        ps.FIELD_LINK: {
+            ps.value_key(ps.FIELD_LINK, lk.get("url"))
+            for lk in profile.links or []
+            if lk.get("url")
+        },
+    }
+
+
+async def _resume_blocks(s) -> list[tuple[UUID, str, str, list[str]]]:
+    """(원본 id, 제목, 파일 이름, 앞 블록 글): 가장 최근 내 경험 자료부터, 원본마다 가장 최근 읽기 결과."""
+    sources = (
+        await s.execute(
+            select(Source.id, Source.title)
+            .where(
+                Source.purpose == SourcePurpose.EXPERIENCE.value,
+                Source.purpose_pending.is_(False),
+            )
+            .order_by(Source.created_at.desc(), Source.id.desc())
+            .limit(SUGGEST_SOURCES)
+        )
+    ).all()
+    out = []
+    for source_id, title in sources:
+        run = (
+            await s.execute(
+                select(ParseRun.id, SourceVersion.original_filename)
+                .join(SourceVersion, SourceVersion.id == ParseRun.source_version_id)
+                .where(
+                    SourceVersion.source_id == source_id,
+                    ParseRun.status.in_([ParseStatus.COMPLETE, ParseStatus.PARTIAL]),
+                )
+                .order_by(
+                    SourceVersion.created_at.desc(),
+                    ParseRun.pipeline_version.desc(),
+                    ParseRun.created_at.desc(),
+                )
+                .limit(1)
+            )
+        ).first()
+        if run is None:
+            continue
+        texts = (
+            await s.scalars(
+                select(DocumentBlock.text)
+                .where(DocumentBlock.parse_run_id == run.id)
+                .order_by(DocumentBlock.ordinal)
+                .limit(SUGGEST_BLOCKS)
+            )
+        ).all()
+        out.append((source_id, title, run.original_filename, list(texts)))
+    return out
+
+
+async def profile_suggestions(db: Database, actor: ActorContext) -> list[ProfileSuggestion]:
+    """내 경험 자료에서 찾은 프로필 칸 후보. 프로필에 이미 있는 값은 뺀다 (맞춘 꼴로 비교, 링크는 주소).
+
+    같은 칸·같은 값은 한 번 (가장 최근 원본의 것). 이름 1개, 이메일 3개, 휴대전화 3개, 링크 8개까지.
+    이름은 이름표가 붙은 줄(한글 이름 먼저)을, 없으면 이력서로 보이는 원본 앞줄의 한글 2~4글자를 쓴다."""
+    async with db.workspace_session(actor.workspace_id) as s:
+        have = _profile_keys(await s.scalar(select(Profile)))
+        docs = await _resume_blocks(s)
+    found: dict[str, list[tuple[ps.Found, UUID, str]]] = {f: [] for f in ps.FIELDS}
+    guesses: list[tuple[ps.Found, UUID, str]] = []
+    for source_id, title, filename, texts in docs:
+        for body in texts:
+            for f in ps.scan_block(body):
+                found[f.field].append((f, source_id, title))
+        if ps.looks_like_resume(title, filename):
+            for body in texts[:NAME_GUESS_BLOCKS]:
+                if g := ps.guess_name(body):
+                    guesses.append((g, source_id, title))
+                    break
+    # 이름: 이름표 붙은 한글 이름 → 이름표 붙은 다른 이름(영문) → 이력서 앞줄 짐작
+    names = found[ps.FIELD_NAME]
+    found[ps.FIELD_NAME] = [
+        *(x for x in names if ps.is_hangul_name(x[0].value)),
+        *(x for x in names if not ps.is_hangul_name(x[0].value)),
+        *guesses,
+    ]
+    out: list[ProfileSuggestion] = []
+    for field_name in ps.FIELDS:
+        seen = set(have[field_name])
+        picked = 0
+        for f, source_id, title in found[field_name]:
+            key = ps.value_key(field_name, f.value)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(ProfileSuggestion(field_name, f.value, f.label, source_id, title, f.quote))
+            picked += 1
+            if picked >= ps.LIMITS[field_name]:
+                break
+    return out
 
 
 # ---------------------------------------------------------------- 사진
