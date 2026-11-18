@@ -2,6 +2,7 @@ import type { SourcePurpose } from "@career-brain/client";
 import { Button, cn, Sheet, Textarea } from "@career-brain/ui";
 import { FileUp } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { collect, collectDropped, MAX_FOLDER_FILES, type Collected } from "../lib/folderFiles";
 import { ACCEPT, addFiles, addPaste, clearFinished, useIngestQueue } from "../lib/ingest";
 import { IngestQueue } from "./ingest/IngestQueue";
 import { OrganizeResult } from "./ingest/OrganizeResult";
@@ -35,6 +36,8 @@ export function UploadSheet({
   const [pasted, setPasted] = useState("");
   const [over, setOver] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
+  const folderPicker = useRef<HTMLInputElement>(null);
+  const [note, setNote] = useState<string | null>(null);
   const taken = useRef<File[] | null>(null);
 
   useEffect(() => {
@@ -46,6 +49,14 @@ export function UploadSheet({
 
   const take = (files: FileList | File[] | null | undefined) => {
     if (files && files.length) addFiles(Array.from(files), fixed);
+  };
+  // 폴더째 넣은 것: 읽을 수 있는 것만 넣고, 뺀 것은 수만 알린다
+  const takeCollected = ({ files, skipped, overflow }: Collected) => {
+    take(files);
+    const parts = [];
+    if (skipped) parts.push(`읽지 못하는 형식 ${skipped}개`);
+    if (overflow) parts.push(`한 번에 ${MAX_FOLDER_FILES}개를 넘은 ${overflow}개`);
+    setNote(parts.length ? `${parts.join(", ")}는 넣지 않았습니다.` : null);
   };
   const onPaste = (e: ClipboardEvent) => {
     // 클립보드의 그림(화면 캡처 등)은 파일로 넣는다. 글은 입력 칸이 받는다
@@ -82,7 +93,7 @@ export function UploadSheet({
           if (!hasFiles(e)) return;
           e.preventDefault();
           setOver(false);
-          take(e.dataTransfer.files);
+          void collectDropped(e.dataTransfer).then(takeCollected);
         }}
       >
         <div
@@ -101,8 +112,33 @@ export function UploadSheet({
             >
               파일 고르기
             </button>
+            {" · "}
+            <button
+              type="button"
+              onClick={() => folderPicker.current?.click()}
+              className="inline-flex min-h-9 items-center font-medium underline underline-offset-2"
+            >
+              폴더째 넣기
+            </button>
           </p>
-          <p className="text-[13px] text-muted">PDF·DOCX·PPTX·엑셀·한글·사진·텍스트, 여러 개를 한꺼번에 넣을 수 있습니다.</p>
+          <p className="text-[13px] text-muted">
+            PDF·DOCX·PPTX·엑셀·한글·사진·텍스트. 모아 둔 폴더를 통째로 놓아도 됩니다 (안쪽 폴더까지, 같은 파일은 한
+            번만).
+          </p>
+          {note ? <p className="text-[13px] text-muted" role="status">{note}</p> : null}
+          <input
+            ref={folderPicker}
+            type="file"
+            multiple
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden
+            {...{ webkitdirectory: "" }}
+            onChange={(e) => {
+              takeCollected(collect(Array.from(e.target.files ?? [])));
+              e.target.value = "";
+            }}
+          />
           <input
             ref={picker}
             type="file"

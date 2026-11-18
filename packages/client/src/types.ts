@@ -1748,3 +1748,37 @@ export interface OrganizeStatus {
   };
   auto_extract: AutoExtractState;
 }
+
+// 지원 문서 ↔ 브레인 (2026-11-19)
+export interface ToBrainOut {
+  source_id: Uuid;
+  deduplicated: boolean;
+  title: string;
+  paragraphs: number;
+  withheld: number;
+}
+
+export interface BrainClaimMatch {
+  claim_id: Uuid;
+  statement: string;
+  kind: string;
+  experience_id: Uuid;
+  experience_title: string;
+}
+
+export interface BrainBlockMatch {
+  block_id: string;
+  confirmed: BrainClaimMatch[];
+  pending: number;
+}
+
+export interface BrainMatches {
+  document_id: Uuid;
+  in_brain: boolean;
+  source_id: Uuid | null;
+  /** 확인 전 후보가 가장 많이 나온 원본 (다른 파일로 넣었어도) */
+  review_source_id: Uuid | null;
+  blocks: BrainBlockMatch[];
+  confirmed_total: number;
+  pending_total: number;
+}

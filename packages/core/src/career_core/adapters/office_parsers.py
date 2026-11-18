@@ -1,4 +1,4 @@
-"""PPTX·XLSX·HWPX 로컬 추출기와 옛 한글(.hwp) 안내 (2026-11-17).
+"""PPTX·XLSX·HWPX 로컬 추출기 (2026-11-17).
 
 DOCX 파서(``adapters.parsers.DocxTextParser``)와 같은 길: 표준 라이브러리 ``zipfile`` + ``xml.etree``,
 ``domain.docx_zip``의 항목 수·풀린 크기 상한과 DTD·개체 선언 거부. 외부 전송·외부 의존성이 없다.
@@ -13,8 +13,7 @@ DOCX 파서(``adapters.parsers.DocxTextParser``)와 같은 길: 표준 라이브
   읽고, 잘랐으면 시트 이름 블록에 적는다. 쪽은 없다.
 - HWPX(OWPML): ``Contents/section*.xml`` 순서대로 문단·표(행 하나 = 블록 하나)·글상자, 각주·미주는 뒤에.
   머리말·꼬리말·숨은 설명(``hiddenComment``)은 읽지 않는다. 암호를 건 문서는 ``encrypted``. 쪽은 없다.
-- HWP(한글 5.x OLE·한글 3.0): 허용 라이선스로 안전하게 읽을 길이 아직 없어 ``hwp_unsupported``로 끝낸다
-  (원본은 보관된다. 웹이 "HWPX나 PDF로 저장해 넣어 주세요"라고 알린다).
+- HWP(한글 5.x OLE)는 ``adapters.hwp`` (2026-11-19). 한글 3.0 이하는 ``hwp_unsupported``.
 """
 
 from __future__ import annotations
@@ -593,23 +592,11 @@ class HwpxTextParser:
         return LocalParseResult(blocks=tuple(out.items), pages_total=None)
 
 
-# ---------------------------------------------------------------- HWP (옛 형식)
-
-
-class HwpUnsupportedParser:
-    """한글 5.x(OLE 복합 문서 + 압축 레코드)·한글 3.0 바이너리. 허용 라이선스의 순수 파이썬 읽기 도구가
-    없고(pyhwp는 AGPL), 직접 짜면 OLE·레코드 해석이라는 새 공격면이 생겨 지금은 읽지 않는다."""
-
-    def parse(self, data: bytes) -> LocalParseResult:
-        raise ParseError("hwp_unsupported")
-
-
 __all__ = [
     "MAX_SLIDES",
     "MAX_XLSX_COLS",
     "MAX_XLSX_ROWS",
     "NOTES_LABEL",
-    "HwpUnsupportedParser",
     "HwpxTextParser",
     "PptxTextParser",
     "XlsxTextParser",

@@ -601,7 +601,8 @@ export function parseFailNote(code: string | null | undefined, mime?: string): s
     too_many_blocks: "글이 너무 많아 읽지 못했습니다",
     file_too_large: "파일 안의 내용이 너무 커서 읽지 못했습니다",
     file_too_complex: "파일 구성이 너무 복잡해 읽지 못했습니다",
-    hwp_unsupported: "한글 97 형식(.hwp)은 아직 읽지 못합니다. 한글에서 HWPX나 PDF로 저장해 넣어 주세요.",
+    hwp_unsupported: "한글 3.0 이하 형식은 읽지 못합니다. 한글에서 HWPX나 PDF로 저장해 넣어 주세요.",
+    hwp_distribution: "배포용 한글 문서는 글이 잠겨 있어 읽지 못합니다. 원본을 HWPX나 PDF로 저장해 넣어 주세요.",
     unsupported_type: "이 형식은 읽지 못합니다",
   };
   if (code?.startsWith("model_ocr_denied")) return "연결된 모델이 이 자료를 받지 않습니다";

@@ -1,4 +1,4 @@
-"""PPTX·XLSX·HWPX 읽기와 옛 한글(.hwp) 안내 (2026-11-17). 시험 파일은 모두 이 시험이 zip + XML로 만든다."""
+"""PPTX·XLSX·HWPX 읽기와 옛 한글(.hwp) 형식 판별 (2026-11-17, .hwp 읽기는 test_hwp.py). 시험 파일은 모두 이 시험이 zip + XML로 만든다."""
 
 from __future__ import annotations
 
@@ -435,7 +435,7 @@ def test_hwp_type_detection():
 
 
 @pytest.mark.anyio
-async def test_hwp_upload_is_kept_and_parse_fails_with_hwp_code(db, tmp_path):
+async def test_fake_hwp_upload_is_kept_and_parse_fails(db, tmp_path):
     ws, subject = await create_workspace(db, name="A", owner_display_name="alice")
     owner = ActorContext(subject, ws, scopes_for_role(Role.OWNER))
     blobs = LocalBlobStore(tmp_path / "blobs")
@@ -455,7 +455,8 @@ async def test_hwp_upload_is_kept_and_parse_fails_with_hwp_code(db, tmp_path):
     await run_until_idle(db, parsing_handlers(deps))
     async with db.workspace_session(ws) as s:
         run = await s.get(ParseRun, res.parse_run_id)
-    assert (run.status, run.error_code) == ("failed", "hwp_unsupported")
+    # 머리만 흉내 낸 바이트는 복합 문서로 열리지 않는다 (원본은 남는다)
+    assert (run.status, run.error_code) == ("failed", "malformed")
 
 
 @pytest.mark.anyio
