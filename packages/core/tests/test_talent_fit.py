@@ -153,6 +153,14 @@ def test_trait_cleaning_and_levels():
     doc = uuid4()
     fit = uc.read_fit({"type": "score", "score": 2.7, "confidence": 0.5}, doc)
     assert (fit.level, fit.score, fit.confidence) == ("shown", 2.0, 0.5)
+    # 확률이 있으면 가장 그럴듯한 단계, 양쪽으로 갈리면 unclear (평균 1.08을 "말로만"으로 읽지 않는다)
+    split = {"score": 1.08, "confidence": 0.0, "probabilities": {"0": 0.31, "1": 0.29, "2": 0.4}}
+    assert uc.read_fit(split, doc).level == "unclear"
+    lean = {"score": 1.54, "confidence": 0.31, "probabilities": {"0": 0.17, "1": 0.12, "2": 0.71}}
+    assert uc.read_fit(lean, doc).level == "shown"
+    said = {"score": 1.0, "confidence": 1.0, "probabilities": {"0": 0.0, "1": 1.0, "2": 0.0}}
+    assert uc.read_fit(said, doc).level == "claimed"
+    assert uc.level_from({"0": "x"}, 1.5) == "shown"  # 모양이 다르면 점수로
     assert uc.read_fit({"score": True}, doc) is None
     assert uc.read_fit({"score": "1"}, doc) is None
     assert uc.read_fit(None, doc) is None

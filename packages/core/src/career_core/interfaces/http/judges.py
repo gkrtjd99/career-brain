@@ -57,7 +57,7 @@ class TalentFitIn(BaseModel):
 
 class TraitFitOut(BaseModel):
     document_id: UUID
-    level: str  # absent | claimed | shown
+    level: str  # absent | claimed | shown | unclear
     score: float  # 0~2
     confidence: float | None
 

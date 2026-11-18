@@ -13,6 +13,7 @@ const LEVEL: Record<TalentLevel, { label: string; tone: BadgeTone }> = {
   shown: { label: "한 일로 드러남", tone: "ok" },
   claimed: { label: "말로만 보임", tone: "warn" },
   absent: { label: "안 보임", tone: "none" },
+  unclear: { label: "판단 갈림", tone: "none" },
 };
 
 const STATUS: Record<string, string> = {
@@ -36,14 +37,11 @@ const NOTE: Record<string, string> = {
   rate_limited: "요청이 잦아 잠시 막혔습니다. 조금 뒤 다시 확인합니다.",
 };
 
-/** 판정 모델도 답이 갈린 경우 (확신이 낮음) */
-const UNSURE_BELOW = 0.35;
-
 export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: string; dirty: boolean }) {
   const run = useMutation({ mutationFn: () => api.talentFit(appId, docId) });
   const res: TalentFit | undefined = run.data;
   const rows = (res?.traits ?? []).map((t) => ({ trait: t, fit: t.fits.find((f) => f.document_id === docId) ?? null }));
-  const counts = { shown: 0, claimed: 0, absent: 0 };
+  const counts = { shown: 0, claimed: 0, absent: 0, unclear: 0 };
   for (const r of rows) if (r.fit) counts[r.fit.level] += 1;
   const judged = rows.some((r) => r.fit);
   return (
@@ -66,7 +64,10 @@ export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: 
           <p className="text-xs text-muted tabular-nums">
             {STATUS[res.judge.status] ?? res.judge.status}
             {res.judge.note ? ` — ${NOTE[res.judge.note] ?? res.judge.note}` : ""}
-            {judged ? ` · 드러남 ${counts.shown} · 말로만 ${counts.claimed} · 안 보임 ${counts.absent}` : ""}
+            {judged
+              ? ` · 드러남 ${counts.shown} · 말로만 ${counts.claimed} · 안 보임 ${counts.absent}` +
+                (counts.unclear ? ` · 갈림 ${counts.unclear}` : "")
+              : ""}
             {res.judge.cost_usd && res.judge.calls ? ` · ${usd(res.judge.cost_usd)}` : ""}
             {res.blocks_withheld ? ` · 보내지 않은 문단 ${res.blocks_withheld}개` : ""}
           </p>
@@ -78,9 +79,6 @@ export function TalentFitPanel({ appId, docId, dirty }: { appId: string; docId: 
                   <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-xs text-muted">
                     {fit ? (
                       <span className={cn(toneText(LEVEL[fit.level].tone))}>{LEVEL[fit.level].label}</span>
-                    ) : null}
-                    {fit && fit.confidence !== null && fit.confidence < UNSURE_BELOW ? (
-                      <span>· AI도 판단이 갈림</span>
                     ) : null}
                     <span>
                       {fit ? "· " : ""}

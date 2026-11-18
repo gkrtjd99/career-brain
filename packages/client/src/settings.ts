@@ -78,7 +78,7 @@ export interface VisibilityJudge {
   basis: "judge_advisory";
 }
 
-export type TalentLevel = "absent" | "claimed" | "shown";
+export type TalentLevel = "absent" | "claimed" | "shown" | "unclear";
 
 export interface TraitFit {
   document_id: Uuid;
