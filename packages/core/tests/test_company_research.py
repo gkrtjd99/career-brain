@@ -563,3 +563,27 @@ async def test_old_saved_posting_gets_lists_on_refetch(db, env):
     after = await posting_uc.get_posting(db, owner, r.posting_id)
     assert after.fields["talent"][0].startswith("실패를 두려워하지 않고")
     assert after.company_id is not None
+
+
+async def test_refetch_researches_an_already_linked_company(db, env):
+    """c0053 전에 사람이 이어 둔 회사: 다시 가져오면 찾은 적 없는 회사도 찾는다."""
+    owner, deps = env["owner"], env["deps"]
+    url = "https://career.gasang.example/job/linked"
+    env["site"].pages = {
+        "/job/linked": f"<html><body><main><pre>{SECTIONED}</pre></main></body></html>"
+    }
+    cid = await uc.create_company(db, owner, name="가상전자")
+    [r] = await posting_uc.save_urls(db, owner, [url])
+    await run_until_idle(db, posting_handlers(deps))
+    view = await posting_uc.get_posting(db, owner, r.posting_id)
+    async with db.workspace_session(owner.workspace_id) as s:
+        p = await s.get(JobPosting, r.posting_id)
+        p.status, p.fields, p.evidence = "saved", {"title": "SW 개발", "company": "가상전자"}, {}
+        p.confirmed_version_id, p.company_id = view.latest.id, cid
+        p.saved_by, p.saved_at = owner.subject_id, utcnow()
+    assert (await uc.get_company(db, owner, cid)).research_status is None
+    await posting_uc.refetch(db, owner, r.posting_id)
+    await run_until_idle(db, posting_handlers(deps))
+    company = await uc.get_company(db, owner, cid)
+    assert company.research_status == "done"
+    assert [p.origin for p in company.pages if p.origin == "posting"] == ["posting"]
