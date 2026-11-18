@@ -414,6 +414,34 @@ def _interview_out(view: interviews.InterviewView) -> InterviewOut:
     )
 
 
+class RecentOrganizeOut(BaseModel):
+    since: datetime
+    sources: int
+    experiences_created: int
+    experiences_matched: int
+    claims_created: int
+    claims_attached: int
+
+
+class OrganizeStatusOut(BaseModel):
+    """브레인 정리 상태 한 줄 (c0052, ``usecases.organize``). 세기만 한다."""
+
+    processing: int
+    needs_purpose: int
+    failed: int
+    pending_claims: int
+    review_experiences: int
+    duplicates: int
+    profile_values: int
+    education: int
+    skills: int
+    credentials: int
+    expiring: int
+    recent: RecentOrganizeOut
+    # on · off · no_permission · no_model · egress_denied · api_key_missing
+    auto_extract: str
+
+
 # ---------------------------------------------------------------- routes
 
 
@@ -473,6 +501,16 @@ def add_brain_routes(router: APIRouter, deps, authorize) -> None:
     async def brain_overview(actor: reader) -> BrainOverviewOut:
         view = await brain.brain_overview(db, actor)
         return BrainOverviewOut.model_validate(view, from_attributes=True)
+
+    @router.get("/brain/organize", response_model=OrganizeStatusOut)
+    async def organize_status(actor: reader) -> OrganizeStatusOut:
+        """넣은 자료를 정리한 상태: 진행 중·확인할 것·지난 하루의 정리 결과 (c0052)."""
+        from career_core.usecases.organize import organize_status as status_of
+
+        view = await status_of(
+            db, deps.models, actor, can_extract=deps.permissions.allows(actor, "brain.extract")
+        )
+        return OrganizeStatusOut.model_validate(view, from_attributes=True)
 
     @router.post("/experiences", response_model=StatusOut, status_code=201)
     async def create_experience(actor: writer, body: ExperienceIn) -> StatusOut:

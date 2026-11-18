@@ -11,11 +11,13 @@ import {
   KanbanSquare,
   Menu,
   Search,
+  Settings,
   SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, useToken } from "../lib/api";
+import type { ManageTab } from "../pages/Manage";
 import { setDisplayTimeZone, useDisplayTimeZone } from "../lib/dates";
 import { IngestProvider } from "./GlobalActions";
 import { CommandPalette } from "./palette/CommandPalette";
@@ -24,6 +26,8 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** 연결·관리의 탭 하나로 바로 (설정) */
+  tab?: ManageTab;
 }
 
 // 주 메뉴는 하루 일의 순서대로: 오늘 → 공고 → 지원 → 브레인 → 학습 (plan §13)
@@ -41,11 +45,20 @@ const TOOLS: NavItem[] = [
 ];
 // 관리 일(모델 연결·사용량·에이전트·작업·토큰·백업·설정)은 한 화면의 탭으로 (plan §21)
 const MANAGE: NavItem = { to: "/manage", label: "연결·관리", icon: SlidersHorizontal };
+// 설정(테마·시간대·넣은 자료 바로 정리·문서 검사 목록)은 연결·관리의 한 탭이지만 자주 찾으니 따로 둔다
+const SETTINGS: NavItem = { to: "/manage", label: "설정", icon: Settings, tab: "settings" };
 const MOBILE_TABS = MAIN.slice(0, 4);
-const MORE = [...MAIN.slice(4), ...TOOLS, MANAGE];
+const MORE = [...MAIN.slice(4), ...TOOLS, MANAGE, SETTINGS];
 
 function isActive(path: string, to: string) {
   return to === "/" ? path === "/" : path === to || path.startsWith(`${to}/`);
+}
+
+/** 연결·관리와 설정은 같은 화면의 다른 탭: 탭으로 나눠 켠다 */
+function navActive(path: string, tab: string | undefined, item: NavItem) {
+  if (item.to !== "/manage") return isActive(path, item.to);
+  if (path !== "/manage") return false;
+  return item.tab ? tab === item.tab : tab !== "settings";
 }
 
 /** 단축키 표시: 맥은 ⌘K, 그 밖은 Ctrl K */
@@ -58,20 +71,23 @@ function shortcutLabel() {
 function SideLink({
   item,
   path,
+  tab,
   onClick,
   quiet = false,
 }: {
   item: NavItem;
   path: string;
+  tab?: string;
   onClick?: () => void;
   /** 도구 무리: 한 단계 작게 */
   quiet?: boolean;
 }) {
-  const active = isActive(path, item.to);
+  const active = navActive(path, tab, item);
   const Icon = item.icon;
   return (
     <Link
       to={item.to}
+      search={item.tab ? { tab: item.tab } : undefined}
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -90,6 +106,12 @@ function SideLink({
 
 export function AppShell() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const tab = useRouterState({
+    select: (s) => {
+      const t = (s.location.search as Record<string, unknown>).tab;
+      return typeof t === "string" ? t : undefined;
+    },
+  });
   const token = useToken();
   const [more, setMore] = useState(false);
   const [palette, setPalette] = useState(false);
@@ -166,7 +188,8 @@ export function AppShell() {
               ))}
             </nav>
             <nav className="space-y-0.5 border-t border-line pt-3" aria-label="연결·관리">
-              <SideLink item={MANAGE} path={path} />
+              <SideLink item={MANAGE} path={path} tab={tab} />
+              <SideLink item={SETTINGS} path={path} tab={tab} />
               {me.data ? <p className="truncate px-2.5 pt-2 text-xs text-muted">공간: {me.data.workspace.name}</p> : null}
             </nav>
           </div>
@@ -233,7 +256,7 @@ export function AppShell() {
             aria-haspopup="dialog"
             className={cn(
               "flex h-14 flex-col items-center justify-center gap-0.5 text-[11px]",
-              MORE.some((it) => isActive(path, it.to)) ? "font-medium text-fg" : "text-muted",
+              MORE.some((it) => navActive(path, tab, it)) ? "font-medium text-fg" : "text-muted",
             )}
           >
             <Menu size={20} />
@@ -252,8 +275,9 @@ export function AppShell() {
               <SideLink key={it.to} item={it} path={path} onClick={() => setMore(false)} />
             ))}
           </div>
-          <div className="mt-4 border-t border-line pt-3">
-            <SideLink item={MANAGE} path={path} onClick={() => setMore(false)} />
+          <div className="mt-4 space-y-0.5 border-t border-line pt-3">
+            <SideLink item={MANAGE} path={path} tab={tab} onClick={() => setMore(false)} />
+            <SideLink item={SETTINGS} path={path} tab={tab} onClick={() => setMore(false)} />
           </div>
           {me.data ? <p className="mt-4 px-2.5 text-xs text-muted">공간: {me.data.workspace.name}</p> : null}
         </Sheet>

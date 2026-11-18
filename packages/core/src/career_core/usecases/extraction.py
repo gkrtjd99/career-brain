@@ -313,6 +313,101 @@ async def request_extraction(db: Database, actor: ActorContext, parse_run_id: UU
     return ext.id
 
 
+# ---------------------------------------------------------------- 알아서 정리 (c0052)
+
+
+async def extract_blocker(gateway, actor: ActorContext, data_class: str) -> str | None:
+    """이 공간에서 경험 뽑기를 지금 보낼 수 있나. ``None`` = 보낼 수 있음, 아니면 이유 코드.
+
+    호출·장부 기록 없이 미리 본다: 라우트(``extract`` → 기본)가 없으면 ``no_model``, 기계 밖으로 나가는
+    연결이 이 등급을 받지 않으면 ``egress_denied``, 키가 비었으면 ``api_key_missing``. 예산은 호출 때
+    게이트웨이가 본다 (넘으면 그 추출이 ``budget_exceeded``로 실패하고 장부에 남는다)."""
+    from career_core.llm.gateway import scoped_gateway
+
+    gw = await scoped_gateway(gateway, actor.workspace_id)
+    if gw is None:
+        return "no_model"
+    route = gw.config.route_for(EXTRACT_PURPOSE)
+    endpoint = gw.config.endpoints.get(route.endpoint) if route is not None else None
+    if endpoint is None:
+        return "no_model"
+    if endpoint.leaves_host and not gw.allows_data_class(
+        actor, endpoint.name, data_class, EXTRACT_PURPOSE
+    ):
+        return "egress_denied"
+    if endpoint.api_key_env and not gw.env.get(endpoint.api_key_env):
+        return "api_key_missing"
+    return None
+
+
+async def auto_extract_state(
+    db: Database, gateway, actor: ActorContext, *, can_extract: bool
+) -> str:
+    """화면에 보일 "알아서 정리" 상태: ``on``(넣으면 바로 정리) · ``off``(설정에서 끔) · ``no_permission``
+    (이 토큰은 AI로 보낼 수 없음) · ``no_model`` · ``egress_denied`` · ``api_key_missing``.
+    내 경험 자료는 ``private``로 들어가므로 그 등급으로 본다."""
+    from career_core.usecases.workspace_settings import workspace_auto_extract
+
+    async with db.workspace_session(actor.workspace_id) as s:
+        on = await workspace_auto_extract(s)
+    if not on:
+        return "off"
+    if not can_extract:
+        return "no_permission"
+    return await extract_blocker(gateway, actor, "private") or "on"
+
+
+async def auto_extract(
+    db: Database, gateway, ws: UUID, parse_run_id: UUID, *, allowed: bool | None = None
+) -> UUID | None:
+    """읽기가 끝난 원본의 경험 후보 뽑기를 서버가 건다 (사람이 누르지 않아도). 건 추출 ID, 아니면 None.
+
+    모두 맞을 때만: 읽기 완료·일부 완료, 넣은 사람의 권한(``parse_runs.auto_extract``, ``allowed``로 덮음),
+    용도가 내 경험 자료이고 확인 대기가 아님(증빙·참고·확인 전은 절대 보내지 않는다), 이 읽기에 추출이 아직
+    없음(실패했어도 다시 걸지 않는다 — 자료 화면의 "다시 뽑기"는 사람이), 공간 설정 ``auto_extract`` 켜짐,
+    AI 연결이 이 등급을 받음(``extract_blocker``). 비용·예산·장부는 수동 추출과 같은 길(게이트웨이)이다."""
+    from career_core.usecases.workspace_settings import workspace_auto_extract
+
+    async with db.workspace_session(ws) as s:
+        row = (
+            await s.execute(
+                select(
+                    ParseRun.status,
+                    ParseRun.auto_extract,
+                    ParseRun.requested_by,
+                    Source.purpose,
+                    Source.purpose_pending,
+                    Source.data_class,
+                )
+                .join(SourceVersion, SourceVersion.id == ParseRun.source_version_id)
+                .join(Source, Source.id == SourceVersion.source_id)
+                .where(ParseRun.id == parse_run_id)
+            )
+        ).first()
+        if row is None:
+            return None
+        status, flagged, requested_by, purpose, pending, data_class = row
+        if status not in (ParseStatus.COMPLETE, ParseStatus.PARTIAL):
+            return None
+        if not (flagged if allowed is None else allowed):
+            return None
+        if purpose != SourcePurpose.EXPERIENCE or pending:
+            return None
+        if await s.scalar(
+            select(ExtractionRun.id).where(ExtractionRun.parse_run_id == parse_run_id).limit(1)
+        ):
+            return None
+        if not await workspace_auto_extract(s):
+            return None
+    actor = ActorContext(subject_id=requested_by, workspace_id=ws)
+    if await extract_blocker(gateway, actor, data_class) is not None:
+        return None
+    try:
+        return await request_extraction(db, actor, parse_run_id)
+    except (NotFound, ClaimRuleError):  # 그 사이 용도가 바뀌었다
+        return None
+
+
 def build_prompt(blocks: list[DocumentBlock]) -> tuple[str, int]:
     parts: list[str] = []
     used = 0

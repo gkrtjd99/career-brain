@@ -17,7 +17,7 @@ const STAGE_LABEL: Record<IngestItem["stage"], string> = {
   waiting: "기다리는 중",
   reading: "읽는 중",
   saving: "보내는 중",
-  splitting: "나누는 중",
+  splitting: "정리 중",
   saved: "저장됨",
   confirm: "확인 필요",
   failed: "실패",
@@ -167,7 +167,7 @@ function Destination({ it, onNavigate }: { it: IngestItem; onNavigate: () => voi
     );
   if (it.sourceId && it.kind === "experience" && it.stage === "saved" && /사실 [1-9]/.test(it.note ?? ""))
     return (
-      <Link to="/brain" search={{ review: true }} onClick={onNavigate} className={LINK}>
+      <Link to="/brain" search={{ check: true }} onClick={onNavigate} className={LINK}>
         확인하기
       </Link>
     );

@@ -1,5 +1,5 @@
 import type { DocumentSettings } from "@career-brain/client";
-import { Button, cn, Label, Section, Textarea } from "@career-brain/ui";
+import { Button, cn, Label, Section, Switch, Textarea, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ErrorText } from "../common";
@@ -7,9 +7,10 @@ import { CaptureSection } from "./CaptureSection";
 import { WorkspaceSettingsSection } from "../settings/WorkspaceSettingsSection";
 import { JudgeCacheSection } from "../settings/JudgeCacheSection";
 import { api } from "../../lib/api";
+import { notOrganizedNote } from "../../lib/ingest";
 import { useTheme, type ThemePref } from "../../lib/theme";
 
-/** 설정 탭: 테마, 브라우저에서 보내기(북마크), 문서 검사, 작업 공간(표시 시간대·기술명 별칭), 판정 캐시 */
+/** 설정 탭: 테마, 브레인 정리(c0052), 브라우저에서 보내기(북마크), 문서 검사, 작업 공간(표시 시간대·기술명 별칭), 판정 캐시 */
 export function SettingsTab({ scopes }: { scopes: string[] }) {
   const [theme, setTheme] = useTheme();
   return (
@@ -39,11 +40,54 @@ export function SettingsTab({ scopes }: { scopes: string[] }) {
           ))}
         </div>
       </Section>
+      <OrganizeSettingSection canEdit={scopes.includes("draft-write")} />
       <CaptureSection />
       <WorkspaceSettingsSection />
       <DocumentSettingsSection />
       {scopes.includes("egress") ? <JudgeCacheSection /> : null}
     </div>
+  );
+}
+
+/** 브레인 정리: 넣은 내 경험 자료를 서버가 바로 AI로 정리할지 (공간 설정, 기본 켜짐) */
+function OrganizeSettingSection({ canEdit }: { canEdit: boolean }) {
+  const qc = useQueryClient();
+  const settings = useQuery({ queryKey: ["workspace-settings-full"], queryFn: api.workspaceSettings });
+  const caps = useQuery({ queryKey: ["ingest-capabilities"], queryFn: api.ingestCapabilities });
+  const save = useMutation({
+    mutationFn: (on: boolean) => api.saveWorkspaceSettings({ auto_extract: on }),
+    onSuccess: (d) => {
+      qc.setQueryData(["workspace-settings-full"], d);
+      void qc.invalidateQueries({ queryKey: ["workspace-settings"] });
+      void qc.invalidateQueries({ queryKey: ["ingest-capabilities"] });
+      void qc.invalidateQueries({ queryKey: ["organize"] });
+      toast(d.auto_extract ? "넣은 자료를 바로 정리합니다." : "넣은 자료는 보관만 합니다.");
+    },
+  });
+  const on = settings.data?.auto_extract ?? true;
+  const state = caps.data?.auto_extract;
+  return (
+    <Section title="브레인 정리">
+      <label className="flex cursor-pointer items-start justify-between gap-4 border-t border-line pt-4">
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">넣은 자료를 바로 정리</span>
+          <span className="block text-[13px] text-muted">
+            내 경험 자료의 글을 연결된 AI로 보내 경력·사실 후보를 뽑습니다. 비용이 들고, 뽑은 것은 확인 전으로 들어옵니다.
+          </span>
+          {on && state && state !== "on" && state !== "off" ? (
+            <span className="mt-1 block text-[13px] font-medium">{notOrganizedNote(state).replace("했습니다", "합니다")}.</span>
+          ) : null}
+        </span>
+        <Switch
+          checked={on}
+          disabled={!settings.data || save.isPending || !canEdit}
+          onCheckedChange={(v) => save.mutate(v)}
+          aria-label="넣은 자료를 바로 정리"
+          className="mt-0.5"
+        />
+      </label>
+      <ErrorText error={save.error} />
+    </Section>
   );
 }
 

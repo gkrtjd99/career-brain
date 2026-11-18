@@ -1,4 +1,4 @@
-import type { SourcePurpose } from "@career-brain/client";
+import type { ExperienceKind, SourcePurpose } from "@career-brain/client";
 import { Sheet } from "@career-brain/ui";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { CreateExperienceForm, EMPTY_EXPERIENCE } from "./ExperienceForm";
@@ -7,8 +7,8 @@ import { UploadSheet } from "./UploadSheet";
 interface IngestContext {
   /** 자료 넣기 시트를 연다. purpose = 처음 고른 용도 (사람이 바꿀 수 있다) */
   open: (purpose?: SourcePurpose, files?: File[]) => void;
-  /** 경험 추가 시트를 연다 */
-  openExperience: () => void;
+  /** 경험 추가 시트를 연다. kind = 미리 고를 종류 (브레인의 경력·프로젝트 칸에서) */
+  openExperience: (kind?: ExperienceKind) => void;
 }
 
 const Ctx = createContext<IngestContext | null>(null);
@@ -23,12 +23,12 @@ export function IngestProvider({ children }: { children: ReactNode }) {
     purpose: "experience",
     files: null,
   });
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState<ExperienceKind | null>(null);
   const open = useCallback(
     (purpose: SourcePurpose = "experience", files?: File[]) => setUpload({ open: true, purpose, files: files ?? null }),
     [],
   );
-  const openExperience = useCallback(() => setCreating(true), []);
+  const openExperience = useCallback((kind?: ExperienceKind) => setCreating(kind ?? "other"), []);
   const value = useMemo(() => ({ open, openExperience }), [open, openExperience]);
   return (
     <Ctx.Provider value={value}>
@@ -41,8 +41,10 @@ export function IngestProvider({ children }: { children: ReactNode }) {
         initialFiles={upload.files}
         onClose={() => setUpload((u) => ({ ...u, open: false }))}
       />
-      <Sheet open={creating} onOpenChange={setCreating} title="경험 추가">
-        {creating ? <CreateExperienceForm initial={EMPTY_EXPERIENCE} onDone={() => setCreating(false)} /> : null}
+      <Sheet open={creating !== null} onOpenChange={(o) => !o && setCreating(null)} title="경험 추가">
+        {creating ? (
+          <CreateExperienceForm initial={{ ...EMPTY_EXPERIENCE, kind: creating }} onDone={() => setCreating(null)} />
+        ) : null}
       </Sheet>
     </Ctx.Provider>
   );

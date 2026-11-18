@@ -293,6 +293,26 @@ def _missing_pages(result: LocalParseResult) -> list[int]:
 
 
 async def process_parse_run(deps: ParsingDeps, workspace_id: UUID, run_id: UUID) -> StepOutcome:
+    outcome = await _process_parse_run(deps, workspace_id, run_id)
+    if outcome.done:
+        await after_read(deps.db, deps.gateway, workspace_id, run_id)
+    return outcome
+
+
+async def after_read(db: Database, gateway, ws: UUID, run_id: UUID, **kw) -> UUID | None:
+    """읽기가 끝났다 → 내 경험 자료면 서버가 경험 후보 뽑기를 건다 (c0052, ``extraction.auto_extract``).
+
+    읽기 결과는 이미 저장했다. 여기서 무엇이 실패해도 읽기를 되돌리거나 다시 돌리지 않는다."""
+    from career_core.usecases.extraction import auto_extract
+
+    try:
+        return await auto_extract(db, gateway, ws, run_id, **kw)
+    except Exception as exc:  # noqa: BLE001 - 정리 걸기 실패가 읽기 작업을 실패로 만들지 않게
+        log.warning("auto extraction not queued: %s", type(exc).__name__)
+        return None
+
+
+async def _process_parse_run(deps: ParsingDeps, workspace_id: UUID, run_id: UUID) -> StepOutcome:
     view = await _load(deps.db, workspace_id, run_id)
     if view is None or view.status in TERMINAL_PARSE_STATUSES:
         return StepOutcome(done=True)

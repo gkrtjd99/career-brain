@@ -1,9 +1,10 @@
 import type { SourcePurpose } from "@career-brain/client";
-import { Button, Checkbox, cn, Sheet, Textarea } from "@career-brain/ui";
+import { Button, cn, Sheet, Textarea } from "@career-brain/ui";
 import { FileUp } from "lucide-react";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
-import { ACCEPT, addFiles, addPaste, clearFinished, useAutoExtract, useIngestQueue } from "../lib/ingest";
+import { ACCEPT, addFiles, addPaste, clearFinished, useIngestQueue } from "../lib/ingest";
 import { IngestQueue } from "./ingest/IngestQueue";
+import { OrganizeResult } from "./ingest/OrganizeResult";
 
 /** 드래그한 것에 파일이 있나 (글·링크를 끌 때는 놓는 곳을 띄우지 않는다) */
 export function hasFiles(e: DragEvent) {
@@ -33,7 +34,6 @@ export function UploadSheet({
   const fixed = purpose && purpose !== "experience" ? purpose : undefined;
   const [pasted, setPasted] = useState("");
   const [over, setOver] = useState(false);
-  const [autoExtract, setAutoExtract] = useAutoExtract();
   const picker = useRef<HTMLInputElement>(null);
   const taken = useRef<File[] | null>(null);
 
@@ -64,7 +64,7 @@ export function UploadSheet({
         if (!o) onClose();
       }}
       title="브레인에 넣기"
-      description="넣은 것을 읽고 알맞은 곳에 둡니다. 증빙 서류는 이 기기 밖으로 보내지 않습니다."
+      description="넣으면 읽고 알아서 정리합니다. 증빙 서류는 이 기기 밖으로 보내지 않습니다."
       width="lg"
     >
       <div
@@ -155,23 +155,11 @@ export function UploadSheet({
                 </Button>
               ) : null}
             </div>
+            <OrganizeResult items={queue} onNavigate={onClose} />
             <IngestQueue items={queue} onNavigate={onClose} />
           </section>
         ) : null}
 
-        <label className="flex cursor-pointer items-start gap-2.5 py-1 text-[13px]">
-          <Checkbox
-            className="mt-0.5"
-            checked={autoExtract}
-            onCheckedChange={(checked) => setAutoExtract(checked)}
-          />
-          <span>
-            내 경험 자료는 읽은 뒤 바로 경험 후보를 뽑기
-            <span className="block text-muted">
-              읽은 글을 연결된 모델에 보내며 비용이 듭니다. 뽑은 것은 모두 확인 전으로 들어옵니다.
-            </span>
-          </span>
-        </label>
       </div>
     </Sheet>
   );

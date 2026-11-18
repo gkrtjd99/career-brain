@@ -170,10 +170,15 @@ export interface IngestGuess {
   company_name: string | null;
 }
 
+/** c0052: 넣으면 서버가 바로 정리하는지. on 외에는 왜 안 하는지 */
+export type AutoExtractState = "on" | "off" | "no_permission" | "no_model" | "egress_denied" | "api_key_missing";
+
 export interface IngestCapabilities {
   /** 사진을 연결된 모델로 읽을 수 있는 자료 등급. 증빙은 늘 이 기기에서 읽는다 */
   model_ocr_classes: string[];
   model_ocr_route: string | null;
+  /** c0052: 읽기가 끝난 내 경험 자료를 서버가 바로 정리하는지 */
+  auto_extract?: AutoExtractState;
 }
 
 export interface TextLayerBlock {
@@ -1705,4 +1710,35 @@ export interface FileCheck {
   summary: Record<string, number>;
   source_id?: Uuid | null;
   version_id?: Uuid | null;
+}
+
+/** c0052 브레인 정리 상태 한 줄 (GET /core/brain/organize). 세기만 한다 */
+export interface OrganizeStatus {
+  /** 읽는 중·정리 중인 자료 */
+  processing: number;
+  /** 무엇인지 확인이 필요한 자료 */
+  needs_purpose: number;
+  /** 읽기·정리 실패 */
+  failed: number;
+  pending_claims: number;
+  review_experiences: number;
+  /** "같은 경험일 수 있음" */
+  duplicates: number;
+  /** 자료에서 찾은 프로필 값 (아직 프로필에 없음) */
+  profile_values: number;
+  education: number;
+  skills: number;
+  /** 확인 전 자격 후보 */
+  credentials: number;
+  expiring: number;
+  /** 지난 하루의 정리 결과 */
+  recent: {
+    since: IsoDateTime;
+    sources: number;
+    experiences_created: number;
+    experiences_matched: number;
+    claims_created: number;
+    claims_attached: number;
+  };
+  auto_extract: AutoExtractState;
 }

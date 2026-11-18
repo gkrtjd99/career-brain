@@ -219,6 +219,8 @@ export function createClient({
       return { items, total } satisfies T.ExperiencePage;
     },
     brainOverview: () => get<T.BrainOverview>("/core/brain/overview"),
+    /** c0052: 넣은 자료의 정리 상태 한 줄 (진행·확인할 것·지난 하루의 결과) */
+    organizeStatus: () => get<T.OrganizeStatus>("/core/brain/organize"),
     experience: (experienceId: string) =>
       get<T.Experience>(`/core/experiences/${id(experienceId)}`),
     createExperience: (body: T.ExperienceIn) => post<T.StatusOut>("/core/experiences", body),

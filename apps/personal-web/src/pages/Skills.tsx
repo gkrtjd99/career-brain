@@ -88,7 +88,7 @@ function SkillList({
     return (
       <p className="border-t border-line pt-3 text-sm text-muted">
         아직 모은 기술이 없습니다. 경험에 태그를 달거나 "사용한 기술" 사실을 확인하면 여기에 나옵니다.{" "}
-        <Link to="/brain" hash="experiences" className="text-fg underline underline-offset-2">
+        <Link to="/brain/experiences" className="text-fg underline underline-offset-2">
           경험 보기
         </Link>
       </p>

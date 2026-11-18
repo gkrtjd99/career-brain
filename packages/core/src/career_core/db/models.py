@@ -119,6 +119,8 @@ class ParseRun(Base):
     hidden_text: Mapped[str] = mapped_column(Text, default="keep")
     # c0039: 이 기기(브라우저)·연결된 모델이 읽은 글의 기록 (글은 document_blocks)
     text_layer: Mapped[dict | None] = mapped_column(JSONB, default=None)
+    # c0052: 넣은 사람이 경험 뽑기 권한을 가졌다 → 읽기가 끝나면 서버가 경험 후보 뽑기를 건다 (공간 설정이 켜졌을 때)
+    auto_extract: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class DocumentBlock(Base):
@@ -1019,6 +1021,8 @@ class WorkspaceSettings(Base):
     workspace_id: Mapped[UUID]
     timezone: Mapped[str | None] = mapped_column(Text, default=None)
     tech_aliases: Mapped[list] = mapped_column(JSONB, default=list)
+    # c0052: 읽기가 끝난 내 경험 자료를 바로 AI로 정리한다 (기본 켜짐)
+    auto_extract: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -19,12 +19,15 @@ export interface WorkspaceSettings {
   tech_aliases: TechAliasEntry[];
   /** 기본 표 (읽기 전용) */
   builtin_aliases: TechAliasEntry[];
+  /** c0052: 넣은 내 경험 자료를 바로 AI로 정리 (기본 켜짐) */
+  auto_extract: boolean;
 }
 
 /** 준 칸만 바꾼다. timezone: null → 기본값(Asia/Seoul), tech_aliases: [] → 사용자 별칭 비우기 */
 export interface WorkspaceSettingsIn {
   timezone?: string | null;
   tech_aliases?: TechAliasEntry[];
+  auto_extract?: boolean;
 }
 
 /** 판정 모델의 참고 의견. 연결·충족 판정이 아니다 */

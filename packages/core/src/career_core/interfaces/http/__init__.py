@@ -392,6 +392,8 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 purpose_pending=purpose_pending,
                 purpose_hint=purpose_hint,
                 text_layer=layer,
+                # c0052: 읽기가 끝나면 서버가 경험 후보 뽑기를 건다 (AI로 보낼 권한이 있을 때만)
+                auto_extract=deps.permissions.allows(actor, "brain.extract"),
             )
         except UploadRejected as exc:
             raise HTTPException(status_code=exc.status, detail=exc.code) from exc
@@ -406,6 +408,14 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 )
             except TextLayerError:
                 pass
+        if result.deduplicated and result.parse_run_id is not None:
+            # 같은 파일을 다시 넣음: 아직 정리하지 않은 자료면 지금 정리한다 (예: 그때는 AI 연결이 없었다)
+            from career_core.usecases.parsing import after_read
+
+            if deps.permissions.allows(actor, "brain.extract"):
+                await after_read(
+                    deps.db, deps.models, actor.workspace_id, result.parse_run_id, allowed=True
+                )
         return UploadOut(
             source_id=result.source_id,
             version_id=result.version_id,
@@ -434,6 +444,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 markdown=body.markdown,
                 purpose=body.purpose,
                 max_bytes=deps.max_upload_bytes,
+                auto_extract=deps.permissions.allows(actor, "brain.extract"),
             )
         except UploadRejected as exc:
             raise HTTPException(status_code=exc.status, detail=exc.code) from exc
@@ -454,6 +465,12 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
         body: PurposePatch,
         actor: Annotated[ActorContext, Depends(authorize("sources.write"))],
     ) -> PurposeChangeOut:
+        from career_core.usecases.extraction import auto_extract_state
+
+        # c0052: 내 경험 자료로 정하면 바로 정리 — 권한·공간 설정·AI 연결이 다 맞을 때만 (아니면 자료 화면에서)
+        can_extract = deps.permissions.allows(actor, "brain.extract") and (
+            await auto_extract_state(deps.db, deps.models, actor, can_extract=True) == "on"
+        )
         try:
             result = await sources_uc.change_purpose(
                 deps.db,
@@ -461,7 +478,7 @@ def _add_source_routes(router: APIRouter, deps: CoreDeps, authorize) -> None:
                 source_id,
                 body.purpose,
                 data_class=body.data_class,
-                can_extract=deps.permissions.allows(actor, "brain.extract"),
+                can_extract=can_extract,
             )
         except sources_uc.SourceNotFound as exc:
             raise not_found from exc
