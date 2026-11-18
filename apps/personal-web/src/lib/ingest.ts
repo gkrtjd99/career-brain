@@ -9,6 +9,7 @@
 // 큐는 화면 밖에 둔다 (창을 닫아도 계속 처리하고, 다시 열면 그대로 보인다).
 
 import type {
+  ExtractionRun,
   IngestCapabilities,
   IngestGuess,
   IngestKind,
@@ -18,6 +19,7 @@ import type {
 } from "@career-brain/client";
 import { useSyncExternalStore } from "react";
 import { api, ApiError, queryClient } from "./api";
+import { looksLikeCoverLetter } from "../components/sources/CoverLetterAnswers";
 import { maskResidentNumbers, recognizeImage, textLayerOf } from "./ocr";
 
 export type IngestStage = "waiting" | "reading" | "saving" | "splitting" | "saved" | "confirm" | "failed";
@@ -398,6 +400,23 @@ async function route(id: string, purpose: SourcePurpose) {
   await finish(id, src);
 }
 
+/** 추출 결과 한 줄: 새로 만든 것과 이미 있던 경험·사실에 붙인 것을 나눠 말한다. */
+export function extractNote(run: ExtractionRun): string {
+  const parts = [
+    run.experiences_created ? `새 경험 ${run.experiences_created}개` : null,
+    run.experiences_matched ? `있던 경험에 더함 ${run.experiences_matched}개` : null,
+    run.claims_created ? `확인할 사실 ${run.claims_created}개` : null,
+    run.claims_attached ? `있던 사실에 근거로 붙임 ${run.claims_attached}개` : null,
+  ].filter(Boolean);
+  const sugg = run.suggestions;
+  const more = [
+    sugg?.credentials_created ? `자격 후보 ${sugg.credentials_created}개` : null,
+    sugg?.education?.length ? `학력 제안 ${sugg.education.length}개` : null,
+    sugg?.skills?.length ? `기술 제안 ${sugg.skills.length}개` : null,
+  ].filter(Boolean);
+  return [...parts, ...more].join(" · ") || "새로 뽑은 경험·사실이 없습니다";
+}
+
 async function finish(id: string, src: Source) {
   const it = get(id);
   if (!it) return;
@@ -432,9 +451,10 @@ async function finish(id: string, src: Source) {
         patch(id, { stage: "splitting", note: "오래 걸리면 연결·관리 › 작업에서 상태를 보세요" });
         return;
       }
+      const cover = looksLikeCoverLetter(src.title, src.versions.at(-1)?.original_filename);
       patch(id, {
         stage: "saved",
-        note: `경험 ${run.experiences_created}개 · 확인할 사실 ${run.claims_created}개`,
+        note: extractNote(run) + (cover ? " · 자료 화면에서 공통 답변으로 옮길 수 있습니다" : ""),
       });
       return;
     }

@@ -283,20 +283,28 @@ function DeleteExperienceDialog({ exp, open, onClose }: { exp: Experience; open:
 /** 확인 대기 사실을 한꺼번에 확인. 기여(본인/팀)를 한 번 고르거나, 적힌 대로 (기여 모름은 건너뜀). */
 export function ConfirmAllButton({
   experienceId,
+  sourceId,
   count,
   knownContribution,
 }: {
-  experienceId: string;
+  /** 경험 하나 또는 자료 하나에서 나온 확인 전 사실 전부 (둘 중 하나) */
+  experienceId?: string;
+  sourceId?: string;
   count: number;
-  /** 본인·팀이 이미 정해진 사실 수. 0이면 "적힌 대로"는 아무것도 확인하지 못하니 보이지 않는다 */
-  knownContribution: number;
+  /** 본인·팀이 이미 정해진 사실 수. 0이면 "적힌 대로"는 아무것도 확인하지 못하니 보이지 않는다. 모르면 비운다 */
+  knownContribution?: number;
 }) {
   const qc = useQueryClient();
   const run = useMutation({
     mutationFn: (contribution: "personal" | "team" | "as_is") =>
-      api.confirmClaims({ contribution, experience_id: experienceId }),
+      api.confirmClaims({ contribution, experience_id: experienceId, source_id: sourceId }),
     onSuccess: (r) => {
-      void qc.invalidateQueries({ queryKey: ["experience", experienceId] });
+      if (experienceId) void qc.invalidateQueries({ queryKey: ["experience", experienceId] });
+      if (sourceId) {
+        void qc.invalidateQueries({ queryKey: ["source", sourceId] });
+        void qc.invalidateQueries({ queryKey: ["sources"] });
+        void qc.invalidateQueries({ queryKey: ["experience"] });
+      }
       void qc.invalidateQueries({ queryKey: ["experiences"] });
       void qc.invalidateQueries({ queryKey: ["skills"] });
       const skipped = r.skipped.filter((s) => s.reason === "contribution_required").length;
@@ -322,11 +330,11 @@ export function ConfirmAllButton({
         <DropdownMenuContent align="start">
           <DropdownMenuItem onSelect={() => run.mutate("personal")}>모두 본인이 한 일로 확인</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => run.mutate("team")}>모두 팀이 한 일로 확인</DropdownMenuItem>
-          {knownContribution ? (
+          {knownContribution !== 0 ? (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => run.mutate("as_is")}>
-                적힌 대로 확인 ({knownContribution}개, 본인·팀 모름은 남김)
+                적힌 대로 확인 ({knownContribution != null ? `${knownContribution}개, ` : ""}본인·팀 모름은 남김)
               </DropdownMenuItem>
             </>
           ) : null}
