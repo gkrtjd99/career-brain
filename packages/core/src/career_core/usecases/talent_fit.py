@@ -24,7 +24,7 @@ from sqlalchemy import select
 
 from career_core.db import Database, JobPosting
 from career_core.db.base import utcnow
-from career_core.db.models import ApplicationDocument, CompanyFact
+from career_core.db.models import ApplicationDocument, CompanyFact, CompanyPage
 from career_core.domain.companies import is_stale
 from career_core.domain.documents import BlockInput
 from career_core.domain.postings import FieldName
@@ -66,12 +66,31 @@ JudgeCall = Callable[[dict, dict[str, dict]], Awaitable[JudgmentResult]]
 
 _BULLET = re.compile(r"^\s*(?:[-*•·▪▸►○●■□◦‣※✓✔]+|\(?\d{1,2}[.)]|[①-⑳])\s*")
 _TRAIL = re.compile(r"[\s,.;:·、。]+$")
+# 줄이 문장 가운데서 끊겨 남은 이음말 ("…쌓아가는 사람 과")
+_DANGLING = re.compile(r"\s+(?:과|와|및|그리고|또는|and|or)$", re.IGNORECASE)
+# 사람의 모습을 말하는 줄인지 (회사 소개·맺음말 줄을 거른다). 짧은 줄(핵심 가치 낱말)은 그대로 둔다.
+_PERSON = re.compile(
+    r"사람|인재|[는은] 분|태도|자세|동료|역량|정신|의식|가치|"
+    r"\b(?:people|person|someone|you|values?|mindset|attitude)\b",
+    re.IGNORECASE,
+)
+SHORT_TRAIT_CHARS = 20
+_SENTENCE_END = re.compile(r"(?:다|요|죠)$")
 _KEY = re.compile(r"[\W_]+")
 
 
 def clean_trait(text: str) -> str:
     """앞의 글머리표·번호와 끝의 쉼표·마침표를 뗀다."""
-    return _TRAIL.sub("", _BULLET.sub("", text or "")).strip()[:MAX_TRAIT_CHARS]
+    t = _TRAIL.sub("", _BULLET.sub("", text or "")).strip()
+    return _TRAIL.sub("", _DANGLING.sub("", t)).strip()[:MAX_TRAIT_CHARS]
+
+
+def is_trait_line(text: str) -> bool:
+    """공고 인재상 섹션의 줄 중 사람의 모습을 말하는 줄. "우리는 …혁신기업입니다" 같은 소개 줄은 아니다."""
+    if _PERSON.search(text):
+        return True
+    # 짧은 줄은 핵심 가치 낱말("주인의식")일 때만: 문장으로 끝나면("…싶습니다") 맺음말이다
+    return len(text) <= SHORT_TRAIT_CHARS and not _SENTENCE_END.search(text)
 
 
 def _key(text: str) -> str:
@@ -130,7 +149,7 @@ async def collect_traits(s, posting: JobPosting | None) -> list[Trait]:
     def add(text: str, source: str, confirmed: bool, fact_id: UUID | None = None) -> None:
         t = clean_trait(text)
         k = _key(t)
-        if len(k) < 2 or k in seen:
+        if len(k) < 2 or k in seen or (source == "posting" and not is_trait_line(t)):
             return
         seen.add(k)
         out.append(Trait(t, source, confirmed, fact_id))
@@ -141,16 +160,23 @@ async def collect_traits(s, posting: JobPosting | None) -> list[Trait]:
         if isinstance(line, str):
             add(line, "posting", True)
     if posting.company_id is not None:
+        q = select(CompanyFact).where(
+            CompanyFact.company_id == posting.company_id,
+            CompanyFact.kind.in_(TRAIT_FACT_KINDS),
+            CompanyFact.status.in_(("confirmed", "candidate")),
+        )
+        if out:
+            # 공고 글에서 뽑은 회사 항목은 공고 인재상 줄을 고쳐 쓴 것이다: 공고 줄이 있으면 빼고
+            # 홈페이지·위키백과 같은 다른 원문에서 온 것만 더한다 (사람이 확인한 것은 남긴다).
+            from_posting = select(CompanyPage.id).where(CompanyPage.origin == "posting")
+            q = q.where(
+                (CompanyFact.status == "confirmed") | CompanyFact.page_id.not_in(from_posting)
+            )
         rows = (
             await s.scalars(
-                select(CompanyFact)
-                .where(
-                    CompanyFact.company_id == posting.company_id,
-                    CompanyFact.kind.in_(TRAIT_FACT_KINDS),
-                    CompanyFact.status.in_(("confirmed", "candidate")),
+                q.order_by(CompanyFact.status != "confirmed", CompanyFact.created_at).limit(
+                    MAX_TRAITS * 3
                 )
-                .order_by(CompanyFact.status != "confirmed", CompanyFact.created_at)
-                .limit(MAX_TRAITS * 3)
             )
         ).all()
         today = utcnow().date()
@@ -352,6 +378,7 @@ __all__ = [
     "build_questions",
     "clean_trait",
     "collect_traits",
+    "is_trait_line",
     "judge_talent_fit",
     "level_of",
     "read_fit",

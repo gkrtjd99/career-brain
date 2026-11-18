@@ -5,13 +5,14 @@
 """
 
 import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
 import pytest
 from career_core.adapters.typesafe import TypeSafeClient
 from career_core.db import ModelCall
-from career_core.db.models import CompanyFact
+from career_core.db.models import CompanyFact, CompanyPage
 from career_core.domain.workspace import Role, scopes_for_role
 from career_core.interfaces.http import CoreDeps, build_router
 from career_core.llm import JudgmentCompletion, ModelCallError, TokenUsage, UsagePart
@@ -28,6 +29,8 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 pytestmark = pytest.mark.anyio
+
+T0 = datetime.now(UTC)
 
 JEV_CONFIG = """
 [endpoints.jev]
@@ -130,6 +133,15 @@ def test_trait_cleaning_and_levels():
     )
     assert uc.clean_trait("1) 정직한 사람.") == "정직한 사람"
     assert uc.clean_trait("① 주인의식") == "주인의식"
+    assert uc.clean_trait("자신의 일에 자부심을 갖고 전문성을 쌓아가는 사람 과") == (
+        "자신의 일에 자부심을 갖고 전문성을 쌓아가는 사람"
+    )
+    assert uc.is_trait_line("동료와 함께 문제를 푸는 태도를 중요하게 생각합니다")
+    assert uc.is_trait_line("주인의식")  # 짧은 가치 낱말
+    assert uc.is_trait_line("We look for people who own problems end to end")
+    assert not uc.is_trait_line("우리는 새로운 기술과 시장에 끊임없이 도전하는 혁신기업 입니다")
+    assert not uc.is_trait_line("그런 분들과 함께 미래를 만들어가고 싶습니다")
+    assert not uc.is_trait_line("함께 미래를 만들어가고 싶습니다")
     assert [uc.level_of(x) for x in (0.0, 0.59, 0.6, 1.39, 1.4, 2.0)] == [
         "absent",
         "absent",
@@ -253,6 +265,36 @@ async def test_talent_fit_judges_each_trait_and_is_advisory(db, env):
     )
     async with db.workspace_session(owner.workspace_id) as s:
         (await s.get(CompanyFact, cand)).status = "candidate"
+        # 공고 글에서 뽑은 후보는 공고 줄을 고쳐 쓴 것이라 빠진다
+        posting_page = CompanyPage(
+            id=uuid4(),
+            workspace_id=owner.workspace_id,
+            company_id=cid,
+            origin="posting",
+            url="https://jobs.example.test/t/1",
+            status="done",
+            text="도전을 즐기는 인재",
+            fetched_at=T0,
+            requested_by=owner.subject_id,
+        )
+        s.add(posting_page)
+        await s.flush()
+        s.add(
+            CompanyFact(
+                workspace_id=owner.workspace_id,
+                company_id=cid,
+                page_id=posting_page.id,
+                kind="talent",
+                body="도전을 즐기는 인재",
+                quote="도전을 즐기는 인재",
+                quote_start=0,
+                quote_end=9,
+                fetched_at=T0,
+                status="candidate",
+                origin="model",
+                created_by=owner.subject_id,
+            )
+        )
 
     # 연결이 없으면 묻지 않는다 (default로 넘어가지 않는다)
     res = await uc.judge_talent_fit(db, None, owner, aid, document_id=doc.id)
