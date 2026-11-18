@@ -102,6 +102,7 @@ def _upgrade_v1(arc: _Archive) -> None:
 | c0048 | `schema_step` | 새 표 `interview_preps`·`interview_prep_questions` (옛 묶음엔 빈 표). 합치기는 DB UNIQUE: 지원마다 준비 하나, 준비 안의 출처 열쇠(`source_key`) |
 | c0049 | `schema_step` | 새 표 `portfolio_items`·`portfolio_item_revisions`·`portfolio_line_claims`·`portfolio_images`·`portfolio_bundles`·`portfolio_bundle_items` (옛 묶음엔 빈 표). 이미지 바이트는 `blob_key`로 `blobs/`에 들어가 복원 후 sha256이 같다. `github_tokens`는 묶음에 넣지 않는다 |
 | c0050 | `schema_step` | `experiences.merged_into_id`·`merged_at`·`possible_duplicate_of = null` (옛 자료엔 합친 경험·같은 경험 표시가 없다), `extraction_runs.experiences_matched = 0`·`claims_attached = 0`·`suggestions = {}`. 두 경험 FK는 자기 표를 가리키므로 `DEFERRABLE INITIALLY IMMEDIATE`(복원 중 순서 무관) |
+| c0051 | `no_data_change` | `document_revisions.origin`에 `ai_draft` (지원서 AI 초안 revision, CHECK만 넓힘). 옛 revision은 그대로 |
 | c0052 | `schema_step` | `workspace_settings.auto_extract = true`(설정 기본값), `parse_runs.auto_extract = false`(복원한 옛 읽기는 자동으로 정리하지 않는다) |
 
 - 받는 head의 하한은 `SCHEMA_FLOOR = "c0011"`(내보내기가 처음 생긴 head, O11)이다. 그보다 옛 묶음은 있을 수 없다. c0011~c0017 묶음은 형식 1이라 먼저 `UPGRADES`로 형식 2가 된 뒤 head 단계를 지난다. 그보다 옛 묶음, 단계가 빠진 revision을 지나야 하는 묶음은 `version_mismatch: … no conversion step for cNNNN`. 이 설치보다 **새** 묶음(모르는 revision)도 `version_mismatch` — 먼저 설치를 올린다.

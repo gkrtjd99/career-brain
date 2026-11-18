@@ -1,5 +1,5 @@
 // 지원 작업대의 "쓸 경험" 칸 (O15, plan §19.3). 문항마다 쓸 경험 후보와 그 근거·이유·빈 곳을 보인다.
-// 글은 쓰지 않는다: "이 경험으로 쓰기"는 고른 것을 기록하고, 편집기가 그 사실이 연결된 빈 문단을 둔다.
+// "이 경험으로 쓰기"는 고른 것을 기록한다. 초안 쓰기(§22)가 고른 경험을 먼저 쓴다.
 import type {
   ApplicationPrep,
   DocumentSummary,
@@ -110,7 +110,7 @@ export function PrepPanel({
     return (
       <div className="space-y-3">
         <p className="text-[13px] leading-6">
-          문항마다 쓸 경험을 2~3개 찾습니다. 글은 쓰지 않습니다.
+          문항마다 쓸 경험을 2~3개 찾습니다. 고른 경험은 초안을 쓸 때 먼저 씁니다.
         </p>
         {editable ? (
           <Button variant="primary" onClick={() => generate.mutate(true)} disabled={generate.isPending}>

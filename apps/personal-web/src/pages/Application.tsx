@@ -99,12 +99,21 @@ export function ApplicationView({ app }: { app: Application }) {
 }
 
 /** 검사 요약(분량·위험·근거…)을 글자로. 참고(info)는 뺀다. */
+/**
+ * 검사 요약에서 확인 전 사실에 기댄 문장 수만큼 "근거 없는 경험·수치"를 뺀다 (그 문장은 "확인 전"으로 따로 센다).
+ * 확인 전 사실은 검사가 근거로 치지 않아 같은 문장이 두 번 세어지지 않게.
+ */
+export function withoutUnconfirmed(summary: Record<string, number> | undefined, unconfirmed: number) {
+  if (!summary || !unconfirmed || !summary.unsupported_statement) return summary;
+  return { ...summary, unsupported_statement: Math.max(0, summary.unsupported_statement - unconfirmed) };
+}
+
 export function summaryFlags(summary: Record<string, number> | undefined) {
   if (!summary) return [];
   const groups: Record<string, number> = {};
   for (const [code, n] of Object.entries(summary)) {
     const g = FINDING[code]?.group ?? "info";
-    if (g === "info") continue;
+    if (g === "info" || n <= 0) continue;
     groups[g] = (groups[g] ?? 0) + n;
   }
   return Object.entries(groups).map(([g, n]) => {
@@ -350,6 +359,12 @@ export function SubmitDialog({
     enabled: open,
     staleTime: 0,
   });
+  // AI 초안 가운데 확인 전 사실에만 기댄 문장 (plan §22): 경고와 같이 확인을 받는다
+  const draftView = useQuery({
+    queryKey: ["application-draft", app.id],
+    queryFn: () => api.applicationDraft(app.id),
+    enabled: open,
+  });
   useEffect(() => setAck(false), [open, sensitive.data?.sensitive_hash]);
   useEffect(() => setWarnAck(false), [open]);
   const hash = sensitive.data?.sensitive_hash ?? null;
@@ -386,12 +401,19 @@ export function SubmitDialog({
   const byDoc = new Map(checks?.documents.map((d) => [d.document_id, d]) ?? []);
   const filled = app.documents.filter((d) => d.current_revision > 0);
   const empty = app.documents.filter((d) => d.current_revision === 0);
+  const unconfirmedOf = (docId: string) =>
+    draftView.data?.documents.find((x) => x.document_id === docId)?.unconfirmed_sentences.length ?? 0;
   // 남은 경고 (참고·민감 정보 제외 — 민감 정보는 아래에서 따로 확인받는다)
   const warnings = filled.flatMap((d) =>
-    Object.entries(byDoc.get(d.id)?.summary ?? {})
+    Object.entries(withoutUnconfirmed(byDoc.get(d.id)?.summary, unconfirmedOf(d.id)) ?? {})
       .filter(([code, n]) => n > 0 && !["info", "sensitive"].includes(FINDING[code]?.group ?? "info"))
       .map(([code, n]) => ({ doc: d.title, code, n })),
   );
+  const unconfirmed = filled
+    .map((d) => ({ doc: d.title, n: unconfirmedOf(d.id) }))
+    .filter((u) => u.n > 0);
+  const unconfirmedTotal = unconfirmed.reduce((a, u) => a + u.n, 0);
+  const warnTotal = warnings.reduce((a, w) => a + w.n, 0) + unconfirmedTotal;
   return (
     <ConfirmDialog
       open={open}
@@ -410,7 +432,7 @@ export function SubmitDialog({
         sensitive.isPending ||
         sensitive.isError ||
         (needsAck && !ack) ||
-        (warnings.length > 0 && !warnAck)
+        ((warnings.length > 0 || unconfirmedTotal > 0) && !warnAck)
       }
       onConfirm={() => submit.mutate()}
     >
@@ -429,7 +451,7 @@ export function SubmitDialog({
                   ...(d.counts?.over_char_limit || d.counts?.over_byte_limit
                     ? [{ key: "over", label: "분량 초과", tone: "danger" as const }]
                     : []),
-                  ...summaryFlags(byDoc.get(d.id)?.summary),
+                  ...summaryFlags(withoutUnconfirmed(byDoc.get(d.id)?.summary, unconfirmedOf(d.id))),
                 ]}
               />
             </div>
@@ -442,10 +464,16 @@ export function SubmitDialog({
         </p>
       ) : null}
       {!filled.length ? <p className="mt-2 text-xs text-danger">저장한 글이 없어 고정할 수 없습니다.</p> : null}
-      {warnings.length ? (
+      {warnings.length || unconfirmedTotal ? (
         <div className="mt-3 rounded-md border border-warn/40 bg-warn-soft px-3 py-2.5 text-[13px]">
-          <p className="font-semibold">남은 경고 {warnings.reduce((a, w) => a + w.n, 0)}개</p>
+          <p className="font-semibold">남은 경고 {warnTotal}개</p>
           <ul className="mt-1.5 space-y-0.5">
+            {unconfirmed.map((u) => (
+              <li key={`unconfirmed-${u.doc}`} className="flex gap-2">
+                <span className="font-medium">확인 전 사실에 기댄 문장 {u.n}개</span>
+                <span className="min-w-0 truncate text-xs leading-5 text-muted">{u.doc}</span>
+              </li>
+            ))}
             {warnings.map((w) => (
               <li key={`${w.doc}-${w.code}`} className="flex gap-2">
                 <span className={cn("font-medium", toneText(FINDING_GROUP[FINDING[w.code]!.group].tone))}>

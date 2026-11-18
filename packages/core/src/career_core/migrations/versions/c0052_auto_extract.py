@@ -1,7 +1,7 @@
 """core: 브레인에 넣으면 알아서 정리 — 읽기가 끝난 내 경험 자료의 경험 후보 뽑기를 서버가 건다 (2026-11-18)
 
 Revision ID: c0052
-Revises: c0050
+Revises: c0051
 
 - ``core.workspace_settings.auto_extract``: 이 공간에서 읽기가 끝난 내 경험 자료를 바로 AI로 정리할지
   (기본 켜짐). 끄면 자료 화면에서 직접 "경험 뽑기"를 누른다.
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "c0052"
-down_revision = "c0050"
+down_revision = "c0051"
 branch_labels = None
 depends_on = None
 

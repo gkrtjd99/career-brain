@@ -65,7 +65,8 @@ export function datesLine(p: Pick<PostingSummary, "deadline" | "opens_at" | "lif
 /** 지원 상태 한 마디: 지원 전 · 문항 1/2 · 작성 중 · 제출함 · 1차 면접 · 통과 … */
 export function applicationLabel(a: PostingApplication | null | undefined): string {
   if (!a) return "지원 전";
-  if (a.status === "draft") return a.questions ? `문항 ${a.answered}/${a.questions}` : "작성 중";
+  if (a.status === "draft")
+    return a.questions ? `문항 ${a.questions} · ${a.answered ? `초안 ${a.answered}` : "초안 전"}` : "작성 중";
   if (a.status === "submitted") {
     if (!a.stage) return "제출함";
     if (a.stage.outcome === "pending") return a.stage.name;

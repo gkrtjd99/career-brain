@@ -506,6 +506,7 @@ export const SUGGESTION_STATUS: Record<string, { label: string; tone: BadgeTone 
 export const REVISION_ORIGIN: Record<string, string> = {
   user: "직접 저장",
   ai_suggestion: "AI 수정안 적용",
+  ai_draft: "AI 초안",
 };
 
 export const STAGE_KIND: Record<StageKind, string> = {

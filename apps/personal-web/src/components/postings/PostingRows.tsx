@@ -32,7 +32,7 @@ function draftState(p: PostingSummary): { label: ReactNode; strong: boolean } {
 }
 
 /**
- * 공고 한 줄. 왼쪽: 제목(없으면 호스트) / 회사 · 날짜. 오른쪽: D-day(또는 접수 시작) / 지원 상태.
+ * 공고 한 줄. 왼쪽: 제목(없으면 호스트) / 회사 · 날짜. 오른쪽 한 줄: 지원 상태 · D-day(또는 접수 시작).
  * 선택 모드에서는 줄을 누르면 고른다.
  */
 export function PostingRow({
@@ -55,20 +55,15 @@ export function PostingRow({
 
   const state = draft ? draftState(p) : null;
   const right = (
-    <div className="flex shrink-0 flex-col items-end gap-0.5 text-right text-[13px] tabular-nums">
+    <div className="flex max-w-[45%] shrink-0 flex-col items-end text-right text-[13px] tabular-nums">
       {state ? (
         <span className={cn("whitespace-nowrap", state.strong ? "font-medium text-fg" : "text-muted")}>{state.label}</span>
       ) : (
-        <>
-          {p.lifecycle === "closed" ? null : (
-            <span className={cn("whitespace-nowrap", timingSoon(p) ? "font-semibold text-fg" : "text-muted")}>
-              {timingLabel(p)}
-            </span>
-          )}
-          <span className={cn("whitespace-nowrap", p.application ? "text-fg" : "text-muted")}>
-            {applicationLabel(p.application)}
-          </span>
-        </>
+        <span className={cn("max-w-full truncate", timingSoon(p) && p.lifecycle !== "closed" ? "font-semibold text-fg" : "text-muted")}>
+          {[p.application ? applicationLabel(p.application) : null, p.lifecycle === "closed" ? null : timingLabel(p)]
+            .filter(Boolean)
+            .join(" · ") || "마감"}
+        </span>
       )}
     </div>
   );

@@ -398,6 +398,9 @@ export const applicationRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/applications/$applicationId",
   beforeLoad: requireToken,
+  // draft = 막 만든 지원: 초안 쓰기 창을 바로 연다 (§22)
+  validateSearch: (s: Record<string, unknown>): { draft?: boolean } =>
+    s.draft === true || s.draft === "true" || s.draft === "1" ? { draft: true } : {},
   component: lazyRouteComponent(() => import("./pages/Workbench"), "ApplicationWorkbenchPage"),
 });
 
