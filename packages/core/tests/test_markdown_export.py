@@ -400,7 +400,7 @@ async def env(db, tmp_path):
         claim_ids=[confirmed],
     )
 
-    company = await company_uc.create_company(db, owner, name="가상전자", aliases=["가상"])
+    company = await company_uc.find_or_create_company(db, owner, name="가상전자", aliases=["가상"])
     page = await company_uc.import_paste(
         db,
         None,

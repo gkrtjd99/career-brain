@@ -422,6 +422,22 @@ async def create_company(
     return row.id
 
 
+async def find_or_create_company(
+    db: Database, actor: ActorContext, *, name: str, aliases: list[str] | None = None, **kw
+) -> UUID:
+    """이름 키가 같은 회사가 있으면 그 회사(준 별칭은 더한다), 없으면 만든다. 공고를 저장하면 회사가 저절로
+    생기므로(c0053) 같은 이름으로 다시 만들 때 쓴다."""
+    key = name_key(clean_name(name))
+    async with db.workspace_session(actor.workspace_id) as s:
+        found = await s.scalar(select(Company).where(Company.name_key == key))
+        if found is not None:
+            if aliases:
+                found.aliases = clean_aliases([*found.aliases, *aliases], found.name)
+                found.updated_at = utcnow()
+            return found.id
+    return await create_company(db, actor, name=name, aliases=aliases, **kw)
+
+
 _UNSET: Any = object()
 
 

@@ -1145,8 +1145,11 @@ async def test_merge_policies_permissions_and_rollback(db, env, tmp_path, monkey
     # fail: 겹치는 행이 있으면 아무것도 쓰지 않는다 (같은 공간에 합치면 모두 겹친다)
     with pytest.raises(ArchiveError, match="duplicates_found"):
         await merge_workspace(db, blobs, owner, out, on_duplicate="fail")
-    # B와 A가 겹치는 행은 document_settings(공간당 1행)뿐이다
-    with pytest.raises(ArchiveError, match="duplicates_found: core.document_settings 1$"):
+    # B와 A가 겹치는 행은 document_settings(공간당 1행)와, 두 공간에 같은 이름 회사 공고를 저장해 저절로
+    # 생긴 회사(c0053, 이름 키가 공간 안에서 하나)다
+    with pytest.raises(
+        ArchiveError, match="duplicates_found: core.companies 1, core.document_settings 1$"
+    ):
         await merge_workspace(db, blobs, other, out, on_duplicate="fail")
 
     # 한 행이 CHECK를 어기면 (해시까지 맞춘 묶음) 전체가 되돌려진다

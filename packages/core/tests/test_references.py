@@ -362,7 +362,7 @@ async def test_reference_from_uploaded_source(db, env):
         await uc.create_reference(db, blobs, owner, kind="essay", title="x")
     report = await uc.check_pii(db, owner, source_id=ref.source_id)
     assert report.total == 0
-    cid = await company_uc.create_company(db, owner, name="가상물류")
+    cid = await company_uc.find_or_create_company(db, owner, name="가상물류")
     rid = await uc.create_reference(
         db,
         blobs,
@@ -650,7 +650,7 @@ async def test_mcp_reference_tools_give_notes_not_text(db, env):
 
 async def test_export_restore_keeps_references_marked(db, env, tmp_path):
     owner, blobs = env["owner"], env["blobs"]
-    cid = await company_uc.create_company(db, owner, name="가상물류")
+    cid = await company_uc.find_or_create_company(db, owner, name="가상물류")
     rid = await uc.create_reference(
         db,
         blobs,
