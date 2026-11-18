@@ -58,8 +58,9 @@ class TalentFitIn(BaseModel):
 class TraitFitOut(BaseModel):
     document_id: UUID
     level: str  # absent | claimed | shown | unclear
-    score: float  # 0~2
-    confidence: float | None
+    shown: float  # 문단 중 가장 높은 "한 일로 보여 준다" 확률 (0~1)
+    said: float | None  # "말로 내세우거나 약속한다" 확률 (0~1)
+    evidence: list[str]  # 근거 문단(블록 ID), 확률 높은 순
 
 
 class TraitRowOut(BaseModel):

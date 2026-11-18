@@ -83,9 +83,12 @@ export type TalentLevel = "absent" | "claimed" | "shown" | "unclear";
 export interface TraitFit {
   document_id: Uuid;
   level: TalentLevel;
-  /** 0~2 (확률 가중 평균) */
-  score: number;
-  confidence: number | null;
+  /** 문단 중 가장 높은 "한 일로 보여 준다" 확률 (0~1) */
+  shown: number;
+  /** "말로 내세우거나 약속한다" 확률 (0~1) */
+  said: number | null;
+  /** 근거 문단(블록 ID), 확률 높은 순 */
+  evidence: string[];
 }
 
 export interface TalentTrait {

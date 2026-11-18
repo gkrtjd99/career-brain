@@ -452,7 +452,16 @@ export function DocumentEditor({
           blockNo={blockNo}
         />
       ) : null}
-      {appId ? <TalentFitPanel appId={appId} docId={doc.id} dirty={dirty} /> : null}
+      {appId ? (
+        <TalentFitPanel
+          appId={appId}
+          docId={doc.id}
+          dirty={dirty}
+          blocks={baseBlocks}
+          onJump={jump}
+          blockNo={blockNo}
+        />
+      ) : null}
     </>
   );
 
