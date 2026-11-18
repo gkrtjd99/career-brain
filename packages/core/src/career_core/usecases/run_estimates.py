@@ -33,7 +33,12 @@ from career_core.domain.runs import RunRuleError
 from career_core.ports import ActorContext
 
 # 계획 단위 하나(문단·경험)당 모델 호출 수
-CALLS_PER_UNIT = {"suggest_document_batch": 1, "interview_question_batch": 1}
+CALLS_PER_UNIT = {
+    "suggest_document_batch": 1,
+    "interview_question_batch": 1,
+    # 문항마다 한 번 (분량을 넘으면 한 번 더 줄여 달라고 한다)
+    "draft_application": 1,
+}
 HISTORY_RUNS = 20
 MAX_UNITS = 1000
 MIN_SIZED_RUNS = 2

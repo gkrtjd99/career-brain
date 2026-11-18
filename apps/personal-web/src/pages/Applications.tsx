@@ -1,5 +1,5 @@
 import type { ApplicationSummary } from "@career-brain/client";
-import { cn, Spinner } from "@career-brain/ui";
+import { cn, Disclosure, Spinner } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -35,7 +35,8 @@ export function useCreateApplication() {
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["applications"] });
       qc.invalidateQueries({ queryKey: ["postings"] });
-      void navigate({ to: "/applications/$applicationId", params: { applicationId: res.id } });
+      // 막 만든 지원은 초안 쓰기 창을 바로 연다 (plan §22)
+      void navigate({ to: "/applications/$applicationId", params: { applicationId: res.id }, search: { draft: true } });
     },
   });
 }
@@ -50,13 +51,12 @@ export function ApplicationsPage() {
   const apps = useQuery({ queryKey: ["applications"], queryFn: api.applications });
   const list = apps.data ?? [];
   const draft = list.filter((a) => a.status === "draft").sort(byDeadline);
-  const submitted = list.filter((a) => a.status === "submitted" && !inProcess(a));
-  const process = list.filter(inProcess);
+  const going = list.filter((a) => a.status === "submitted");
   const done = list.filter((a) => ["passed", "rejected", "withdrawn"].includes(a.status));
   const loading = apps.isPending;
 
   return (
-    <div>
+    <div className="mx-auto max-w-3xl">
       <PageHeader title="지원" />
       {loading ? (
         <div className="mb-6 flex items-center gap-2 text-sm text-muted">
@@ -65,9 +65,8 @@ export function ApplicationsPage() {
       ) : null}
       <ErrorText error={apps.error} className="mb-4" />
 
-      {/* 넓은 화면: 네 칸 보드. 좁은 화면: 칸별로 묶은 목록 */}
-      <div className="grid grid-cols-1 gap-y-10 md:grid-cols-2 md:gap-x-10 xl:grid-cols-4 xl:gap-x-8">
-        <Column title="준비 중" count={draft.length}>
+      <div className="space-y-10">
+        <Group title="준비 중" count={draft.length}>
           {draft.length ? (
             <Rows items={draft} />
           ) : !loading ? (
@@ -79,25 +78,34 @@ export function ApplicationsPage() {
               에서 지원서 쓰기를 누르면 여기에 생깁니다.
             </Quiet>
           ) : null}
-        </Column>
-        <Column title="제출" count={submitted.length}>
-          {submitted.length ? <Rows items={submitted} /> : !loading ? <Quiet>제출하고 결과를 기다리는 지원이 없습니다.</Quiet> : null}
-        </Column>
-        <Column title="전형 중" count={process.length}>
-          {process.length ? <Rows items={process} /> : !loading ? <Quiet>서류 다음 전형을 진행 중인 지원이 없습니다.</Quiet> : null}
-        </Column>
-        <Column title="결과" count={done.length}>
-          {done.length ? <Rows items={done} /> : !loading ? <Quiet>기록한 결과가 없습니다.</Quiet> : null}
-          {done.length ? (
-            <p className="mt-3 text-[13px] text-muted">개인 표본은 작습니다. 결과로 원인을 단정하지 않습니다.</p>
-          ) : null}
-        </Column>
+        </Group>
+        {going.length ? (
+          <Group title="제출·전형" count={going.length}>
+            <Rows items={going} />
+          </Group>
+        ) : null}
+        {done.length ? (
+          <Disclosure
+            tone="row"
+            className="border-b border-line"
+            contentClassName="pt-0"
+            title={
+              <>
+                결과 <span className="font-normal text-muted tabular-nums">{done.length}</span>
+              </>
+            }
+          >
+            <div className="pb-3 [&>ul]:border-b-0">
+              <Rows items={done} />
+            </div>
+          </Disclosure>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function Column({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+function Group({ title, count, children }: { title: string; count: number; children: ReactNode }) {
   return (
     <section className="min-w-0">
       <h2 className="mb-2 text-[15px] font-semibold">
@@ -139,24 +147,25 @@ function AppRow({ a }: { a: ApplicationSummary }) {
   const dday = a.status === "draft" ? ddayLabel(a.deadline) : null;
   const n = daysLeft(a.deadline);
   const soon = n !== null && n >= 0 && n <= 3;
+  const written = a.questions - a.unwritten;
   const status =
     a.status === "draft"
-      ? nextAction(a)
+      ? a.questions
+        ? `문항 ${a.questions} · ${written ? `초안 ${written}` : "초안 전"}${a.unwritten && written ? ` · 빈 문항 ${a.unwritten}` : ""}`
+        : nextAction(a)
       : a.status === "submitted"
         ? (stageLine(a) ?? "제출함 · 전형 단계 기록 전")
         : [APP_STATUS[a.status].label, stageLine(a)].filter(Boolean).join(" · ");
+  const name = [a.company, a.job_title].filter(Boolean).join(" · ") || a.title;
   return (
     <li>
       <Link
         to="/applications/$applicationId"
         params={{ applicationId: a.id }}
-        className="-mx-2 flex min-h-14 items-start gap-3 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
+        className="-mx-2 flex min-h-14 items-center gap-3 rounded-md px-2 py-3 transition-colors duration-150 hover:bg-subtle/60"
       >
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{a.company ?? a.title}</div>
-          {a.job_title || a.company ? (
-            <div className="truncate text-[13px] text-muted">{a.job_title ?? a.title}</div>
-          ) : null}
+          <div className="truncate text-sm font-medium">{name}</div>
           <div
             className={cn(
               "mt-0.5 truncate text-[13px] tabular-nums",

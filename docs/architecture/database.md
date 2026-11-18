@@ -709,3 +709,13 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 합치기(`usecases/experience_merge.py::merge_experiences`, approve 필요, 20개까지): 대상 칸이 이긴다(빈 칸만 채움, 태그는 합침). 주장·하위 경험·자격·학력·포트폴리오 항목·면접 세션을 대상으로 옮기고, 대상에 같은 문장이 있는 추출 후보는 근거를 옮긴 뒤 은퇴(`claims_folded`). 지원 준비의 고른 경험·문항·요건과 면접 준비 질문의 경험 ID를 바꿔 쓴다. 이력서 revision은 바꾸지 않는다(덧붙이기만 하는 기록) — 읽을 때 `merged_into_id`를 따라 대상 값으로 읽고, 한 번에 채우기는 대상을 다시 넣지 않는다. 합친 경험은 `retired` + `merged_into_id`로 남는다(기록).
 - 지우기(`delete_experience`): **거부가 기본**. 하위 경험·포트폴리오·면접 세션·쓰인 사실(문서·이력서 줄·포트폴리오 줄·공통 답변·학습)·이력서 최신 revision·지원 준비가 가리키면 409 `experience_in_use`(+ 쓰는 곳 수), 확인한 사실이 있으면 `include_confirmed=true`와 approve가 있어야 한다. 지우면 사실·근거는 cascade, 자격·학력은 연결만 끊고, 은퇴한 하위 경험은 위를 비운다. 이 경험을 가리키던 `possible_duplicate_of`·`merged_into_id`는 FK가 비운다.
 - 내보내기: `@schema_step("c0050")`, 합치기 키는 [backup.md](../operations/backup.md). 시험: `packages/core/tests/test_audit_fixes.py`.
+
+## 지원서 AI 초안 (c0051, plan §22)
+
+`c0051` (`down_revision = c0050`). 표를 더하지 않는다: `document_revisions.origin`의 CHECK에 `ai_draft`를 더할 뿐이다 (`user`·`ai_suggestion`·`ai_draft`).
+
+- 초안 쓰기(`usecases/application_draft.py`, workflow `draft_application`)가 문항마다 새 revision 하나를 남긴다. `origin = 'ai_draft'`, `suggestion_id = NULL`, `reason = 'AI 초안'`, 멱등 키 `run:<실행 ID>:doc:<문서 ID>`. 블록 `origin = 'ai'`, 문장 근거는 `spans`, 기댄 사실은 블록 `claim_ids`와 `document_claims` (예전 근거 표시·검사·제출본 그대로).
+- "확인 전" 표시는 저장하지 않는다: 읽을 때(`GET /core/applications/{id}/draft`) 문장에 걸친 사실 중 확인한 것이 없으면 그 문장을 센다. 사람이 사실을 확인하면 표시가 사라진다.
+- downgrade는 `ai_draft` revision을 `user`로 바꾸고 CHECK를 되돌린다 (revision은 지우지 않는다 — 문서의 지금 글일 수 있다).
+- 내보내기: `no_data_change("c0051")` (표 모양 그대로). 시험: `packages/core/tests/test_application_draft.py`.
+

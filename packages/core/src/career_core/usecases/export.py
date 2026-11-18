@@ -1618,6 +1618,12 @@ def _c0050_experience_merge(arc) -> None:
         )
 
 
+no_data_change(
+    "c0051",
+    "document_revisions.origin에 ai_draft (지원서 AI 초안 revision, CHECK만 넓힘, 옛 행은 그대로)",
+)
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

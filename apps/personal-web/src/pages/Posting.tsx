@@ -9,10 +9,10 @@ import {
   type PostingValue,
   type PostingVersion,
 } from "@career-brain/client";
-import { Badge, Button, Checkbox, cn, DateField, Highlight, IconButton, Input, Section, Sheet, Spinner, Textarea, TimeField, toast } from "@career-brain/ui";
+import { Badge, Button, Checkbox, cn, DateField, Highlight, IconButton, Input, MoreMenu, Section, Sheet, Spinner, Textarea, TimeField, toast } from "@career-brain/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
-import { Archive, ExternalLink, FileText, PenLine, RefreshCw, Trash2, Plus } from "lucide-react";
+import { ExternalLink, FileText, PenLine, Trash2, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { ErrorText, Loaded, PageHeader } from "../components/common";
 import { CompanyLine } from "../components/companies/CompanyLine";
@@ -96,8 +96,12 @@ export function PostingPage() {
 
 function PostingView({ p }: { p: Posting }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [evidenceOf, setEvidenceOf] = useState<{ field: PostingField; index?: number } | null>(null);
   const [versionId, setVersionId] = useState<string | null>(null);
+  const [history, setHistory] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [pasting, setPasting] = useState(false);
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["posting", p.id] });
     qc.invalidateQueries({ queryKey: ["postings"] });
@@ -116,9 +120,11 @@ function PostingView({ p }: { p: Posting }) {
   const st = POSTING_STATUS[p.status];
   const pendingRun = run?.status === "pending";
   const failedRun = run?.status === "failed" || (!p.latest && !pendingRun && run?.status !== "listing");
+  // 저장한 공고는 읽기 화면. 바뀐 항목이 있거나 "수정"을 누르면 확인 양식.
+  const reviewing = p.status !== "saved" || p.pending_changes.length > 0 || editing;
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="mx-auto max-w-3xl">
       <PageHeader
         back={{ to: "/postings", label: "공고" }}
         title={title}
@@ -129,8 +135,12 @@ function PostingView({ p }: { p: Posting }) {
                 <span className={cn("tabular-nums", timingSoon(timing) && "font-semibold text-fg")}>
                   {timingLabel(timing)}
                 </span>
-                <span aria-hidden>·</span>
-                <span className={p.application ? "text-fg" : undefined}>{applicationLabel(p.application)}</span>
+                {p.application ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className="text-fg">{applicationLabel(p.application)}</span>
+                  </>
+                ) : null}
               </>
             ) : (
               <span className={p.status === "draft" ? "font-medium text-fg" : undefined}>{st.label}</span>
@@ -147,66 +157,147 @@ function PostingView({ p }: { p: Posting }) {
           </span>
         }
         actions={
-          <>
+          <div className="flex items-center gap-2">
             {p.status === "saved" ? <WriteApplication p={p} /> : null}
-            <Button variant="ghost" onClick={() => refetch.mutate()} disabled={refetch.isPending || pendingRun}>
-              <RefreshCw size={14} className={pendingRun ? "animate-spin" : undefined} /> 다시 가져오기
-            </Button>
-            {p.status !== "archived" ? (
-              <Button variant="ghost" onClick={() => archive.mutate()} disabled={archive.isPending}>
-                <Archive size={14} /> 보관
-              </Button>
+            {pendingRun ? (
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-muted">
+                <Spinner /> 가져오는 중
+              </span>
             ) : null}
-          </>
+            <MoreMenu
+              label="공고 메뉴"
+              items={[
+                p.status === "saved" && !reviewing ? { label: "수정", onSelect: () => setEditing(true) } : null,
+                p.status === "saved"
+                  ? {
+                      label: "요건별 준비 상태",
+                      onSelect: () => void navigate({ to: "/study", search: { tab: "coverage", posting: p.id } }),
+                    }
+                  : null,
+                {
+                  label: "다시 가져오기",
+                  onSelect: () => refetch.mutate(),
+                  disabled: refetch.isPending || pendingRun,
+                  separated: true,
+                },
+                failedRun ? null : { label: "본문 직접 붙여넣기", onSelect: () => setPasting(true) },
+                { label: "가져오기 기록·버전", onSelect: () => setHistory(true) },
+                p.status !== "archived"
+                  ? { label: "보관", onSelect: () => archive.mutate(), disabled: archive.isPending, separated: true }
+                  : null,
+              ]}
+            />
+          </div>
         }
       />
       <ErrorText error={refetch.error ?? archive.error} className="mb-4" />
       <CompanyLine p={p} />
 
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-14">
-        <div className="min-w-0 space-y-10">
-          {run ? <RunNotice run={run} posting={p} /> : null}
-          {p.pending_changes.length && p.status === "saved" ? (
-            <div role="status" className="rounded-md bg-subtle px-3 py-2.5 text-[13px]">
-              다시 가져온 공고에서 바뀐 항목:{" "}
-              <strong>{p.pending_changes.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}</strong>. 아래에서
-              새 값을 확인하고 다시 저장하세요.
+      <div className="min-w-0 space-y-10">
+        {run ? <RunNotice run={run} posting={p} /> : null}
+        {p.pending_changes.length && p.status === "saved" ? (
+          <div role="status" className="rounded-md bg-subtle px-3 py-2.5 text-[13px]">
+            다시 가져온 공고에서 바뀐 항목:{" "}
+            <strong>{p.pending_changes.map((f) => FIELD_LABEL[f as PostingField] ?? f).join(", ")}</strong>. 아래에서
+            새 값을 확인하고 다시 저장하세요.
+          </div>
+        ) : null}
+        {failedRun || pasting ? (
+          <ManualText postingId={p.id} open onDone={() => (setPasting(false), invalidate())} />
+        ) : null}
+        <ChoiceQuestions p={p} />
+        {reviewing ? (
+          p.latest || p.status !== "draft" ? (
+            <div>
+              <ReviewForm
+                key={`${p.latest?.id}-${p.confirmed_version_id}-${p.saved_at}`}
+                p={p}
+                onEvidence={setEvidenceOf}
+                onSaved={() => (setEditing(false), invalidate())}
+              />
+              {editing && !p.pending_changes.length ? (
+                <Button variant="ghost" className="mt-2" onClick={() => setEditing(false)}>
+                  취소
+                </Button>
+              ) : null}
             </div>
-          ) : null}
-          {failedRun ? <ManualText postingId={p.id} open onDone={invalidate} /> : null}
-          <ChoiceQuestions p={p} />
-          {p.latest || p.status !== "draft" ? (
-            <ReviewForm
-              key={`${p.latest?.id}-${p.confirmed_version_id}-${p.saved_at}`}
-              p={p}
-              onEvidence={setEvidenceOf}
-              onSaved={invalidate}
-            />
-          ) : null}
-          {failedRun ? null : <ManualText postingId={p.id} open={false} onDone={invalidate} />}
-        </div>
-
-        <aside className="mt-10 min-w-0 space-y-10 lg:mt-0">
-          <Section title="가져오기 기록">
-            <Runs runs={p.runs} onVersion={setVersionId} />
-          </Section>
-          {p.status === "saved" ? (
-            <Section title="준비">
-              <NextSteps p={p} />
-            </Section>
-          ) : null}
-          {p.latest ? (
-            <Section title="버전">
-              <Versions p={p} onOpen={setVersionId} />
-            </Section>
-          ) : null}
-        </aside>
+          ) : null
+        ) : (
+          <PostingRead p={p} />
+        )}
       </div>
 
       {p.latest ? (
         <EvidenceSheet posting={p} version={p.latest} target={evidenceOf} onClose={() => setEvidenceOf(null)} />
       ) : null}
+      <Sheet open={history} onOpenChange={setHistory} title="가져오기 기록·버전">
+        <div className="space-y-8">
+          <Section title="가져오기 기록">
+            <Runs runs={p.runs} onVersion={setVersionId} />
+          </Section>
+          {p.latest ? (
+            <Section title="버전">
+              <Versions p={p} onOpen={setVersionId} />
+            </Section>
+          ) : null}
+        </div>
+      </Sheet>
       <VersionSheet postingId={p.id} versionId={versionId} onClose={() => setVersionId(null)} />
+    </div>
+  );
+}
+
+/** 저장한 공고 읽기: 값이 있는 항목만, 문항은 글자 수와 함께. */
+function PostingRead({ p }: { p: Posting }) {
+  const value = (f: PostingField) => p.fields[f];
+  const line = (["location", "employment_type", "career_level"] as PostingField[])
+    .map((f) => value(f))
+    .filter((v): v is string => typeof v === "string" && !!v.trim());
+  const deadline = value("deadline") as string | undefined;
+  const opens = value("opens_at") as string | undefined;
+  const questions = (value("questions") as EssayQuestion[] | undefined) ?? [];
+  const lists = (["responsibilities", "requirements", "preferred", "process"] as PostingField[])
+    .map((f) => ({ f, items: (value(f) as string[] | undefined) ?? [] }))
+    .filter((x) => x.items.length);
+  return (
+    <div className="space-y-8 text-sm">
+      {line.length || deadline || opens ? (
+        <p className="text-[13px] text-muted tabular-nums">
+          {[
+            ...line,
+            deadline ? (deadline === "always" ? "상시 채용" : `마감 ${formatDeadline(deadline)}`) : null,
+            opens ? `접수 시작 ${formatDeadline(opens)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      ) : null}
+      {questions.length ? (
+        <section>
+          <h2 className="mb-2 text-[15px] font-semibold">{FIELD_LABEL.questions}</h2>
+          <ol className="divide-y divide-line border-y border-line">
+            {questions.map((q, i) => (
+              <li key={i} className="flex items-start gap-3 py-3">
+                <span className="shrink-0 text-muted tabular-nums">{i + 1}.</span>
+                <span className="min-w-0 flex-1 leading-6">{q.prompt}</span>
+                {q.char_limit ? (
+                  <span className="shrink-0 text-[13px] text-muted tabular-nums">{q.char_limit.toLocaleString()}자</span>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+      {lists.map(({ f, items }) => (
+        <section key={f}>
+          <h2 className="mb-2 text-[15px] font-semibold">{FIELD_LABEL[f]}</h2>
+          <ul className="list-disc space-y-1 pl-5 leading-6 marker:text-muted">
+            {items.map((it, i) => (
+              <li key={i}>{it}</li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }
@@ -413,25 +504,10 @@ function WriteApplication({ p }: { p: Posting }) {
             : create.mutate(p.id)
         }
       >
-        {create.isPending ? <Spinner /> : <PenLine size={14} />} 지원서 쓰기
+        {create.isPending ? <Spinner /> : <PenLine size={14} />} {app ? "지원서 열기" : "지원서 쓰기"}
       </Button>
       {create.error ? <ErrorText error={create.error} className="basis-full" /> : null}
     </>
-  );
-}
-
-/** 저장한 공고에서 학습으로 넘어가는 길. */
-function NextSteps({ p }: { p: Posting }) {
-  const row =
-    "-mx-2 flex min-h-11 flex-col justify-center rounded-md px-2 py-2.5 transition-colors duration-150 hover:bg-subtle/60";
-  return (
-    <ul className="divide-y divide-line border-t border-line text-[13px]">
-      <li>
-        <Link to="/study" search={{ tab: "coverage", posting: p.id }} className={row}>
-          <span className="text-sm font-medium">요건별 준비 상태 보기</span>
-        </Link>
-      </li>
-    </ul>
   );
 }
 
@@ -499,9 +575,7 @@ function ReviewForm({
         </span>
       }
     >
-      <p className="text-[13px] text-muted">
-        원문에서 못 찾은 값은 비워 두었습니다.
-      </p>
+      {p.status === "draft" ? <p className="text-[13px] text-muted">원문에서 못 찾은 값은 비워 두었습니다.</p> : null}
       <form
         className="mt-3 divide-y divide-line border-t border-line"
         onSubmit={(e) => {

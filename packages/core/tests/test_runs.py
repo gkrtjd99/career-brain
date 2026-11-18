@@ -725,6 +725,7 @@ async def test_start_requires_workflow_action(db, env):
         "submit_application",
         "suggest_document_batch",
         "interview_question_batch",
+        "draft_application",
     }
 
 
@@ -829,6 +830,7 @@ async def test_http_runs_and_approvals(db, env, client):
         w["name"] for w in (await client.get("/core/runs/workflows", headers=auth("viewer"))).json()
     ]
     assert sorted(names) == [
+        "draft_application",
         "interview_question_batch",
         "save_job_urls",
         "submit_application",
