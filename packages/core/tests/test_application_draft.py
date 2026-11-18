@@ -233,6 +233,9 @@ async def test_draft_uses_only_own_candidate_facts(db, env):
     assert run.status == "done", run.error_code
     assert run.result["written"] == 2 and run.result["skipped"] == 0
 
+    # 두 문항 다 지난 경험을 묻는다. 담당 업무도 맥락으로 간다
+    assert [d["question_focus"] for d in llm.datas] == ["past", "past"]
+    assert all("responsibilities" in d for d in llm.datas)
     sent = [json.dumps(d, ensure_ascii=False) for d in llm.datas]
     sent_ids = {c["claim_id"] for d in llm.datas for e in d["experiences"] for c in e["claims"]}
     # 참고 글·restricted 사실은 모델로 가지 않는다
@@ -279,6 +282,23 @@ async def test_draft_uses_only_own_candidate_facts(db, env):
 
     await brain.confirm_claim(db, owner, UUID(claims["c3"]), contribution="personal")
     assert (await draft.draft_view(db, owner, aid)).unconfirmed_total == 0
+
+
+@pytest.mark.parametrize(
+    ("question", "focus"),
+    [
+        ("입사 후 이루고 싶은 목표를 적어 주세요. (공백 포함 500자 이내)", "future"),
+        ("입사 후 포부를 지난 경험과 연결해 적어 주세요.", "future"),
+        ("앞으로 5년의 커리어 계획은 무엇입니까?", "future"),
+        ("당사에서 하고 싶은 일을 적어 주세요.", "future"),
+        ("목표를 세워 달성한 경험을 적어 주세요.", "past"),
+        ("지원 직무와 관련해 가장 자신 있는 경험을 적어 주세요.", "past"),
+        ("지원 동기를 적어 주세요.", "past"),
+    ],
+)
+def test_question_focus(question, focus):
+    # 포부 문항은 앞으로 할 일 중심으로 쓰게 모델에 알린다 (지난 경험은 짧은 근거로만)
+    assert draft.question_focus(question) == focus
 
 
 async def test_char_limit_retry_then_trim(db, env):
