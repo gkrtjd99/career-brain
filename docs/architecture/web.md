@@ -12,7 +12,7 @@ CAREER_API_PROXY=http://127.0.0.1:8765 npm run dev     # API 주소가 다르면
 npm run typecheck && npm run build                     # 결과: apps/personal-web/dist
 ```
 
-처음 열면 첫 연결 화면(`/connect`)에서 `uv run personal-api bootstrap` 이 출력한 API 토큰을 넣는다. 저장 전에 `/api/core/me` 로 확인하고, 이 브라우저의 `localStorage` 에만 둔다. 401이 오면 첫 연결 화면으로 돌아간다. 토큰 바꾸기·지우기는 연결·관리 › 토큰.
+토큰이 없으면 첫 연결 화면(`/connect`)이 먼저 `POST /api/local/session`을 부른다: 서버를 띄운 컴퓨터의 브라우저면 내 공간의 owner 토큰을 받아 바로 연다 (공간이 없으면 그때 만든다, [install.md](../operations/install.md) §1). 다른 기기는 연결·관리 › 토큰에서 만든 토큰을 넣는다. 저장 전에 `/api/core/me` 로 확인하고, 이 브라우저의 `localStorage` 에만 둔다. 401이 오면 첫 연결 화면으로 돌아간다. 토큰 바꾸기·지우기는 연결·관리 › 토큰.
 
 배포 빌드는 정적 파일(`dist/`)이다. 같은 출처에서 `/api` 를 personal-api 로 넘기면 된다. API 주소가 다르면 빌드 때 `VITE_API_BASE` 로 바꾼다. 테마 초기화는 외부 파일(`/theme-init.js`)이라 `script-src 'self'` CSP와 맞는다.
 

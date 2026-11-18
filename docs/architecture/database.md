@@ -732,3 +732,7 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - 같은 파일을 다시 넣거나 끝난 읽기에 이 기기의 글을 붙여도 같은 검사로 건다. 확인 대기 자료를 내 경험으로 정하면 권한·설정·연결이 맞을 때만 건다.
 - `GET /core/brain/organize`: 정리 상태 한 줄 (읽는 중·정리 중, 용도 확인 필요, 실패, 확인할 사실, 같은 경험일 수 있음, 프로필에 넣을 값, 학력·기술 제안, 자격 후보, 곧 만료, 지난 하루의 정리 결과, `auto_extract` 상태). 세기만 한다.
 - 내보내기: `@schema_step("c0052")`(옛 묶음: 설정 켜짐, 옛 읽기는 자동으로 뽑지 않음). 시험: `packages/core/tests/test_auto_extract.py`.
+
+## 이 컴퓨터에서 바로 열기 (p0003)
+
+`personal` 체인 `p0003_local_login` (down_revision `p0002`): 표는 그대로, SECURITY DEFINER 함수 `personal.local_login_owner()` 하나. 쓸 수 있는(폐기·만료 아님) owner 토큰이 있는 공간 중 데모(`label = 'demo'`)가 아닌 것, 마지막으로 쓴(없으면 만든) 시각이 늦은 것의 (공간, actor)를 돌려준다. 토큰·해시는 돌려주지 않는다. 부르는 곳은 `POST /api/local/session`(`personal_api/local_login.py`) 하나뿐: 이 컴퓨터·이 컴퓨터 이름·같은 화면 요청에만 새 owner 토큰(`이 컴퓨터`)을 만들고, 공간이 없으면 만든다. 내보내기 대상 밖(`personal.*`). 시험: `apps/personal-api/tests/test_local_login.py`.

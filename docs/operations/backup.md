@@ -13,7 +13,7 @@
 ## 1. 공간 내보내기
 
 ```bash
-export CAREER_API_TOKEN=cbp_...          # 소유자 토큰 (bootstrap에서 받은 것)
+export CAREER_API_TOKEN=cbp_...          # 소유자 토큰 (연결·관리 › 토큰에서 만든 것)
 uv run --no-sync personal-api export --out career-$(date +%F).tar.gz
 # Docker (app.env에 CAREER_API_TOKEN). 마운트한 폴더는 컨테이너 사용자(uid 10001)가 쓸 수 있어야 한다
 mkdir -p backup && sudo chown 10001 backup

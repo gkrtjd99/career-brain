@@ -39,12 +39,20 @@ uv sync --package personal-api --no-dev --extra pdf-render --extra korean   # �
 docker compose -f deploy/compose/compose.yaml up -d db   # 127.0.0.1:5432, 개발용 비밀번호
 cp .env.example .env                               # 모델 키 (선택). .env는 git에 올리지 않는다
 cp models.example.toml models.toml                 # 모델 설정 (선택, 없으면 모델 기능만 꺼진다: §3)
-uv run --no-sync personal-api migrate
-uv run --no-sync personal-api bootstrap            # API 토큰을 한 번만 출력한다. 안전한 곳에 보관
-uv run --no-sync personal-api demo                 # 선택: 가상 자료로 채운 데모 공간 + 그 토큰 (아래 "데모 공간")
 npm ci && npm run build                            # 선택: apps/personal-web/dist
 uv run --no-sync personal-api serve                # http://127.0.0.1:8000 (API + worker + 웹)
 ```
+
+이 컴퓨터 브라우저로 http://127.0.0.1:8000 을 열면 바로 쓴다. `migrate`·`bootstrap`은 따로 돌리지 않는다:
+
+- DB 준비: `serve`가 127.0.0.1·localhost에 붙을 때 시작 전에 migration을 한다 (`CAREER_AUTO_MIGRATE=0`이면 끈다).
+- 내 공간: 이 컴퓨터 브라우저가 처음 열 때 만들고, 그 브라우저에 owner 토큰을 넣어 준다 (`POST /api/local/session`).
+  받는 요청은 이 컴퓨터(loopback)에서, 이 컴퓨터 이름(127.0.0.1·localhost)으로, 같은 화면에서 보낸 것뿐이다.
+  다른 사이트·다른 기기·같은 컴퓨터의 리버스 프록시를 거친 바깥 주소 요청은 404. 끄려면 `CAREER_LOCAL_LOGIN=0`.
+  공간이 여럿이면 쓸 수 있는 owner 토큰이 있는 공간 중 데모가 아닌 것, 가장 최근에 쓴 것을 연다.
+- 다른 기기(휴대폰 등)·MCP·CLI(`CAREER_API_TOKEN`)용 토큰은 설정 → 연결·관리 → 토큰에서 만든다.
+  `personal-api bootstrap`(공간 + 토큰을 명령으로 만들기)은 서버·스크립트용으로 남아 있다.
+- `uv run --no-sync personal-api demo`: 선택. 가상 자료로 채운 데모 공간 + 그 토큰 (아래 "데모 공간").
 
 설치되는 선택 기능 (2026-11-18 확인):
 
