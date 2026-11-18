@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
@@ -98,8 +99,9 @@ Rules:
 - Every claim must cite at least one quote copied EXACTLY (character for character) from one block.
   Keep quotes short: the phrase that supports the claim, not the whole block.
 - statement: one sentence in the document's language, staying close to the quoted words.
-- contribution: "personal" only if the text says the person did it themselves,
-  "team" if it is a team/organization result, otherwise "unknown".
+- contribution: "personal" only if the text says the person did it themselves (직접, 혼자, 담당,
+  주도, 제가, "I" …), "team" if it is a team/organization result, otherwise "unknown". Korean
+  resumes leave out the subject ("결제 API 구축"); a missing subject alone is "unknown".
 - kind: one of responsibility, action, result, decision, difficulty, skill, other.
 - period: copy the period as written (e.g. "2021.03 - 2023.02") or null. Never guess.
 - An experience is something the person DID: a job, a project, a course or bootcamp they took part in,
@@ -184,6 +186,24 @@ def parse_model_json(text: str) -> dict[str, Any]:
     if start < 0 or end <= start:
         raise ValueError("no_json")
     return json.loads(text[start : end + 1])
+
+
+# 본인이 했다고 글에 적힌 표시. 한국어 이력서는 주어를 빼고 쓰므로("결제 API 구축") 주어가 없다는 것만으로
+# "본인"이 아니다. 이런 표시가 인용·문장에 없으면 모델이 "본인"이라 해도 "모름"으로 두고 사람이 정한다.
+_SELF_MARKERS = re.compile(
+    r"직접|혼자|단독|전담|담당|주도|맡아|맡은|맡았|제가|저는|본인이|본인은|1인|"
+    r"\bI\b|\bmy\b|\bmyself\b|\bsolely\b|\bpersonally\b",
+    re.IGNORECASE,
+)
+
+
+def checked_contribution(contribution: str, texts: Sequence[str]) -> str:
+    """모델이 정한 기여 구분을 글로 확인한다: "본인"은 본인 표시가 있을 때만 남긴다."""
+    if contribution == Contribution.PERSONAL.value and not any(
+        _SELF_MARKERS.search(t or "") for t in texts
+    ):
+        return Contribution.UNKNOWN.value
+    return contribution
 
 
 def find_quote(block_text: str, quote: str) -> tuple[int, int] | None:
@@ -794,7 +814,10 @@ class _Saver:
                 experience_id=target.row.id,
                 kind=_norm(c.kind, ClaimKind, ClaimKind.OTHER.value),
                 statement=statement,
-                contribution=_norm(c.contribution, Contribution, Contribution.UNKNOWN.value),
+                contribution=checked_contribution(
+                    _norm(c.contribution, Contribution, Contribution.UNKNOWN.value),
+                    [statement, *(b.text[a:z] for b, a, z in spans)],
+                ),
                 status=ClaimStatus.EXTRACTED.value,
                 origin=ClaimOrigin.AI_EXTRACTION.value,
                 extraction_run_id=self.run_id,
