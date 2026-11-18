@@ -1,10 +1,11 @@
 import { FileUp } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
+import { collectDropped } from "../../lib/folderFiles";
 import { hasFiles } from "../UploadSheet";
 
 /**
  * 화면 어디에 파일을 끌어다 놓아도 브레인에 넣기 창으로 보낸다 (c0039). 놓는 동안만 화면 전체에 안내를 띄운다.
- * 글·링크를 끌 때는 아무것도 하지 않는다 (파일만).
+ * 글·링크를 끌 때는 아무것도 하지 않는다 (파일·폴더만).
  */
 export function IngestDropTarget({ onFiles, children }: { onFiles: (files: File[]) => void; children: ReactNode }) {
   const [over, setOver] = useState(false);
@@ -29,8 +30,10 @@ export function IngestDropTarget({ onFiles, children }: { onFiles: (files: File[
         e.preventDefault();
         depth.current = 0;
         setOver(false);
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length) onFiles(files);
+        // 폴더를 놓으면 안쪽 파일까지 모은다 (읽지 못하는 형식·시스템 파일은 뺀다)
+        void collectDropped(e.dataTransfer).then(({ files }) => {
+          if (files.length) onFiles(files);
+        });
       }}
     >
       {children}

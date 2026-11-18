@@ -4,7 +4,8 @@
 DOCX(c0023)는 zip 안에 본문 부분(``word/document.xml``)이 있어야 하고, 항목 수가 많으면 판별하지 않는다
 (압축 해제 상한은 파서·검사가 ``domain.docx_zip``으로 다시 지킨다). 다른 zip은 받지 않는다.
 PPTX·XLSX·HWPX(2026-11-17)도 zip 안 본문 부분 이름으로 판별한다 (``docx_zip.office_kind``).
-옛 한글(.hwp, OLE 복합 문서 또는 한글 3.0)은 받아 두되 읽지 않는다 (파서가 ``hwp_unsupported``).
+옛 한글(.hwp)은 OLE 복합 문서(한글 5.x)면 ``adapters.hwp``가 읽고, 한글 3.0 이하는 받아 두되 읽지 않는다
+(파서가 ``hwp_unsupported``).
 다른 OLE 문서(.doc·.xls·.ppt)는 받지 않는다.
 """
 

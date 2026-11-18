@@ -11,6 +11,7 @@ import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "
 import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { ExportSheet } from "../components/doc/ExportSheet";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
+import { BrainLinkPanel } from "../components/doc/BrainLinkPanel";
 import { TalentFitPanel } from "../components/doc/TalentFitPanel";
 import { VisibilityJudgePanel } from "../components/doc/VisibilityJudgePanel";
 import { api, ApiError } from "../lib/api";
@@ -262,7 +263,13 @@ export function DocumentEditor({
         idempotency_key: `${doc.id}:${opts.baseRevision}:${fnv1a(canonical(blocks))}`,
       }),
     onSuccess: async () => {
-      const fresh = await qc.fetchQuery({ queryKey: ["document", doc.id], queryFn: () => api.document(appId, doc.id) });
+      // 방금 저장한 판을 꼭 다시 받는다: 기본 staleTime(15초) 안이면 fetchQuery가 저장 전 캐시를 돌려줘
+      // 편집기가 저장 전 글로 되돌아가 보였다 (2026-11-19)
+      const fresh = await qc.fetchQuery({
+        queryKey: ["document", doc.id],
+        queryFn: () => api.document(appId, doc.id),
+        staleTime: 0,
+      });
       reset(fresh);
       if (appId) {
         qc.invalidateQueries({ queryKey: ["application", appId] });
@@ -452,6 +459,23 @@ export function DocumentEditor({
           blockNo={blockNo}
         />
       ) : null}
+      <BrainLinkPanel
+        appId={appId}
+        docId={doc.id}
+        revision={doc.revision_no}
+        dirty={dirty}
+        onJump={jump}
+        blockNo={blockNo}
+        onLink={(links) =>
+          setBlocks((bs) =>
+            bs.map((b) => {
+              const add = links.find((l) => l.blockId === b.id)?.claimIds ?? [];
+              const extra = add.filter((c) => !b.claim_ids.includes(c));
+              return extra.length ? { ...b, claim_ids: [...b.claim_ids, ...extra] } : b;
+            }),
+          )
+        }
+      />
       {appId ? (
         <TalentFitPanel
           appId={appId}
@@ -478,6 +502,7 @@ export function DocumentEditor({
         const fresh = await qc.fetchQuery({
           queryKey: ["document", doc.id],
           queryFn: () => api.document(appId, doc.id),
+          staleTime: 0, // 수정안을 적용한 새 판 (저장과 같다)
         });
         reset(fresh);
         qc.invalidateQueries({ queryKey: ["revisions", doc.id] });

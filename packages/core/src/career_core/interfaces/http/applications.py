@@ -439,6 +439,38 @@ def _shared_scope() -> None:
     return None
 
 
+class ToBrainOut(BaseModel):
+    source_id: UUID
+    deduplicated: bool  # 같은 글을 이미 넣었음 (처음 원본을 쓴다)
+    title: str
+    paragraphs: int
+    withheld: int  # 제한 근거가 연결돼 넣지 않은 문단
+
+
+class ClaimMatchOut(BaseModel):
+    claim_id: UUID
+    statement: str
+    kind: str
+    experience_id: UUID
+    experience_title: str
+
+
+class BlockMatchOut(BaseModel):
+    block_id: str
+    confirmed: list[ClaimMatchOut]
+    pending: int
+
+
+class BrainMatchesOut(BaseModel):
+    document_id: UUID
+    in_brain: bool
+    source_id: UUID | None
+    review_source_id: UUID | None
+    blocks: list[BlockMatchOut]
+    confirmed_total: int
+    pending_total: int
+
+
 def _add_document_routes(router: APIRouter, deps, authorize, doc_path: str, scope_dep) -> None:
     """문서 하나에 붙는 경로. scope는 지원 ID(지원 문서) 또는 None(공용 문서)."""
     db = deps.db
@@ -471,6 +503,59 @@ def _add_document_routes(router: APIRouter, deps, authorize, doc_path: str, scop
         except NotFound as exc:
             raise _not_found() from exc
         return DocumentOut.model_validate(view, from_attributes=True)
+
+    @router.post(doc_path + "/to-brain", response_model=ToBrainOut, status_code=201)
+    async def send_to_brain(
+        actor: Annotated[ActorContext, Depends(authorize("sources.write"))],
+        scope: Scope,
+        document_id: UUID,
+    ) -> ToBrainOut:
+        """저장한 글을 브레인에 내 경험 자료로 넣는다. 읽기가 끝나면 경험·주장 후보를 뽑는다 (권한이 있을 때)."""
+        from career_core.uploads import UploadRejected
+        from career_core.usecases import document_brain
+
+        if deps.blobs is None:
+            raise HTTPException(status_code=503, detail="uploads_not_configured")
+        try:
+            res, rendered = await document_brain.send_to_brain(
+                db,
+                deps.blobs,
+                actor,
+                scope,
+                document_id,
+                max_bytes=deps.max_upload_bytes,
+                auto_extract=deps.permissions.allows(actor, "brain.extract"),
+            )
+        except NotFound as exc:
+            raise _not_found() from exc
+        except UploadRejected as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+        if res.deduplicated and res.parse_run_id is not None:
+            # 같은 글을 다시 보냄: 그때 정리하지 못했으면 지금 정리한다 (POST /sources와 같다)
+            from career_core.usecases.parsing import after_read
+
+            if deps.permissions.allows(actor, "brain.extract"):
+                await after_read(
+                    db, deps.models, actor.workspace_id, res.parse_run_id, allowed=True
+                )
+        return ToBrainOut(
+            source_id=res.source_id,
+            deduplicated=res.deduplicated,
+            title=rendered.title,
+            paragraphs=rendered.paragraphs,
+            withheld=rendered.withheld,
+        )
+
+    @router.get(doc_path + "/brain-matches", response_model=BrainMatchesOut)
+    async def brain_matches(actor: reader, scope: Scope, document_id: UUID) -> BrainMatchesOut:
+        """문단마다 그 글 안에 원문 인용이 그대로 있는 브레인 주장 (확인한 것은 연결 후보, 확인 전은 수만)."""
+        from career_core.usecases import document_brain
+
+        try:
+            got = await document_brain.brain_matches(db, actor, scope, document_id)
+        except NotFound as exc:
+            raise _not_found() from exc
+        return BrainMatchesOut.model_validate(got, from_attributes=True)
 
     @router.get(doc_path + "/revisions", response_model=list[RevisionSummaryOut])
     async def revisions(actor: reader, scope: Scope, document_id: UUID) -> list[RevisionSummaryOut]:

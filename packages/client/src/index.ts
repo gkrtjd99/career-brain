@@ -383,6 +383,12 @@ export function createClient({
         `${docPath(applicationId, documentId)}/revisions`,
         body,
       ),
+    /** 저장한 글을 브레인에 내 경험 자료로 넣는다 (읽기 뒤 경험·주장 후보를 뽑는다) */
+    documentToBrain: (applicationId: string | null, documentId: string) =>
+      post<T.ToBrainOut>(`${docPath(applicationId, documentId)}/to-brain`),
+    /** 문단마다 글 안에 원문 인용이 그대로 있는 브레인 주장 (확인한 것은 연결 후보, 확인 전은 수만) */
+    brainMatches: (applicationId: string | null, documentId: string) =>
+      get<T.BrainMatches>(`${docPath(applicationId, documentId)}/brain-matches`),
     /** 편집 중인 문단의 글자·바이트 수 (서버 코드가 센다, 저장 안 함) */
     countDraft: (applicationId: string | null, documentId: string, blocks: string[], signal?: AbortSignal) =>
       json<T.TextCounts>(
