@@ -95,7 +95,7 @@ function BrowserTokenSection({ me }: { me: Me | undefined }) {
           spellCheck={false}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="personal-api bootstrap (또는 demo) 이 출력한 토큰"
+          placeholder="cbp_로 시작하는 토큰"
         />
         <ErrorText error={check.error} />
         <div className="flex flex-wrap gap-2">

@@ -15,7 +15,7 @@
 | streamable HTTP (JSON 응답) | `POST http://127.0.0.1:8000/api/core/mcp` | `Authorization: Bearer <API 토큰>` (요청마다 확인) |
 | stdio | `personal-api mcp` | 환경변수 `CAREER_API_TOKEN` (메시지마다 다시 확인) |
 
-- 토큰은 HTTP API와 같은 것(`personal-api bootstrap`이 만든 `cbp_…`)이고 같은 `IdentityResolver`로 확인한다. 폐기하면 다음 요청부터 막힌다.
+- 토큰은 HTTP API와 같은 것(연결·관리 › 토큰에서 만든 `cbp_…`)이고 같은 `IdentityResolver`로 확인한다. 폐기하면 다음 요청부터 막힌다.
 - 공간은 토큰이 정한다. 도구 인자는 `additionalProperties: false`라서 `workspace_id`를 넘기면 `invalid_arguments`로 거부된다.
 - `Origin` 헤더가 있으면 같은 호스트여야 한다(브라우저를 이용한 DNS rebinding 차단). `GET /api/core/mcp`(서버→클라이언트 스트림)는 제공하지 않아 405다.
 - 지원 규격 판: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`. 그 밖의 판을 요청하면 최신 판으로 답한다.

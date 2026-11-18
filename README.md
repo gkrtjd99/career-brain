@@ -50,13 +50,13 @@ http://127.0.0.1:8000 을 열고 설정 화면에 토큰을 넣는다. 인터넷
 uv sync --package personal-api --no-dev --extra pdf-render --extra korean   # 선택 기능: install.md §1
 docker compose -f deploy/compose/compose.yaml up -d db   # 개발용 DB (127.0.0.1)
 cp .env.example .env && cp models.example.toml models.toml   # 선택: 모델 키·설정
-uv run --no-sync personal-api migrate
-uv run --no-sync personal-api bootstrap                  # 또는 demo
 npm ci && npm run build                                  # 웹 화면
 uv run --no-sync personal-api serve                      # http://127.0.0.1:8000
 ```
 
-**업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ... && personal-api migrate`. 그 전에 `pg_dump` 백업 또는 `personal-api export` ([backup.md](docs/operations/backup.md)).
+이 컴퓨터 브라우저로 열면 바로 쓴다. DB 준비는 `serve`가 하고, 내 공간은 처음 열 때 만들어진다. 토큰은 휴대폰 같은 다른 기기에서 열 때만 설정 → 연결·관리 → 토큰에서 만든다. 예시 데이터로 둘러보려면 `personal-api demo`.
+
+**업데이트**: `git pull` → (Docker) `docker compose up -d --build` / (로컬) `uv sync ...` 뒤 `serve`를 다시 띄우면 DB도 맞춘다. 그 전에 `pg_dump` 백업 또는 `personal-api export` ([backup.md](docs/operations/backup.md)).
 
 **모델 연결**: `models.example.toml`을 `models.toml`로 복사하고 키는 환경변수로 둔다. `personal-api models`(상태, 키 값은 출력 안 함) · `pricing`(단가표) · `ping`(연결 확인, 종량제면 과금) · `usage`(사용량). 검색 임베딩 기본은 OpenAI `text-embedding-3-large` 1024차원, 더 싸게는 `3-small` 512차원, 자료를 밖으로 보내지 않으려면 로컬 모델. 비교: [search.md](docs/architecture/search.md) · 게이트웨이: [models.md](docs/architecture/models.md)
 

@@ -1,11 +1,15 @@
 """`personal-api serve`: 작은 서버용 all-in-one 실행.
 
 한 프로세스가 API(uvicorn) + 작업 worker(별도 스레드) + 빌드된 웹 정적 파일을 맡는다.
-migration은 하지 않는다 (`personal-api migrate`를 배포 때 따로 실행).
+이 컴퓨터에서 띄울 때(127.0.0.1)는 시작 전에 migration도 한다. 따로 ``migrate``·``bootstrap``을 돌릴
+필요가 없다 (공간은 브라우저로 처음 열 때 만든다, ``personal_api.local_login``). 컨테이너(0.0.0.0)는
+compose의 ``migrate`` 서비스가 먼저 돈다.
 
 환경변수 (명령행 인자가 우선):
   CAREER_HOST              기본 127.0.0.1 (컨테이너 이미지는 0.0.0.0)
   CAREER_PORT              기본 8000
+  CAREER_AUTO_MIGRATE      기본: 127.0.0.1·localhost에 붙을 때 1, 그 밖 0
+  CAREER_LOCAL_LOGIN       기본 1. 0이면 이 컴퓨터 브라우저도 토큰을 넣는다
   CAREER_EMBEDDED_WORKER   기본 1. 0이면 API만 (worker는 `personal-api worker`로 따로)
   CAREER_WORKER_LISTEN     기본 1. 새 작업을 LISTEN/NOTIFY로 바로 알아챔 (0이면 짧은 간격 확인만)
   CAREER_WORKER_POLL_SECONDS  대기 작업이 없을 때 확인 간격, 기본 30 (LISTEN 끄면 1)
@@ -96,6 +100,14 @@ def serve(
     from personal_api.cli import build_handlers
     from personal_api.main import app
 
+    bind = host or os.environ.get("CAREER_HOST", "127.0.0.1")
+    if env_flag("CAREER_AUTO_MIGRATE", bind in ("127.0.0.1", "localhost", "::1")):
+        from career_core.db.migrate import upgrade
+
+        from personal_api.migrations import PERSONAL_CHAIN
+
+        upgrade(settings.migration_database_url, [PERSONAL_CHAIN])
+        log.info("migrations: up to date")
     if worker is None:
         worker = env_flag("CAREER_EMBEDDED_WORKER", True)
     if worker:
@@ -110,7 +122,7 @@ def serve(
     quiet_capture_queries()
     uvicorn.run(
         app,
-        host=host or os.environ.get("CAREER_HOST", "127.0.0.1"),
+        host=bind,
         port=port or int(os.environ.get("CAREER_PORT", "8000")),
         log_level=os.environ.get("CAREER_LOG_LEVEL", "info"),
         access_log=env_flag("CAREER_ACCESS_LOG", True),

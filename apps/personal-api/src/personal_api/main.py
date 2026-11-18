@@ -21,6 +21,7 @@ from personal_api.identity import (
     PersonalTokenResolver,
     mcp_oauth_from_settings,
 )
+from personal_api.local_login import local_login_router
 from personal_api.models import (
     build_connections,
     load_config,
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from career_core.interfaces.mcp.oauth import add_metadata_routes
 
         add_metadata_routes(app, deps.mcp_oauth.config)  # /.well-known/… (접두어 밖)
+    app.include_router(local_login_router(db), prefix="/api")  # 이 컴퓨터에서 바로 열기
     app.include_router(build_router(deps), prefix="/api")
     mount_web(app, web_dir_from_env())  # 마지막: /api 경로가 먼저 매칭된다
     return app
