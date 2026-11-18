@@ -44,6 +44,12 @@ data_classes = ["public"]
 # preset = "local"
 # model_dir = "./data/models"
 
+# --- 판정 모델 (TypeSafe Jev). 글을 만들지 않고 확률로 답한다. 인재상 맞춤 판정(talent_fit)에만 쓴다.
+# 입력 토큰만 과금 ($0.042 / 1M). 키: TYPESAFE_API_KEY
+# [endpoints.jev]
+# preset = "typesafe"
+# data_classes = ["private"]
+
 # --- 그 밖의 OpenAI 호환 서버
 # [endpoints.other]
 # preset = "openai-compatible"
@@ -75,6 +81,7 @@ embed = "openai/text-embedding-3-large"
 # 판정 모델 (참고 의견만: 자동 연결·충족 판정 없음). 없으면 기준선(검색 점수·단어 일치)만. default로 넘어가지 않는다.
 # judge_claim = "claude/claude-haiku-5-5"        # 학습 연결 후보: "이 주장이 요건을 보여 주는가" + 이유
 # judge_visibility = "claude/claude-haiku-5-5"   # 지원 문서 요건 가시성 + 문서 속 인용
+# talent_fit = "jev/jev-1.14.0"                # 자기소개서가 인재상을 한 일로 보여 주는가 (TypeSafe 연결만)
 # 지원 준비 문서: 검색 후보 안에서 문항마다 쓸 경험을 고르고 이유를 쓴다(글은 쓰지 않음). 없으면 default.
 # application_prep = "claude/claude-sonnet-5-5"
 # 면접 준비: 출처마다 예상 질문 문구를 다듬고 후보 안에서 쓸 경험을 고른다(답은 쓰지 않음). 없으면 default.

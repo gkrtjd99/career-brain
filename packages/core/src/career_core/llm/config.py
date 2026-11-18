@@ -21,7 +21,7 @@ TOKEN_PARAMS = frozenset({"max_tokens", "max_completion_tokens"})
 
 @dataclass(frozen=True, slots=True)
 class Preset:
-    kind: str  # "anthropic" | "openai" (OpenAI 호환) | "local" (이 프로세스 안에서 도는 모델)
+    kind: str  # "anthropic" | "openai" (OpenAI 호환) | "local" (이 프로세스 안) | "typesafe" (판정)
     base_url: str | None
     api_key_env: str | None
     pricing_provider: str | None
@@ -56,10 +56,13 @@ PRESETS: dict[str, Preset] = {
     "openrouter": Preset("openai", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", None),
     "ollama": Preset("openai", "http://127.0.0.1:11434/v1", None, None, billing=BILLING_FREE),
     "openai-compatible": Preset("openai", None, None, None),
+    # TypeSafe System One (Jev): 글을 만들지 않고 질문마다 확률·점수를 돌려주는 판정 모델. 판정 용도만 맡는다.
+    "typesafe": Preset("typesafe", "https://api.typesafe.ai/v1", "TYPESAFE_API_KEY", "typesafe"),
     # 로컬 임베딩(fastembed, ONNX). 자료가 기계 밖으로 나가지 않으므로 egress 검사를 하지 않는다.
     "local": Preset("local", None, None, None, billing=BILLING_FREE),
 }
 KIND_LOCAL = "local"
+KIND_TYPESAFE = "typesafe"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +124,20 @@ EMBED_PURPOSE = "embed"
 RERANK_PURPOSE = "rerank"
 # 로컬(이 프로세스 안) 모델이 맡을 수 있는 용도
 LOCAL_PURPOSES = frozenset({EMBED_PURPOSE, RERANK_PURPOSE})
+TALENT_FIT_PURPOSE = "talent_fit"
+# 판정 모델(KIND_TYPESAFE)이 맡는 용도. 판정 모델은 이 용도만, 이 용도는 판정 모델만 맡는다.
+JUDGMENT_PURPOSES = frozenset({TALENT_FIT_PURPOSE})
+
+
+def route_problem(purpose: str, endpoint: EndpointConfig) -> str | None:
+    """용도와 연결 종류가 맞지 않는 이유 (맞으면 None). 파일 설정과 화면 설정이 같이 쓴다."""
+    if purpose not in LOCAL_PURPOSES and endpoint.kind == KIND_LOCAL:
+        return "local_only_embed"
+    if purpose == EMBED_PURPOSE and endpoint.kind == "anthropic":
+        return "embed_needs_openai"
+    if (purpose in JUDGMENT_PURPOSES) != (endpoint.kind == KIND_TYPESAFE):
+        return "judgment_only" if endpoint.kind == KIND_TYPESAFE else "needs_judgment_model"
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +239,11 @@ def parse_models_config(text: str, *, base_dir: Path | None = None) -> ModelsCon
             )
     if (r := routes.get(EMBED_PURPOSE)) and endpoints[r.endpoint].kind == "anthropic":
         raise ConfigError("the embed route needs an OpenAI-compatible or local endpoint")
+    for purpose, route in routes.items():
+        if endpoints[route.endpoint].kind == KIND_TYPESAFE and purpose not in JUDGMENT_PURPOSES:
+            raise ConfigError(f"route {purpose!r}: typesafe endpoints only serve judgment routes")
+        if purpose in JUDGMENT_PURPOSES and endpoints[route.endpoint].kind != KIND_TYPESAFE:
+            raise ConfigError(f"route {purpose!r} needs a typesafe endpoint")
     top_n = data.get("rerank", {}).get("top_n", DEFAULT_RERANK_TOP_N)
     if not isinstance(top_n, int) or not 2 <= top_n <= 50:
         raise ConfigError("rerank.top_n must be an integer between 2 and 50")

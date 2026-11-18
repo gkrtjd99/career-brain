@@ -37,14 +37,13 @@ from career_core.db.models import (
 from career_core.llm.config import (
     BILLING_METERED,
     BILLINGS,
-    EMBED_PURPOSE,
     KIND_LOCAL,
-    LOCAL_PURPOSES,
     PRESETS,
     TOKEN_PARAMS,
     EndpointConfig,
     ModelsConfig,
     Route,
+    route_problem,
 )
 from career_core.llm.gateway import month_spend
 from career_core.ports import ActorContext
@@ -66,6 +65,7 @@ KNOWN_PURPOSES: tuple[str, ...] = (
     "rerank",
     "judge_claim",
     "judge_visibility",
+    "talent_fit",
 )
 SELECTABLE_DATA_CLASSES = frozenset({"public", "private"})
 PRICE_PROVIDERS = frozenset(p.pricing_provider for p in PRESETS.values() if p.pricing_provider)
@@ -182,11 +182,7 @@ def _endpoint(row: ModelConnection, has_key: bool) -> EndpointConfig:
 def _route_problem(purpose: str, endpoint: EndpointConfig | None) -> str | None:
     if endpoint is None:
         return "unknown_endpoint"
-    if purpose not in LOCAL_PURPOSES and endpoint.kind == KIND_LOCAL:
-        return "local_only_embed"
-    if purpose == EMBED_PURPOSE and endpoint.kind == "anthropic":
-        return "embed_needs_openai"
-    return None
+    return route_problem(purpose, endpoint)
 
 
 @dataclass(frozen=True, slots=True)
@@ -638,8 +634,16 @@ class ModelConnections:
         if resp.status_code != 200:
             return {"ok": False, "models": [], "error_code": "bad_response"}
         try:
-            data = resp.json().get("data")
-            ids = sorted({str(m["id"]) for m in data if isinstance(m, dict) and m.get("id")})
+            body = resp.json()
+            # OpenAI 호환은 {"data": [{"id"}]}, TypeSafe는 별칭 목록 ({"name"})
+            data = body if isinstance(body, list) else body.get("data", body.get("models"))
+            ids = sorted(
+                {
+                    str(m.get("id") or m.get("name"))
+                    for m in data
+                    if isinstance(m, dict) and (m.get("id") or m.get("name"))
+                }
+            )
         except (ValueError, AttributeError, TypeError, KeyError):
             return {"ok": False, "models": [], "error_code": "bad_response"}
         return {"ok": True, "models": ids[:MAX_MODELS_LISTED]}

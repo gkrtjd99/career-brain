@@ -11,6 +11,7 @@ import { BlockEditor, draftSpans, newKey, spansForSave, type DraftBlock } from "
 import { ChecksPanel } from "../components/doc/ChecksPanel";
 import { ExportSheet } from "../components/doc/ExportSheet";
 import { SuggestionsPanel } from "../components/doc/SuggestionsPanel";
+import { TalentFitPanel } from "../components/doc/TalentFitPanel";
 import { VisibilityJudgePanel } from "../components/doc/VisibilityJudgePanel";
 import { api, ApiError } from "../lib/api";
 import { formatDateTime } from "../lib/dates";
@@ -451,6 +452,7 @@ export function DocumentEditor({
           blockNo={blockNo}
         />
       ) : null}
+      {appId ? <TalentFitPanel appId={appId} docId={doc.id} dirty={dirty} /> : null}
     </>
   );
 

@@ -344,3 +344,33 @@ output = "2.00"
   input = "2.00"
   cached_input = "0.40"
   output = "4.00"
+
+# TypeSafe System One (Jev): 입력 토큰만 과금 ($42 / 10억 토큰 = $0.042 / 1M). 출력 토큰은 무료.
+# jev-latest·jev-preview는 별칭 (지금 jev-1.14.0). 응답의 model은 버전 이름이다.
+[providers.typesafe]
+source = "https://docs.typesafe.ai/models"
+as_of = 2026-11-18
+
+[[models]]
+provider = "typesafe"
+model = "jev-1.14.0"
+input = "0.042"
+output = "0"
+
+[[models]]
+provider = "typesafe"
+model = "jev-1.13.0"
+input = "0.042"
+output = "0"
+
+[[models]]
+provider = "typesafe"
+model = "jev-latest"
+input = "0.042"
+output = "0"
+
+[[models]]
+provider = "typesafe"
+model = "jev-preview"
+input = "0.042"
+output = "0"

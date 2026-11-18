@@ -5,7 +5,11 @@ import type { ModelBilling, ModelConnection, ModelKeyState } from "@career-brain
 export type ConnectionKind = "official" | "subscription" | "litellm" | "ollama" | "custom";
 
 export const KIND_CHOICES: { kind: ConnectionKind; label: string; hint: string }[] = [
-  { kind: "official", label: "공식 API", hint: "Anthropic·OpenAI·Gemini·xAI·OpenRouter의 API 키. 쓴 만큼 청구되고 월 예산에 듭니다." },
+  {
+    kind: "official",
+    label: "공식 API",
+    hint: "Anthropic·OpenAI·Gemini·xAI·OpenRouter·TypeSafe의 API 키. 쓴 만큼 청구되고 월 예산에 듭니다.",
+  },
   {
     kind: "subscription",
     label: "구독 계정 (CLIProxyAPI)",
@@ -22,6 +26,7 @@ export const OFFICIAL_PRESETS: [string, string][] = [
   ["gemini", "Google Gemini"],
   ["xai", "xAI"],
   ["openrouter", "OpenRouter"],
+  ["typesafe", "TypeSafe Jev (판정 전용)"],
 ];
 
 export const DEFAULT_BASE_URL: Partial<Record<ConnectionKind, string>> = {
@@ -43,6 +48,7 @@ const PRESET_LABEL: Record<string, string> = {
   gemini: "공식 API · Gemini",
   xai: "공식 API · xAI",
   openrouter: "공식 API · OpenRouter",
+  typesafe: "판정 모델 · TypeSafe Jev",
   cliproxyapi: "구독 계정 (CLIProxyAPI)",
   ollama: "로컬 모델 (Ollama)",
   local: "로컬 임베딩",
@@ -100,10 +106,11 @@ export const ROUTE_PURPOSE_LABEL: Record<string, string> = {
   doc_suggest: "문서 수정안",
   judge_claim: "학습 연결 판정 (참고)",
   judge_visibility: "요건 가시성 판정 (참고)",
+  talent_fit: "인재상 맞춤 판정 (Jev 연결만, 참고)",
   application_prep: "지원 준비 (쓸 경험 고르기)",
   interview_prep: "면접 준비 (예상 질문 다듬기)",
   interview_feedback: "면접 답 의견 (요청할 때만)",
 };
 
 /** default로 넘어가지 않는 용도 (models.example.toml): 비어 있으면 그 일을 하지 않는다 */
-export const NO_FALLBACK = new Set(["embed", "rerank", "job_extract_image", "judge_claim", "judge_visibility"]);
+export const NO_FALLBACK = new Set(["embed", "rerank", "job_extract_image", "judge_claim", "judge_visibility", "talent_fit"]);

@@ -78,6 +78,34 @@ export interface VisibilityJudge {
   basis: "judge_advisory";
 }
 
+export type TalentLevel = "absent" | "claimed" | "shown";
+
+export interface TraitFit {
+  document_id: Uuid;
+  level: TalentLevel;
+  /** 0~2 (확률 가중 평균) */
+  score: number;
+  confidence: number | null;
+}
+
+export interface TalentTrait {
+  text: string;
+  source: "posting" | "company";
+  confirmed: boolean;
+  fact_id: Uuid | null;
+  fits: TraitFit[];
+  best: TalentLevel | null;
+}
+
+export interface TalentFit {
+  application_id: Uuid;
+  document_ids: Uuid[];
+  traits: TalentTrait[];
+  judge: JudgeRun;
+  blocks_withheld: number;
+  basis: "judge_advisory";
+}
+
 type Json = <R>(method: string, path: string, opts?: { json?: unknown }) => Promise<R>;
 
 interface SettingsDeps {
@@ -93,6 +121,10 @@ export function settingsEndpoints({ get, json }: SettingsDeps) {
       json<WorkspaceSettings>("PUT", "/core/workspace-settings", { json: body }),
     visibilityJudge: (applicationId: string, documentId?: string | null) =>
       json<VisibilityJudge>("POST", `/core/applications/${id(applicationId)}/visibility-judge`, {
+        json: { document_id: documentId ?? null },
+      }),
+    talentFit: (applicationId: string, documentId?: string | null) =>
+      json<TalentFit>("POST", `/core/applications/${id(applicationId)}/talent-fit`, {
         json: { document_id: documentId ?? null },
       }),
     judgeCache: () => get<JudgeCacheStats>("/core/judges/cache"),

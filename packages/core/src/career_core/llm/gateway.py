@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
@@ -22,6 +23,7 @@ from career_core.llm.config import (
     BILLING_METERED,
     EMBED_PURPOSE,
     KIND_LOCAL,
+    KIND_TYPESAFE,
     RERANK_PURPOSE,
     EndpointConfig,
     ModelsConfig,
@@ -31,6 +33,8 @@ from career_core.llm.pricing import Cost, PriceBook
 from career_core.llm.types import (
     EmbeddingCompletion,
     EmbeddingResult,
+    JudgmentCompletion,
+    JudgmentResult,
     ModelCallError,
     ModelCompletion,
     ModelDenied,
@@ -45,6 +49,7 @@ from career_core.ports import (
     BudgetPolicy,
     EgressPolicy,
     EmbeddingClient,
+    JudgmentClient,
     ModelClient,
     RerankClient,
 )
@@ -62,6 +67,10 @@ def default_client_factory(
         from career_core.adapters.embed_local import LocalEmbeddingClient
 
         return LocalEmbeddingClient(endpoint)
+    if endpoint.kind == KIND_TYPESAFE:
+        from career_core.adapters.typesafe import TypeSafeClient
+
+        return TypeSafeClient(endpoint, api_key)  # type: ignore[return-value]
     if endpoint.kind == "anthropic":
         from career_core.adapters.llm_anthropic import AnthropicModelClient
 
@@ -687,8 +696,99 @@ class ModelGateway:
             call_id=str(call_id),
         )
 
+    def judgment_status(self, purpose: str) -> str | None:
+        """판정 모델을 쓸 수 없는 이유 (쓸 수 있으면 None): ``no_route`` 또는 ``api_key_missing``.
+
+        판정 용도는 ``default``로 넘어가지 않는다 (명시 라우트만).
+        """
+        route = self._config.routes.get(purpose)
+        if route is None:
+            return "no_route"
+        endpoint = self._config.endpoints[route.endpoint]
+        if endpoint.kind != KIND_TYPESAFE:
+            return "no_route"
+        if endpoint.api_key_env and not self._env.get(endpoint.api_key_env):
+            return "api_key_missing"
+        return None
+
+    async def judge(
+        self,
+        actor: ActorContext,
+        purpose: str,
+        state: dict,
+        questions: dict[str, dict],
+        *,
+        data_classes: frozenset[str],
+    ) -> JudgmentResult:
+        """판정 모델(TypeSafe System One)에 질문을 보낸다. 다른 호출과 같은 순서를 지난다:
+        egress(자료 등급) → 단가 확인 → 월 예산 → 호출 → 비용 계산 → 장부 기록 (``purpose`` 그대로).
+        """
+        if self._overlay is not None:
+            scoped = await self.view(actor.workspace_id)
+            return await scoped.judge(actor, purpose, state, questions, data_classes=data_classes)
+        route = self._config.routes.get(purpose)
+        if route is None or self._config.endpoints[route.endpoint].kind != KIND_TYPESAFE:
+            raise ModelDenied("no_route")
+        endpoint = self._config.endpoints[route.endpoint]
+        metered = endpoint.billing == BILLING_METERED
+        plan = _Plan(route, endpoint, endpoint.pricing_provider if metered else endpoint.price_as)
+        denial = await self._precheck(actor, purpose, data_classes, plan)
+        if denial:
+            await self._record(actor, purpose, plan, status="denied", error_code=denial)
+            raise ModelDenied(denial)
+        api_key = self._env.get(endpoint.api_key_env) if endpoint.api_key_env else None
+        if endpoint.api_key_env and not api_key:
+            await self._record(actor, purpose, plan, status="denied", error_code="api_key_missing")
+            raise ModelDenied("api_key_missing")
+        prompt_chars = len(json.dumps([state, questions], ensure_ascii=False))
+        reservation = (
+            await self._reserve(actor, purpose, prompt_chars, 0, plan) if metered else None
+        )
+        started = time.perf_counter()
+        client = self._client(endpoint, api_key)
+        try:
+            if not isinstance(client, JudgmentClient):
+                raise ModelCallError("judgment_not_supported")
+            completion = await client.judge(route.model, state, questions)
+        except ModelCallError as exc:
+            await self._release(reservation)
+            await self._record(
+                actor, purpose, plan, status="error", error_code=exc.code, latency=started
+            )
+            raise
+        except Exception as exc:
+            await self._release(reservation)
+            await self._record(
+                actor, purpose, plan, status="error", error_code=type(exc).__name__, latency=started
+            )
+            raise
+        cost, basis = self._bound_unknown(plan, *self._cost(plan, completion), prompt_chars, 0)
+        call_id = await self._record(
+            actor,
+            purpose,
+            plan,
+            status="ok",
+            completion=completion,
+            cost=cost,
+            basis=basis,
+            latency=started,
+        )
+        if reservation is not None and self._budget is not None:
+            actual = int((cost.usd or Decimal(0)) * 1_000_000) if basis != "unknown" else 0
+            await self._budget.settle(reservation, actual)
+        return JudgmentResult(
+            answers=completion.answers,
+            endpoint=endpoint.name,
+            model=completion.model,
+            cost_usd=str(cost.usd) if cost.usd is not None else None,
+            cost_basis=basis,
+            call_id=str(call_id),
+        )
+
     def _cost(
-        self, plan: _Plan, completion: ModelCompletion | EmbeddingCompletion | RerankCompletion
+        self,
+        plan: _Plan,
+        completion: ModelCompletion | EmbeddingCompletion | RerankCompletion | JudgmentCompletion,
     ) -> tuple[Cost, str]:
         metered = plan.endpoint.billing == BILLING_METERED
         if metered and completion.reported_cost_usd is not None:
@@ -716,7 +816,11 @@ class ModelGateway:
         *,
         status: str,
         error_code: str | None = None,
-        completion: ModelCompletion | EmbeddingCompletion | RerankCompletion | None = None,
+        completion: ModelCompletion
+        | EmbeddingCompletion
+        | RerankCompletion
+        | JudgmentCompletion
+        | None = None,
         cost: Cost | None = None,
         basis: str | None = None,
         latency: float | None = None,
