@@ -101,7 +101,9 @@ Rules:
 - statement: one sentence in the document's language, staying close to the quoted words.
 - contribution: "personal" only if the text says the person did it themselves (직접, 혼자, 담당,
   주도, 제가, "I" …), "team" if it is a team/organization result, otherwise "unknown". Korean
-  resumes leave out the subject ("결제 API 구축"); a missing subject alone is "unknown".
+  resume bullets leave out the subject ("결제 API 구축"); a bare bullet without a subject is "unknown".
+  In first-person prose (자기소개서, "저는 … 했습니다. … 설계했습니다.") the subject carries over from the
+  earlier sentence: judge by the nearest earlier subject in the same paragraph.
 - kind: one of responsibility, action, result, decision, difficulty, skill, other.
 - period: copy the period as written (e.g. "2021.03 - 2023.02") or null. Never guess.
 - An experience is something the person DID: a job, a project, a course or bootcamp they took part in,
@@ -188,22 +190,104 @@ def parse_model_json(text: str) -> dict[str, Any]:
     return json.loads(text[start : end + 1])
 
 
-# 본인이 했다고 글에 적힌 표시. 한국어 이력서는 주어를 빼고 쓰므로("결제 API 구축") 주어가 없다는 것만으로
-# "본인"이 아니다. 이런 표시가 인용·문장에 없으면 모델이 "본인"이라 해도 "모름"으로 두고 사람이 정한다.
+# 기여 구분 (2026-11-19 손봄). 모델이 정한 값을 글로 다시 확인한다.
+#
+# 한국어 이력서는 주어를 빼고 쓴다("결제 API 구축"). 주어가 없다는 것만으로 "본인"이 아니다. 그런데 자기소개서는
+# 문단을 "저는 …"으로 열고 다음 문장부터 주어를 뺀다 ("저는 조명을 다시 설계했습니다. 프레넬 필름으로 빛을
+# 퍼뜨려 …"). 그래서 인용 하나만 보면 대부분 "모름"이 된다. 사람이 말할 때처럼 앞 문장의 주어를 잇는다:
+#
+# 1. 인용이 든 문장(과 모델이 쓴 문장)에 본인 표시만 있으면 "본인", 팀 표시만 있으면 "팀".
+# 2. 없으면 같은 문단의 앞 문장을 가까운 것부터 본다. 처음 나오는 표시가 본인뿐이면 "본인", 팀뿐이면 "팀".
+#    둘 다 있는 앞 문장("저는 팀원 넷과 …")에서는 멈추고 "모름".
+#    인용이 든 문장에 둘 다 있으면("저는 A를, 팀원들은 B를 맡았습니다") 모델이 정한 값을 둔다.
+# 3. 문단에도 없으면, 글 전체가 1인칭으로 쓴 글(저는·제가가 든 문단이 둘 이상)이고 인용이 든 문단이 문장으로 쓴
+#    글일 때만 "본인". 이력서 항목("결제 API 구축")처럼 짧은 명사형 줄은 그대로 "모름".
+#
+# 모델이 "본인"·"모름"이라 해도 위 근거로 다시 정한다. "팀"이라 한 것은 그대로 둔다. 근거가 없으면 "모름".
+# 모두 확인 전 후보이고, 사람이 확인할 때 고친다.
+_K = r"(?<![가-힣])"  # 한글 낱말 안("문제가", "빛나는")에서 잡히지 않게
 _SELF_MARKERS = re.compile(
-    r"직접|혼자|단독|전담|담당|주도|맡아|맡은|맡았|제가|저는|본인이|본인은|1인|"
+    rf"직접|혼자|단독|전담|담당(?!자)|주도|맡아|맡은|맡았|{_K}(?:제가|저는|저의|저를|제\s?손|"
+    rf"본인이|본인은|나는|내가|1인)|"
     r"\bI\b|\bmy\b|\bmyself\b|\bsolely\b|\bpersonally\b",
     re.IGNORECASE,
 )
+_TEAM_MARKERS = re.compile(
+    rf"팀원|동료|{_K}(?:저희|우리|팀이|팀은|팀과|팀으로|팀에서|팀 전체|공동으로|함께한)|협업(?:해|하여|하며|으로)|"
+    r"\bwe\b|\bour\b|\bteam\b|\btogether\b",
+    re.IGNORECASE,
+)
+_FIRST_PERSON = re.compile(rf"{_K}(?:제가|저는|저의|저를|나는|내가)|\bI\b|\bmy\b", re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<=[다요.!?。])[.!?。]?\s+|\n+")
+# 문장으로 쓴 글: "~했습니다." "~했다." 로 끝나는 문장이 있다
+_PROSE = re.compile(r"(?:다|요)[.!?。]")
+NARRATIVE_MIN_BLOCKS = 2
 
 
-def checked_contribution(contribution: str, texts: Sequence[str]) -> str:
-    """모델이 정한 기여 구분을 글로 확인한다: "본인"은 본인 표시가 있을 때만 남긴다."""
-    if contribution == Contribution.PERSONAL.value and not any(
-        _SELF_MARKERS.search(t or "") for t in texts
-    ):
-        return Contribution.UNKNOWN.value
-    return contribution
+def _cue(text: str) -> str | None:
+    self_ = bool(_SELF_MARKERS.search(text or ""))
+    team = bool(_TEAM_MARKERS.search(text or ""))
+    if self_ and team:
+        return "both"
+    if self_:
+        return Contribution.PERSONAL.value
+    if team:
+        return Contribution.TEAM.value
+    return None
+
+
+def _sentences_before(block_text: str, start: int) -> tuple[str, list[str]]:
+    """인용 시작이 든 문장과, 그 앞 문장들(가까운 것부터)."""
+    cuts = [0, *(m.end() for m in _SENTENCE_END.finditer(block_text)), len(block_text)]
+    at = max(i for i, c in enumerate(cuts) if c <= start)
+    own_end = cuts[at + 1] if at + 1 < len(cuts) else len(block_text)
+    own = block_text[cuts[at] : own_end]
+    before = [block_text[cuts[i] : cuts[i + 1]] for i in range(at - 1, -1, -1)]
+    return own, before
+
+
+def first_person_narrative(blocks: Sequence[str]) -> bool:
+    """1인칭으로 쓴 글인가 (자기소개서·회고). 저는·제가가 든 문단이 ``NARRATIVE_MIN_BLOCKS``개 이상."""
+    return sum(1 for t in blocks if _FIRST_PERSON.search(t or "")) >= NARRATIVE_MIN_BLOCKS
+
+
+def checked_contribution(
+    contribution: str,
+    texts: Sequence[str],
+    *,
+    context: Sequence[tuple[str, int]] = (),
+    narrative: bool = False,
+) -> str:
+    """모델이 정한 기여 구분을 글로 확인한다.
+
+    ``texts``: 모델이 쓴 문장과 인용. ``context``: 인용이 든 문단 글과 인용 시작 위치. ``narrative``: 글 전체가
+    1인칭으로 쓴 글인지 (``first_person_narrative``).
+    """
+    own = [*texts]
+    befores: list[list[str]] = []
+    for block_text, start in context:
+        sentence, before = _sentences_before(block_text, start)
+        own.append(sentence)
+        befores.append(before)
+    cue = _cue("\n".join(t or "" for t in own))
+    if cue == "both":
+        # "저는 A를, 팀원들은 B를 맡았습니다": 표시가 둘 다 있으면 모델이 문장을 읽고 정한 값을 둔다
+        return contribution
+    if cue is None:
+        for before in befores:
+            for sentence in before:
+                if (cue := _cue(sentence)) is not None:
+                    break
+            if cue is not None:
+                break
+    if cue is None and narrative and any(_PROSE.search(t) for t, _ in context):
+        cue = Contribution.PERSONAL.value
+    # 모델이 "팀"이라 한 것은 그대로 둔다 (팀 표시가 없어도 조직 성과일 수 있다)
+    if contribution == Contribution.TEAM.value:
+        return contribution
+    if cue in (Contribution.PERSONAL.value, Contribution.TEAM.value):
+        return cue
+    return Contribution.UNKNOWN.value  # 본인 근거가 없으면 "본인"은 남기지 않는다
 
 
 def find_quote(block_text: str, quote: str) -> tuple[int, int] | None:
@@ -630,6 +714,7 @@ class _Saver:
         self.parse_run_id = parse_run_id
         self.blocks = blocks
         self.by_ordinal = {b.ordinal: b for b in blocks}
+        self.narrative = first_person_narrative([b.text for b in blocks])
         self.created_exp = self.matched_exp = self.created_claims = 0
         self.attached_claims = self.dropped = 0
         self.exps: list[_Exp] = []
@@ -817,6 +902,8 @@ class _Saver:
                 contribution=checked_contribution(
                     _norm(c.contribution, Contribution, Contribution.UNKNOWN.value),
                     [statement, *(b.text[a:z] for b, a, z in spans)],
+                    context=[(b.text, a) for b, a, _ in spans],
+                    narrative=self.narrative,
                 ),
                 status=ClaimStatus.EXTRACTED.value,
                 origin=ClaimOrigin.AI_EXTRACTION.value,
