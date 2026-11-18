@@ -62,6 +62,10 @@ class FieldName(StrEnum):
     PREFERRED = "preferred"  # 목록
     QUESTIONS = "questions"  # 자기소개서 문항: [{"prompt": str, "char_limit": int|None}]
     PROCESS = "process"  # 전형 절차: 목록
+    # c0053: 인재상·함께 일하고 싶은 사람 / 혜택·복지 / 근무 조건(근무 시간·처우·근무지 안내 등): 목록
+    TALENT = "talent"
+    BENEFITS = "benefits"
+    CONDITIONS = "conditions"
     # c0025: 지원서의 선택형 문항(보기 고르기). 자기소개서가 아니다. 구조화 데이터에서만 (LLM 추출 없음)
     # [{"prompt": str, "required": bool|None, "options": [str], "source_type": int|None}]
     APPLICATION_QUESTIONS = "application_questions"
@@ -72,6 +76,9 @@ LIST_FIELDS = {
     FieldName.REQUIREMENTS,
     FieldName.PREFERRED,
     FieldName.PROCESS,
+    FieldName.TALENT,
+    FieldName.BENEFITS,
+    FieldName.CONDITIONS,
 }
 # 채용 시스템 구조화 데이터에서만 채우는 항목: 비어 있어도 LLM을 부르지 않고, 모델 출력에서 받지 않는다.
 STRUCTURED_ONLY_FIELDS = frozenset({FieldName.APPLICATION_QUESTIONS})
@@ -203,6 +210,28 @@ def ats_request_allowed(page_url: str, api_url: str) -> bool:
 # h 태그·굵은 글씨처럼 "제목인 줄 확실한" 줄에 쓰는 느슨한 단서 (먼저 맞는 것이 이긴다).
 _HEADING_HINTS: tuple[tuple[FieldName, tuple[str, ...]], ...] = (
     (
+        FieldName.TALENT,
+        (
+            "인재상",
+            "일하고 싶은 사람",
+            "일하고 싶은 분",
+            "함께하고 싶은 사람",
+            "함께하고 싶은 분",
+            "찾는 인재",
+            "원하는 인재",
+            "핵심 가치",
+            "핵심가치",
+            "일하는 방식",
+            "core values",
+            "our values",
+            "how we work",
+        ),
+    ),
+    (
+        FieldName.BENEFITS,
+        ("혜택", "복지", "복리후생", "benefit", "perks", "what we offer"),
+    ),
+    (
         FieldName.PREFERRED,
         (
             "우대",
@@ -285,9 +314,28 @@ _HEADING_HINTS: tuple[tuple[FieldName, tuple[str, ...]], ...] = (
             "what you will work on",
         ),
     ),
+    (
+        FieldName.CONDITIONS,
+        (
+            "근무 조건",
+            "근무조건",
+            "근무 환경",
+            "근무환경",
+            "근무 형태",
+            "근무형태",
+            "공통 사항",
+            "공통사항",
+            "working conditions",
+        ),
+    ),
 )
 # 겉모양만으로는 제목인지 모르는 평범한 짧은 줄에 쓰는 엄격한 목록 (공백·기호를 뺀 소문자로 비교).
 _HEADING_EXACT: tuple[tuple[FieldName, tuple[str, ...]], ...] = (
+    (FieldName.TALENT, ("인재상", "핵심가치", "corevalues", "ourvalues")),
+    (
+        FieldName.BENEFITS,
+        ("혜택", "복지", "복리후생", "혜택및복지", "복지및혜택", "benefits", "perks"),
+    ),
     (
         FieldName.PREFERRED,
         ("우대사항", "우대조건", "우대요건", "preferredqualifications", "nicetohave"),
@@ -314,7 +362,10 @@ _HEADING_EXACT: tuple[tuple[FieldName, tuple[str, ...]], ...] = (
         FieldName.RESPONSIBILITIES,
         ("주요업무", "담당업무", "업무내용", "하는일", "responsibilities", "whatyoulldo"),
     ),
+    (FieldName.CONDITIONS, ("근무조건", "근무환경", "근무형태", "공통사항", "처우")),
 )
+_NEW_LISTS = frozenset({FieldName.TALENT, FieldName.BENEFITS, FieldName.CONDITIONS})
+_WRAPPED_HEADING = re.compile(r"^(?:\[[^\[\]]+\]|【[^【】]+】|<[^<>]+>|〈[^〈〉]+〉)$")
 _HEADING_STRIP = re.compile(r"[\s\[\]【】<>〈〉()（）■□▶▷◆◇●○◎※#*:：'’\-·•]+")
 
 
@@ -325,6 +376,12 @@ def classify_heading(line: str, *, certain: bool = False) -> FieldName | None:
     ("Airflow 경험 우대" 같은 항목 줄을 제목으로 오인하지 않게).
     """
     text = " ".join((line or "").split())
+    if not certain and _WRAPPED_HEADING.match(text) and len(text) <= 60:
+        # "[OO가 함께 일하고 싶은 사람]"처럼 괄호로 감싼 줄은 제목이다. 예전 목록(업무·자격·우대·전형)은
+        # 지금처럼 엄격하게 두고, 새 목록(인재상·혜택·근무 조건)만 느슨한 단서로 고른다.
+        loose = classify_heading(text, certain=True)
+        if loose in _NEW_LISTS:
+            return loose
     if not text or len(text) > (80 if certain else 30):
         return None
     if certain:

@@ -664,6 +664,9 @@ export const POSTING_FIELDS = [
   "preferred",
   "questions",
   "process",
+  "talent",
+  "benefits",
+  "conditions",
 ] as const;
 export type PostingField = (typeof POSTING_FIELDS)[number];
 export const POSTING_LIST_FIELDS: readonly PostingField[] = [
@@ -671,6 +674,9 @@ export const POSTING_LIST_FIELDS: readonly PostingField[] = [
   "requirements",
   "preferred",
   "process",
+  "talent",
+  "benefits",
+  "conditions",
 ];
 
 export interface EssayQuestion {

@@ -1233,6 +1233,11 @@ class Company(Base):
     homepage: Mapped[str | None] = mapped_column(Text, default=None)
     corp_code: Mapped[str | None] = mapped_column(Text, default=None)
     business_no: Mapped[str | None] = mapped_column(Text, default=None)
+    # c0053: 마지막 "회사 정보 찾기" (pending | done | failed)
+    research_status: Mapped[str | None] = mapped_column(Text, default=None)
+    researched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    research_notes: Mapped[list] = mapped_column(JSONB, default=list)
+    research_requested_by: Mapped[UUID | None] = mapped_column(default=None)
     created_by: Mapped[UUID]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1248,7 +1253,7 @@ class CompanyPage(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID]
     company_id: Mapped[UUID]
-    origin: Mapped[str] = mapped_column(Text)  # url | paste
+    origin: Mapped[str] = mapped_column(Text)  # url | paste | found | posting (c0053)
     url: Mapped[str | None] = mapped_column(Text, default=None)
     final_url: Mapped[str | None] = mapped_column(Text, default=None)
     title: Mapped[str | None] = mapped_column(Text, default=None)

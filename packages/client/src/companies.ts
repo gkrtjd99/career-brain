@@ -46,8 +46,11 @@ export interface CompanyCitation {
   source_url: string | null;
   /** 글을 받은 시각 (가져온 날·붙여넣은 날) */
   fetched_at: IsoDateTime;
-  origin: "url" | "paste";
+  origin: CompanyPageOrigin;
 }
+
+/** url 사용자가 준 주소 · paste 붙여넣기 · found 회사 정보 찾기가 고른 공개 페이지 · posting 이 회사 공고의 글 */
+export type CompanyPageOrigin = "url" | "paste" | "found" | "posting";
 
 export interface CompanyFact {
   id: Uuid;
@@ -68,7 +71,7 @@ export interface CompanyFact {
 
 export interface CompanyPage {
   id: Uuid;
-  origin: "url" | "paste";
+  origin: CompanyPageOrigin;
   url: string | null;
   final_url: string | null;
   title: string | null;
@@ -114,6 +117,11 @@ export interface Company {
   pages: CompanyPage[];
   postings: CompanyLinkedPosting[];
   applications: CompanyLinkedApplication[];
+  /** 마지막 회사 정보 찾기: pending 찾는 중 · done · failed. 찾은 적 없으면 null */
+  research_status: "pending" | "done" | "failed" | null;
+  researched_at: IsoDateTime | null;
+  /** homepage:posting_url|wikidata|saved|none · homepage_failed:코드 · wikidata:Q… · posting_pages:n · found_pages:n */
+  research_notes: string[];
 }
 
 export interface CompanyIn {
@@ -174,6 +182,9 @@ export function companyEndpoints({ request, get, post, patch }: CompanyDeps) {
     deleteCompanyFact: async (companyId: string, factId: string) => {
       await request("DELETE", `${base(companyId)}/facts/${id(factId)}`);
     },
+    /** 회사 정보 다시 찾기 (202): 이 회사 공고의 글, 홈페이지와 소개·인재상 쪽 몇 쪽, 위키백과 */
+    researchCompany: (companyId: string) =>
+      post<{ id: Uuid; status: "pending" }>(`${base(companyId)}/research`),
     /** 페이지 한 건을 가져오는 작업을 넣는다 (202). 끝나면 회사의 pages에 상태가 보인다 */
     importCompanyUrl: (companyId: string, url: string) =>
       post<{ id: Uuid; status: "pending" }>(`${base(companyId)}/import-url`, { url }),

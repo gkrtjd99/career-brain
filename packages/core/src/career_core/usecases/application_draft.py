@@ -31,14 +31,17 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from career_core.db import Claim, Database, Experience, JobPosting
+from career_core.db.base import utcnow
 from career_core.db.models import (
     Application,
     ApplicationDocument,
     ApplicationPrep,
+    CompanyFact,
     DocumentRevision,
     Run,
 )
 from career_core.domain.brain import CONFIRMED_STATUSES, ClaimStatus
+from career_core.domain.companies import is_stale
 from career_core.domain.documents import (
     MAX_BLOCK_CHARS,
     MAX_CLAIMS_PER_BLOCK,
@@ -76,7 +79,7 @@ MIN_CONFIRMED = 3  # 문항에 쓸 확인한 사실이 이보다 적으면 확�
 POOL_EXPERIENCES = 3  # 문항마다 모델에 보내는 경험 수
 MAX_CLAIMS_PER_EXPERIENCE = 8
 MAX_UNCONFIRMED = 8
-MAX_FACTS = 8
+MAX_FACTS = 12
 DEFAULT_TARGET = 800  # 글자 제한이 없는 문항
 TARGET_SHARE = 0.9  # 제한의 90%를 목표로
 MAX_SENTENCE_CHARS = 600
@@ -101,9 +104,12 @@ Rules:
   organization names or technologies that are not in the cited claims.
 - Prefer claims with "confirmed": true. Use unconfirmed claims only when needed.
 - Build the answer around the experience marked "main": true. Others may support it.
-- "company_context" and "requirements" are context about the company and the job. They are not
-  facts about the applicant. You may connect the applicant's facts to them, but never claim the
-  applicant has a requirement unless a cited claim says so.
+- "company_context", "talent" and "requirements" are context about the company and the job. They
+  are not facts about the applicant. You may connect the applicant's facts to them, but never claim
+  the applicant has a requirement or a trait unless a cited claim says so.
+- "talent" is the kind of person the company says it wants (인재상, 함께 일하고 싶은 사람). Where a
+  cited fact genuinely shows one of those traits, let the answer show it through what the
+  applicant did — do not just repeat the company's words or declare "저는 ~한 사람입니다".
 - Natural Korean 자기소개서 style, polite written form (-습니다). Concrete: situation, what the
   applicant did and why, the result. No clichés (열정, 책임감, 최선을 다하는 등), no exaggeration.
 - 2 to 4 paragraphs. Stay within "max_chars" characters in total (counted by code with the given
@@ -497,22 +503,48 @@ def unconfirmed_sentences(blocks: Sequence[dict], status: dict[str, str]) -> lis
 # ---------------------------------------------------------------- 문항 하나 쓰기
 
 
+DRAFT_FACT_KINDS = ("talent", "values", "culture", "business", "product")
+
+
+async def _company_facts(s: AsyncSession, company_id: UUID | None) -> list[dict]:
+    """초안에 주는 회사 항목: 확인한 것 먼저, 그다음 원문 인용이 확인된 후보(알아서 찾은 것). 오래된 것은 뺀다.
+
+    회사 항목은 지원자의 사실이 아니다 — 연결할 맥락일 뿐 (프롬프트 규칙)."""
+    if company_id is None:
+        return []
+    rows = (
+        await s.scalars(
+            select(CompanyFact)
+            .where(CompanyFact.company_id == company_id, CompanyFact.kind.in_(DRAFT_FACT_KINDS))
+            .order_by(
+                (CompanyFact.status != "confirmed"),
+                CompanyFact.kind,
+                CompanyFact.created_at,
+            )
+            .limit(MAX_FACTS * 3)
+        )
+    ).all()
+    today = utcnow().date()
+    out = [
+        {"kind": f.kind, "body": f.body, "confirmed": f.status == "confirmed"}
+        for f in rows
+        if not is_stale(f.as_of, f.as_of_precision, f.fetched_at, today)
+    ]
+    return out[:MAX_FACTS]
+
+
 async def _context(s: AsyncSession, app: Application) -> dict[str, Any]:
     posting = await s.get(JobPosting, app.posting_id)
     fields = (posting.fields or {}) if posting else {}
     reqs = [str(r) for r in fields.get(FieldName.REQUIREMENTS) or []]
     reqs += [str(r) for r in fields.get(FieldName.PREFERRED) or []]
-    company = await prep_uc._company(s, posting) if posting is not None else None
-    facts = [
-        {"kind": f["kind"], "body": f["body"]}
-        for f in (company or {}).get("facts", [])
-        if not f.get("stale")
-    ][:MAX_FACTS]
+    facts = await _company_facts(s, posting.company_id if posting is not None else None)
     return {
         "company": fields.get(FieldName.COMPANY),
         "job_title": fields.get(FieldName.TITLE),
         "requirements": [r for r in reqs if r.strip()][: prep_uc.MAX_REQUIREMENTS],
         "responsibilities": [str(r) for r in fields.get(FieldName.RESPONSIBILITIES) or []][:20],
+        "talent": [str(r) for r in fields.get(FieldName.TALENT) or [] if str(r).strip()][:12],
         "company_context": facts,
     }
 
@@ -631,6 +663,7 @@ async def draft_document(
         "job_title": ctx["job_title"],
         "requirements": ctx["requirements"],
         "responsibilities": ctx["responsibilities"],
+        "talent": ctx["talent"],
         "company_context": ctx["company_context"],
         "experiences": payload_exps,
         "user_request": (instruction or "").strip()[:MAX_INSTRUCTION_CHARS] or None,
@@ -647,6 +680,7 @@ async def draft_document(
         ctx["company"] or "",
         ctx["job_title"] or "",
         *ctx["responsibilities"],
+        *ctx["talent"],
         *(f["body"] for f in ctx["company_context"]),
     ]
 

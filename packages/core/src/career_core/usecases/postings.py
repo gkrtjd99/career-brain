@@ -202,6 +202,9 @@ Fields (omit when not in the text):
   states the start of the application period. Never use the posting date or today instead
 - posted_at: "YYYY-MM-DD"
 - responsibilities, requirements, preferred, process: lists; each item is a quote of one line/bullet
+- talent: who the company wants to work with (인재상, 함께 일하고 싶은 사람, 핵심 가치) — not the
+  job's requirements; benefits: 혜택·복지; conditions: working conditions such as hours, pay
+  policy (처우), probation, work location details, training. Lists of quotes like the above
 - questions: application essay questions (자기소개서 문항) with char_limit if written, else null
 Also say page_type: "posting" (one job posting), "listing" (a list of many postings), "other".
 
@@ -324,6 +327,9 @@ _LIST_ORDER = (
     FieldName.REQUIREMENTS,
     FieldName.PREFERRED,
     FieldName.PROCESS,
+    FieldName.TALENT,
+    FieldName.BENEFITS,
+    FieldName.CONDITIONS,
 )
 _PREFERRED_WORDS = ("우대", "preferred", "nice to have", "a plus", "is a plus", "bonus")
 
@@ -1837,7 +1843,12 @@ async def confirm_posting(
         posting.status = PostingStatus.SAVED.value
         posting.saved_by = actor.subject_id
         posting.saved_at = utcnow()
-        return posting.status
+        status = posting.status
+    # 회사에 잇고 회사 정보 찾기를 건다 (c0053). 같은 이름의 회사가 없으면 만든다
+    from career_core.usecases.company_research import link_posting_company
+
+    await link_posting_company(db, actor, posting_id)
+    return status
 
 
 async def archive_posting(db: Database, actor: ActorContext, posting_id: UUID) -> str:

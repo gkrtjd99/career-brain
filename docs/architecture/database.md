@@ -733,6 +733,22 @@ worker → claim_job → 로컬 추출(텍스트·HTML·텍스트 PDF) → docum
 - `GET /core/brain/organize`: 정리 상태 한 줄 (읽는 중·정리 중, 용도 확인 필요, 실패, 확인할 사실, 같은 경험일 수 있음, 프로필에 넣을 값, 학력·기술 제안, 자격 후보, 곧 만료, 지난 하루의 정리 결과, `auto_extract` 상태). 세기만 한다.
 - 내보내기: `@schema_step("c0052")`(옛 묶음: 설정 켜짐, 옛 읽기는 자동으로 뽑지 않음). 시험: `packages/core/tests/test_auto_extract.py`.
 
+## 회사 정보 알아서 찾기 (c0053)
+
+`c0053` (`down_revision = c0052`). "공고의 인재상은 왜 안 가져오고, 회사 정보는 왜 알아서 안 찾냐" (2026-11-18 사용 점검).
+
+| 테이블 | 바뀐 칸 |
+|---|---|
+| `companies` | `research_status`(`pending`·`done`·`failed`, 찾은 적 없으면 NULL), `researched_at`, `research_notes`(jsonb: `homepage:posting_url\|wikidata\|saved\|none`, `homepage_failed:<코드>`, `wikidata:Q…`, `posting_pages:n`, `found_pages:n`), `research_requested_by`(모델 호출을 그 사람 것으로) |
+| `company_pages` | `origin` CHECK에 `found`(찾기가 고른 공개 페이지)·`posting`(이 회사 공고의 글). 주소 CHECK는 `paste`가 아니면 주소 필수 |
+
+- 공고를 저장하면(`confirm_posting` → `usecases/company_research.py::link_posting_company`) 공고의 회사 이름 키(`name_key`)가 같은 회사(이름·별칭)에 잇고, 없으면 회사를 만든다. 처음 이어졌거나 이 공고 글이 아직 원문이 아니면 `company_research` 작업을 건다. 회사 화면 "다시 찾기"(`POST /core/companies/{id}/research`, 202)로도 건다. 주기로 다시 찾지 않는다.
+- 찾기(worker, 공고와 같은 fetcher: 공개 주소·크기·시간 상한, 쿠키 없음, 봇 차단 우회 없음): ① 이 회사 공고 최근 3건의 글(같은 글은 건너뜀, 내 브라우저에서 보낸 글은 `private` 등급으로 모델에) ② 홈페이지 — 등록한 것 → 공고 주소가 `career.회사.com`처럼 회사 도메인 아래 채용 사이트면 그 도메인(채용 사이트·채용 시스템 주소는 제외) → 위키데이터 공식 웹사이트(P856, 이름·별칭 키가 같은 엔터티만) ③ 홈페이지 링크 중 같은 사이트의 인재상·문화·회사 소개·사업 쪽 4개까지(한 단계, 로그인·약관·게시판·파일 제외) ④ 위키데이터가 가리키는 위키백과(한국어 먼저). ③④는 `company_fetch` 작업으로 한 쪽씩. 이미 원문인 주소는 다시 받지 않는다.
+- 항목은 다른 원문과 같은 규칙: 원문 인용을 코드가 찾은 것만, 모두 후보. 홈페이지를 짐작·위키데이터로 찾았고 회사에 홈페이지가 없으면 채운다.
+- 초안 쓰기는 공고의 `talent` 목록과 회사 항목(확인한 것 먼저, 그다음 인용 확인된 후보; 인재상·가치·문화·사업·제품, 오래된 것 제외)을 맥락으로 쓴다. 지원자의 사실이 아니다.
+- 공고 항목 새 목록 `talent`(인재상·함께 일하고 싶은 사람)·`benefits`(혜택·복지)·`conditions`(근무 조건)는 `job_postings.fields` JSONB라 DDL 없음.
+- 내보내기: `@schema_step("c0053")`(옛 회사: 찾은 적 없음). 시험: `packages/core/tests/test_company_research.py`.
+
 ## 이 컴퓨터에서 바로 열기 (p0003)
 
 `personal` 체인 `p0003_local_login` (down_revision `p0002`): 표는 그대로, SECURITY DEFINER 함수 `personal.local_login_owner()` 하나. 쓸 수 있는(폐기·만료 아님) owner 토큰이 있는 공간 중 데모(`label = 'demo'`)가 아닌 것, 마지막으로 쓴(없으면 만든) 시각이 늦은 것의 (공간, actor)를 돌려준다. 토큰·해시는 돌려주지 않는다. 부르는 곳은 `POST /api/local/session`(`personal_api/local_login.py`) 하나뿐: 이 컴퓨터·이 컴퓨터 이름·같은 화면 요청에만 새 owner 토큰(`이 컴퓨터`)을 만들고, 공간이 없으면 만든다. 내보내기 대상 밖(`personal.*`). 시험: `apps/personal-api/tests/test_local_login.py`.

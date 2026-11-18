@@ -2,13 +2,14 @@
 
 - 내 경험(주장)과 다른 칸이다. 회사 항목은 주장이 되지 않고, 문서 근거(``document_claims``)로 이을 수 없으며,
   근거 없는 문장 검사에서 근거로 치지 않는다 (문서 경로는 ``claims`` 표만 본다).
-- 모으는 것은 사람이다 (§8, §19 원칙 3): 사용자가 준 페이지 한 건(공고와 같은 가져오기 경로, worker 작업
-  ``company_fetch``)이나 붙여넣은 글만. 사이트를 돌아다니거나 주기로 다시 가져오지 않는다.
+- 원문: 사용자가 준 페이지 한 건(공고와 같은 가져오기 경로, worker 작업 ``company_fetch``)이나 붙여넣은 글,
+  그리고 회사 정보 찾기(c0053, ``usecases.company_research``)가 고른 공개 페이지 몇 쪽·이 회사 공고의 글.
+  사이트를 돌아다니거나 주기로 다시 가져오지 않는다.
 - 모델 추출도 "고르기"다 (공고 추출과 같은 규칙): 항목마다 원문 인용이 있어야 하고 코드가 원문에서 찾는다.
   기준일은 그 숫자가 원문 인용에 있을 때만 남기고, 아니면 비운다. 재무 항목에 기준일이 없으면 버린다.
   모델 항목은 후보(``candidate``)이고 사람이 확인한다. 모델이 없으면 원문만 저장하고 사람이 항목을 더한다.
-- 같은 회사 공고 묶기: 공고의 회사 이름 글자가 회사 이름·별칭과 같은 키(``domain.companies.name_key``)면
-  제안만 하고, 사람이 고른 공고만 잇는다.
+- 같은 회사 공고 묶기: 공고를 저장하면 회사 이름 글자가 회사 이름·별칭과 같은 키(``domain.companies.name_key``)인
+  회사에 저절로 잇는다(c0053). 그 전에 저장한 공고는 제안만 하고 사람이 고른다. 잘못 이어지면 끊는다.
 """
 
 from __future__ import annotations
@@ -173,6 +174,9 @@ class CompanyView:
     pages: list[PageView] = field(default_factory=list)
     postings: list[LinkedPosting] = field(default_factory=list)
     applications: list[LinkedApplication] = field(default_factory=list)
+    research_status: str | None = None  # c0053: pending | done | failed (찾은 적 없으면 None)
+    researched_at: datetime | None = None
+    research_notes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -370,6 +374,9 @@ async def get_company(
             for p in postings
         ],
         [LinkedApplication(a.id, a.posting_id, a.title, a.status, a.submitted_at) for a in apps],
+        c.research_status,
+        c.researched_at,
+        list(c.research_notes or []),
     )
 
 
@@ -695,7 +702,7 @@ def verify_candidates(raw: list[dict], text: str) -> tuple[list[FactCandidate], 
 
 
 async def extract_candidates(
-    gateway, actor: ActorContext, text: str
+    gateway, actor: ActorContext, text: str, *, data_class: str = "public"
 ) -> tuple[list[FactCandidate], UUID | None, list[str]]:
     """게이트웨이로 항목 후보를 뽑는다. 모델이 없거나 거부되면 빈 목록과 메모 (원문은 그대로 저장)."""
     if gateway is None:
@@ -704,7 +711,8 @@ async def extract_candidates(
         messages=(ChatMessage("user", f"<page>\n{text[:MAX_MODEL_TEXT]}\n</page>"),),
         system=SYSTEM_PROMPT,
         max_output_tokens=FACTS_MAX_OUTPUT,
-        data_classes=frozenset({"public"}),  # 공개 회사 페이지·사용자가 붙여넣은 공개 자료
+        # 공개 회사 페이지·사용자가 붙여넣은 공개 자료. 내 브라우저에서 보낸 공고 글은 private
+        data_classes=frozenset({data_class}),
     )
     try:
         result = await gateway.run(actor, FACTS_PURPOSE, request)
@@ -851,31 +859,37 @@ async def _fail_page(db: Database, ws: UUID, page_id: UUID, code: str, http_stat
     return StepOutcome(done=True)
 
 
-async def process_company_fetch(deps, ws: UUID, page_id: UUID) -> StepOutcome:
-    """공고와 같은 가져오기(``deps``는 ``usecases.postings.PostingDeps``: 주소 검사·크기·시간 상한, 쿠키 없음,
-    봇 차단 우회 없음). HTML·글만 받는다 (PDF·이미지는 붙여넣기로 안내)."""
-    from career_core.usecases.postings import _main_text, _parse_page
+@dataclass(frozen=True, slots=True)
+class FetchedText:
+    result: FetchedPage
+    parsed: Any  # PageData | None
+    text: str
 
-    db = deps.db
-    async with db.workspace_session(ws) as s:
-        page = await s.get(CompanyPage, page_id)
-        if page is None or page.status != PageStatus.PENDING:
-            return StepOutcome(done=True)
-        url, requested_by = page.url, page.requested_by
-    actor = ActorContext(requested_by, ws)
+
+@dataclass(frozen=True, slots=True)
+class FetchedFail:
+    code: str
+    status: int | None = None
+    notes: tuple[str, ...] = ()
+    # 받았지만 글이 너무 짧았다 (그림 위주 홈페이지): 링크는 여기서 고를 수 있다
+    page: FetchedPage | None = None
+
+
+async def fetch_text(deps, url: str) -> FetchedText | FetchedFail:
+    """공고와 같은 가져오기(``deps``는 ``usecases.postings.PostingDeps``: 주소 검사·크기·시간 상한, 쿠키 없음,
+    봇 차단 우회 없음). HTML·글만 받는다 (PDF·이미지는 붙여넣기로 안내). 글이 짧으면 브라우저로 한 번 더."""
+    from career_core.usecases.postings import _main_text, _parse_page
 
     result = await deps.fetcher.fetch(url)
     if isinstance(result, FetchFailure):
-        notes: list[str] = []
+        notes: tuple[str, ...] = ()
         if result.code == FetchError.BOT_BLOCKED and result.detail:
-            notes = [f"bot_blocked_by:{result.detail}"]
+            notes = (f"bot_blocked_by:{result.detail}",)
         elif result.code == FetchError.MAYBE_BOT_BLOCKED and result.detail:
-            notes = [f"bot_block_signs:{result.detail}"]
-        return await _fail_page(db, ws, page_id, result.code, result.status, notes)
+            notes = (f"bot_block_signs:{result.detail}",)
+        return FetchedFail(result.code, result.status, notes)
     if result.body is not None:
-        return await _fail_page(
-            db, ws, page_id, FetchError.UNSUPPORTED_CONTENT.value, result.status
-        )
+        return FetchedFail(FetchError.UNSUPPORTED_CONTENT.value, result.status)
     html = "html" in result.content_type
     parsed = await _parse_page(result.text, result.final_url) if html else None
     text = await asyncio.to_thread(_main_text, parsed, result, None)
@@ -887,25 +901,46 @@ async def process_company_fetch(deps, ws: UUID, page_id: UUID) -> StepOutcome:
             text = await asyncio.to_thread(_main_text, parsed, rendered, None)
     text = text[:MAX_PAGE_CHARS]
     if len(text) < MIN_PAGE_TEXT:
-        return await _fail_page(db, ws, page_id, FetchError.NEEDS_MANUAL_CHECK.value, result.status)
+        page = result if "html" in result.content_type else None
+        return FetchedFail(FetchError.NEEDS_MANUAL_CHECK.value, result.status, page=page)
+    return FetchedText(result, parsed, text)
+
+
+def fill_page(page: CompanyPage, got: FetchedText, call_id, notes) -> None:
+    page.status = PageStatus.DONE.value
+    page.final_url = got.result.final_url[:2000]
+    page.http_status = got.result.status
+    page.method = got.result.method
+    page.title = got.parsed.title[:300] if got.parsed is not None and got.parsed.title else None
+    page.text = got.text
+    page.content_hash = _digest(got.text)
+    page.fetched_at = utcnow()
+    page.model_call_id = call_id
+    page.notes = list(notes)
+    page.updated_at = utcnow()
+
+
+async def process_company_fetch(deps, ws: UUID, page_id: UUID) -> StepOutcome:
+    """회사 원문 한 쪽 가져오기 (사용자가 준 주소, 또는 회사 정보 찾기가 고른 주소)."""
+    db = deps.db
+    async with db.workspace_session(ws) as s:
+        page = await s.get(CompanyPage, page_id)
+        if page is None or page.status != PageStatus.PENDING:
+            return StepOutcome(done=True)
+        url, requested_by = page.url, page.requested_by
+    actor = ActorContext(requested_by, ws)
+
+    got = await fetch_text(deps, url)
+    if isinstance(got, FetchedFail):
+        return await _fail_page(db, ws, page_id, got.code, got.status, got.notes)
     # 재시도할 수 있는 모델 오류는 올려 보낸다 (worker가 다시 가져온다). 저장은 아래 한 트랜잭션에서
-    found, call_id, notes = await extract_candidates(deps.gateway, actor, text)
+    found, call_id, notes = await extract_candidates(deps.gateway, actor, got.text)
     async with db.workspace_session(ws) as s:
         await guard_lease(s, page_id)
         page = await s.get(CompanyPage, page_id)
         if page is None or page.status != PageStatus.PENDING:
             return StepOutcome(done=True)
-        page.status = PageStatus.DONE.value
-        page.final_url = result.final_url[:2000]
-        page.http_status = result.status
-        page.method = result.method
-        page.title = parsed.title[:300] if parsed is not None and parsed.title else None
-        page.text = text
-        page.content_hash = _digest(text)
-        page.fetched_at = utcnow()
-        page.model_call_id = call_id
-        page.notes = notes
-        page.updated_at = utcnow()
+        fill_page(page, got, call_id, notes)
         await s.flush()
         page.candidates = _store_candidates(s, ws, requested_by, page, found, call_id)
         await _touch(s, page.company_id)

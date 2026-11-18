@@ -24,6 +24,7 @@ from career_core.domain.companies import (
 )
 from career_core.ports import ActorContext
 from career_core.usecases import companies as uc
+from career_core.usecases import company_research as research_uc
 from career_core.usecases.brain import NotFound
 
 _STATUS = {
@@ -86,7 +87,7 @@ class CitationOut(BaseModel):
     end: int
     source_url: str | None
     fetched_at: datetime
-    origin: str  # url | paste
+    origin: str  # url | paste | found | posting
 
 
 class FactOut(BaseModel):
@@ -106,7 +107,7 @@ class FactOut(BaseModel):
 
 class PageOut(BaseModel):
     id: UUID
-    origin: str  # url | paste
+    origin: str  # url | paste | found | posting
     url: str | None
     final_url: str | None
     title: str | None
@@ -149,6 +150,9 @@ class CompanyOut(BaseModel):
     pages: list[PageOut]
     postings: list[LinkedPostingOut]
     applications: list[LinkedApplicationOut]
+    research_status: str | None = None  # pending | done | failed (찾은 적 없으면 null)
+    researched_at: datetime | None = None
+    research_notes: list[str] = []
 
 
 class FactIn(BaseModel):
@@ -268,6 +272,12 @@ def add_company_routes(router: APIRouter, deps, authorize) -> None:
         return Response(status_code=204)
 
     # --- 원문 가져오기
+
+    @router.post("/companies/{company_id}/research", response_model=StatusOut, status_code=202)
+    async def research(actor: writer, company_id: UUID) -> StatusOut:
+        """회사 정보 다시 찾기: 이 회사 공고의 글, 홈페이지와 그 소개·인재상 쪽 몇 쪽, 위키백과."""
+        status = await guarded(research_uc.request_research(db, actor, company_id))
+        return StatusOut(id=company_id, status=status)
 
     @router.post("/companies/{company_id}/import-url", response_model=StatusOut, status_code=202)
     async def import_url(actor: writer, company_id: UUID, body: ImportUrlIn) -> StatusOut:

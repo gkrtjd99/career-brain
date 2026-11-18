@@ -236,6 +236,7 @@ async def test_draft_uses_only_own_candidate_facts(db, env):
     # 두 문항 다 지난 경험을 묻는다. 담당 업무도 맥락으로 간다
     assert [d["question_focus"] for d in llm.datas] == ["past", "past"]
     assert all("responsibilities" in d for d in llm.datas)
+    assert all(d["talent"] == [] for d in llm.datas)  # 공고에 인재상이 없으면 빈 목록 (c0053)
     sent = [json.dumps(d, ensure_ascii=False) for d in llm.datas]
     sent_ids = {c["claim_id"] for d in llm.datas for e in d["experiences"] for c in e["claims"]}
     # 참고 글·restricted 사실은 모델로 가지 않는다

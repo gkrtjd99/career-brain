@@ -1636,6 +1636,22 @@ def _c0052_auto_extract(arc) -> None:
         arc.add_columns("core.parse_runs", auto_extract=False)
 
 
+@schema_step(
+    "c0053",
+    "회사 정보 찾기: companies.research_status·researched_at·research_notes·research_requested_by (옛 회사는 "
+    "찾은 적 없음), company_pages.origin에 found·posting (CHECK만 넓힘)",
+)
+def _c0053_company_research(arc) -> None:
+    if arc.has("core.companies"):
+        arc.add_columns(
+            "core.companies",
+            research_status=None,
+            researched_at=None,
+            research_notes=[],
+            research_requested_by=None,
+        )
+
+
 def _parents() -> dict[str, str | None]:
     from alembic.script import ScriptDirectory
 

@@ -230,6 +230,9 @@ POSTING_LISTS = (
     ("requirements", "자격 요건"),
     ("preferred", "우대 사항"),
     ("process", "전형 절차"),
+    ("talent", "인재상"),
+    ("conditions", "근무 조건"),
+    ("benefits", "혜택·복지"),
 )
 
 

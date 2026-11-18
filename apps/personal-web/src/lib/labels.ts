@@ -96,6 +96,9 @@ export const FIELD_LABEL: Record<PostingField, string> = {
   preferred: "우대 사항",
   questions: "자기소개서 문항",
   process: "전형 절차",
+  talent: "인재상",
+  benefits: "혜택·복지",
+  conditions: "근무 조건",
 };
 
 export const METHOD_LABEL: Record<string, string> = {
