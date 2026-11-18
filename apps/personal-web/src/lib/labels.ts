@@ -355,6 +355,8 @@ export const ERROR_TEXT: Record<string, string> = {
   unknown_endpoint: "없는 연결입니다.",
   local_only_embed: "로컬 모델은 검색 색인과 검색 결과 다시 정렬에만 쓸 수 있습니다.",
   embed_needs_openai: "임베딩에는 OpenAI 호환 또는 로컬 연결이 필요합니다.",
+  judgment_only: "TypeSafe Jev 연결은 인재상 맞춤 판정에만 쓸 수 있습니다.",
+  needs_judgment_model: "인재상 맞춤 판정에는 TypeSafe Jev 연결이 필요합니다.",
   invalid_budget: "예산은 0 이상의 금액이어야 합니다.",
   name_immutable: "연결 이름은 바꿀 수 없습니다. 새로 만들고 예전 것을 해제하세요.",
   restricted_not_allowed: "민감 자료(restricted)는 모델 연결로 보낼 수 없습니다.",

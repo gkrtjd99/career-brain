@@ -196,3 +196,38 @@ class RerankResult:
     cost_usd: str | None
     cost_basis: str
     call_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class JudgmentCompletion:
+    """판정 모델(TypeSafe System One, Jev 등) 어댑터의 원시 결과: 질문 이름마다 답 하나.
+
+    답은 제공자 응답 그대로의 dict (``{"type": "score", "score": 1.4, "confidence": 0.6,
+    "probabilities": {...}}``). 해석은 부르는 쪽이 한다. 장부 기록을 위해 ModelCompletion과 같은 이름의 필드를 둔다.
+    """
+
+    answers: dict[str, dict]
+    model: str
+    parts: tuple[UsagePart, ...] = ()
+    request_id: str | None = None
+    stop_reason: str | None = None
+    reported_cost_usd: Decimal | None = None
+
+    @property
+    def usage(self) -> TokenUsage:
+        total = TokenUsage()
+        for part in self.parts:
+            total = total + part.usage
+        return total
+
+
+@dataclass(frozen=True, slots=True)
+class JudgmentResult:
+    """게이트웨이가 돌려주는 판정 결과."""
+
+    answers: dict[str, dict]
+    endpoint: str
+    model: str
+    cost_usd: str | None
+    cost_basis: str
+    call_id: str

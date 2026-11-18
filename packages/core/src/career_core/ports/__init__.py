@@ -14,6 +14,7 @@ from uuid import UUID
 
 from career_core.llm.types import (
     EmbeddingCompletion,
+    JudgmentCompletion,
     ModelCompletion,
     ModelRequest,
     RerankCompletion,
@@ -97,6 +98,18 @@ class RerankClient(Protocol):
     async def rerank(
         self, model: str, query: str, documents: Sequence[str]
     ) -> RerankCompletion: ...
+
+
+@runtime_checkable
+class JudgmentClient(Protocol):
+    """판정 모델 하나 (TypeSafe System One). 글을 만들지 않고 질문마다 확률·점수를 돌려준다. 게이트웨이만 부른다.
+
+    ``state``: 판단할 자료 (JSON 객체). ``questions``: 질문 이름 → 질문 (noul·score·choice).
+    """
+
+    async def judge(
+        self, model: str, state: dict, questions: dict[str, dict]
+    ) -> JudgmentCompletion: ...
 
 
 @runtime_checkable
@@ -267,6 +280,7 @@ __all__ = [
     "EmbeddingClient",
     "HiddenTextParser",
     "IdentityResolver",
+    "JudgmentClient",
     "LocalParseResult",
     "LocalParser",
     "ModelClient",
