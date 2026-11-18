@@ -592,7 +592,13 @@ async def test_brain_http_flow(db, blobs, people):
         assert (
             await c.post(f"/core/claims/{claim['id']}/confirm", json={}, headers=auth("editor"))
         ).status_code == 403
-        r = await c.post(f"/core/claims/{claim['id']}/confirm", json={}, headers=auth("owner"))
+        # 원문에 본인 표시가 없어 추출 때 기여가 "모름"으로 남는다: 확인할 때 사람이 정한다
+        assert claim["contribution"] == "unknown"
+        r = await c.post(
+            f"/core/claims/{claim['id']}/confirm",
+            json={"contribution": "personal"},
+            headers=auth("owner"),
+        )
         assert r.json()["status"] == "evidence_supported"
         r = await c.patch(
             f"/core/claims/{claim['id']}", json={"statement": "수정"}, headers=auth("editor")
@@ -809,3 +815,21 @@ monthly_usd = 1000
     assert result.cost_basis == "estimated" and result.cost_usd is not None
     spent = await month_spend(db, owner.workspace_id, gw._clock())
     assert spent > 0
+
+
+@pytest.mark.parametrize(
+    ("model_says", "texts", "kept"),
+    [
+        # 주어를 뺀 이력서 문장: 모델이 "본인"이라 해도 표시가 없으면 "모름"
+        ("personal", ["결제 API 응답 시간을 개선했다", "결제 API 응답 시간 개선"], "unknown"),
+        ("personal", ["정산 배치를 직접 설계했다", "정산 배치 직접 설계"], "personal"),
+        ("personal", ["주문 서비스 개발 담당"], "personal"),
+        ("personal", ["I rebuilt the billing job"], "personal"),
+        ("team", ["팀에서 결제 시스템을 이전했다"], "team"),
+        ("unknown", ["혼자 만들었다"], "unknown"),
+    ],
+)
+def test_extracted_contribution_needs_self_marker(model_says, texts, kept):
+    from career_core.usecases.extraction import checked_contribution
+
+    assert checked_contribution(model_says, texts) == kept

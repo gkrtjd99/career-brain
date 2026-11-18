@@ -593,7 +593,7 @@ async def test_delete_experience_refuses_when_used(db, blobs, people):
     _, _, _, _, exps = await two_sources(db, blobs, owner)
     main, dup = exps["주문 정산 배치 재구축"], exps["주문 정산 배치"]
     [c] = [c for c in await rows(db, owner, Claim, Claim.experience_id == main.id)][:1]
-    await brain.confirm_claim(db, owner, c.id)
+    await brain.confirm_claim(db, owner, c.id, contribution="personal")
     with pytest.raises(experience_merge.ExperienceInUse) as err:
         await experience_merge.delete_experience(db, owner, main.id)
     assert err.value.references == {"confirmed_claims": 1}
