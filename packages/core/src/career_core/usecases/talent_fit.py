@@ -6,6 +6,7 @@
   확인한 것 먼저, 확인 전 후보(원문 인용이 확인된 것)도 쓴다. 오래된 항목은 뺀다. 같은 글은 한 번만.
 - 묻는 것은 "말로 내세우는가"가 아니라 "글쓴이가 실제로 한 일로 드러나는가"다. 세 단계:
   ``absent`` (관련 내용 없음) · ``claimed`` (말로만 내세우거나 흐릿하게 스침) · ``shown`` (한 일로 드러남).
+  가장 그럴듯한 단계의 확률이 0.5 아래면 ``unclear`` (판정 모델도 갈림).
 - 명시 라우트(``routes.talent_fit``, 판정 모델 연결)가 있을 때만 부른다. ``default``로 넘어가지 않는다.
 - 결과는 **참고용**이다. 문서·검사 결과에 저장하지 않는다. 판정 모델은 입력 토큰만 과금되고 값이 아주 작아
   응답 캐시를 두지 않는다 (모델 장부 ``model_calls``에는 남는다).
@@ -41,9 +42,14 @@ MAX_TRAIT_CHARS = 200
 MAX_ESSAY_CHARS = 20_000
 TRAIT_FACT_KINDS = ("talent", "values")
 LEVELS = ("absent", "claimed", "shown")
-# Score(0~2) → 단계. 확률 가중 평균이라 경계는 가운데보다 조금 엄하게 둔다.
+# 단계는 가장 그럴듯한 단계의 확률로 정한다. 그 확률이 MIN_TOP_PROB 아래면 "판단 갈림"(unclear):
+# 평균 점수로 정하면 "안 보임 0.3 · 드러남 0.4"처럼 양쪽으로 갈린 답이 가운데("말로만")로 잘못 읽힌다.
+# 실제 Jev(1.14.0)로 합성 글 30건을 본 값: 행동·말뿐·무관 글은 대개 0.7 넘게 한쪽으로 쏠렸다.
+MIN_TOP_PROB = 0.5
+# 확률이 없는 답(다른 판정 모델)은 점수(0~2)로 나눈다.
 SHOWN_AT = 1.4
 CLAIMED_AT = 0.6
+LEVEL_RANK = {"shown": 3, "claimed": 2, "absent": 1, "unclear": 0}
 
 SCORE_LEVELS = [
     "Nothing in the essay relates to this trait, or the essay shows the opposite.",
@@ -116,7 +122,7 @@ class Trait:
 @dataclass(frozen=True, slots=True)
 class TraitFit:
     document_id: UUID
-    level: str  # absent | claimed | shown
+    level: str  # absent | claimed | shown | unclear (판정 모델도 갈림)
     score: float  # 0~2 (확률 가중 평균)
     confidence: float | None  # 답의 쏠림 (0~1). 낮으면 판정 모델도 갈렸다
 
@@ -217,7 +223,24 @@ def read_fit(answer: Any, document_id: UUID) -> TraitFit | None:
         if isinstance(conf, (int, float)) and not isinstance(conf, bool)
         else None
     )
-    return TraitFit(document_id, level_of(score), round(score, 3), confidence)
+    return TraitFit(
+        document_id, level_from(answer.get("probabilities"), score), round(score, 3), confidence
+    )
+
+
+def level_from(probabilities: Any, score: float) -> str:
+    """가장 그럴듯한 단계 (확률이 MIN_TOP_PROB 아래면 ``unclear``). 확률이 없으면 점수로."""
+    if isinstance(probabilities, dict):
+        probs = []
+        for i in range(len(LEVELS)):
+            p = probabilities.get(str(i))
+            if isinstance(p, bool) or not isinstance(p, (int, float)):
+                break
+            probs.append(float(p))
+        else:
+            top = max(range(len(LEVELS)), key=lambda i: probs[i])
+            return LEVELS[top] if probs[top] >= MIN_TOP_PROB else "unclear"
+    return level_of(score)
 
 
 @dataclass
@@ -363,7 +386,7 @@ async def judge_talent_fit(
     rows = []
     for i, t in enumerate(traits):
         got = fits[i]
-        best = max(got, key=lambda f: f.score).level if got else None
+        best = max(got, key=lambda f: (LEVEL_RANK[f.level], f.score)).level if got else None
         rows.append(TraitRow(t.text, t.source, t.confirmed, t.fact_id, got, best))
     return result(rows, tally.run())
 
@@ -380,6 +403,7 @@ __all__ = [
     "collect_traits",
     "is_trait_line",
     "judge_talent_fit",
+    "level_from",
     "level_of",
     "read_fit",
 ]
